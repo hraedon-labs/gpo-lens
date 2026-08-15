@@ -76,7 +76,7 @@ target-version = "py312"
 # `ruff format` would rewrap it), and every one of those fixes would break the
 # stamp. Style-owning a file we are contractually forbidden to edit is not a
 # choice we get to make, so it is excluded. Report style complaints upstream.
-extend-exclude = ["scripts/patina-check.py"]
+extend-exclude = ["scripts/patina-check.py", "docs/patina"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "B", "C4", "UP", "S"]

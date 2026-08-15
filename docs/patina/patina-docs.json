@@ -1,0 +1,12 @@
+{
+  "patina_version": "0.5.0",
+  "patina_rev": "e7024c1",
+  "note": "Hashes cover the SOURCE bytes; each vendored file carries one extra banner line above them.",
+  "files": {
+    "adoption.md": "662c7b527c023a82b242d1733fb9979071e2e613c4616ab922c8b258e25784ae",
+    "archetypes.md": "70103dc635c0eaccd6e71f5597a7e84173fc8bec9423216939511a44fced922e",
+    "content-model.md": "15b2ff2209e07aabe527dde7aaadba026f03b55207b92afffa1bd94872683389",
+    "patterns.md": "2379845513e0ac8572e1b59a8d5b122edcc62e3f3e3803f0e272d7f6f1801f1a",
+    "token-contract.md": "17a508584e7e48c8d96b5a1838f02d1ae053b77d01efab35d1e3fbd4a90ae856"
+  }
+}

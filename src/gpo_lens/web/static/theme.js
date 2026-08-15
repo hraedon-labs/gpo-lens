@@ -1,4 +1,4 @@
-// patina:sha256 708ab3dcee1ed35ad569e434093a133af066d323df5ebc013890cff79f1a43ad rev:96faa7f
+// patina:sha256 708ab3dcee1ed35ad569e434093a133af066d323df5ebc013890cff79f1a43ad rev:e7024c1
 /* patina theme toggle — shared across the tool family.
    Load this synchronously in <head> (before the stylesheet) so the theme is
    applied before first paint and there is no flash. The family CSP is

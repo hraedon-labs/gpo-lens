@@ -49,6 +49,8 @@ def _run(*extra: str) -> CompletedProcess[str]:
             "--extra",
             str(ROOT / "src" / "gpo_lens" / "web" / "templates"),
             # Kept out of the served static root, like patina-check.py itself.
+            "--docs",
+            str(ROOT / "docs" / "patina"),
             "--ratchet-file",
             str(ROOT / "tests" / "patina-ratchet.json"),
             # gpo-lens's own claims. Validated (legal state per facet, required
