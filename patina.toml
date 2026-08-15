@@ -1,0 +1,51 @@
+# gpo-lens's adoption declaration for patina (see patina docs/adoption.md).
+#
+# CONSUMER-OWNED: patina's sync.sh never writes or rewrites this file. patina
+# defines what conformance means; this file records what gpo-lens claims.
+# Checked by tests/test_patina_conformance.py.
+
+[patina]
+version = "0.5.0"
+accent  = "gpo-lens"
+prefix  = "gp"
+static  = "src/gpo_lens/web/static"
+
+[conformance.vendor]
+state = "enforced"
+
+[conformance.contract]
+state = "enforced"
+
+# NOT `not-applicable`, despite patina docs/adoption.md using gpo-lens as its
+# worked example of exactly that claim ("read-only analysis; no persisted
+# mutable domain state"). That example is wrong about this tool. gpo-lens is
+# read-only towards Active Directory, not towards its own store: it persists
+# finding triage state (`UPDATE finding`, `INSERT INTO finding_triage_event`)
+# including a 2000-char operator note, and snapshot lifecycle (`INSERT INTO
+# snapshot` / `DELETE FROM snapshot`). A free-text note attached to a record is
+# the precise concept class that motivated this facet.
+#
+# The claim is `attested`, not `reviewed`: no human has been through it, and
+# there is no UI-INVENTORY.md yet. What was checked, 2026-08-15, by enumerating
+# every POST route, every SQL write and every <form> in templates/:
+#   snapshot        create -> /ingest (ingest.html upload form)
+#                   delete -> /ingest/delete (ingest.html per-row form)
+#   finding triage  status + note -> /findings/{id}/triage, one inline form per
+#                   row in findings.html. finding_occurrence.html DISPLAYS the
+#                   triage history and never offers a second control for it.
+# One concept, one control holds today. /baseline, /golden, /resultant and /ask
+# accept uploads but compute and discard; they persist nothing.
+[conformance.content_model]
+state = "attested"
+note  = "no UI-INVENTORY.md; enumeration of concepts/controls/endpoints is in the comment above"
+
+# gpo-lens's pages are the reason this facet cannot be enforced anywhere:
+# resultant, baseline_diff, golden_diff, conflicts, admx_coverage and briefing
+# match none of archetypes.md's five archetypes. They are not failure modes —
+# they are shapes patina has no vocabulary for (a diff view, a coverage
+# reconciliation, a per-principal evaluation trace). No surface briefs exist,
+# so the deviation cannot yet be recorded the way docs/adoption.md asks.
+[conformance.structure]
+state = "deferred"
+why   = "six pages have no matching archetype and no surface briefs are written; the shapes need naming before they can be judged"
+until = "the first of those pages is rewritten, or a second family tool reaches for a diff view (patina's stated trigger for harvesting a deviation)"

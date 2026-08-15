@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "allows": 0,
+  "color_literals": [
+    {
+      "fp": "af18f19773bc93a9",
+      "n": 1,
+      "where": "gp.css",
+      "sample": "background: rgba(0,0,0,0.5); z-index: 1000;"
+    }
+  ]
+}

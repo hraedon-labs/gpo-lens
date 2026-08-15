@@ -69,6 +69,14 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# scripts/patina-check.py is VENDORED from patina by its sync.sh and carries a
+# `# patina:sha256` stamp over its own bytes — the checker refuses to run if it
+# was edited here, which is the point (the gate is the highest-leverage file to
+# tamper with). It is not ruff-clean under gpo-lens's rules (E741, E501, and
+# `ruff format` would rewrap it), and every one of those fixes would break the
+# stamp. Style-owning a file we are contractually forbidden to edit is not a
+# choice we get to make, so it is excluded. Report style complaints upstream.
+extend-exclude = ["scripts/patina-check.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "B", "C4", "UP", "S"]

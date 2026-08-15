@@ -1,17 +1,24 @@
-/* Theme: set before first paint (this file is loaded synchronously in <head>,
-   so the attribute is in place before the body renders — no flash), then wire
-   the toggle once the DOM is ready. Default dark, matching the tool family. */
+// patina:sha256 708ab3dcee1ed35ad569e434093a133af066d323df5ebc013890cff79f1a43ad rev:21ab0c3
+/* patina theme toggle — shared across the tool family.
+   Load this synchronously in <head> (before the stylesheet) so the theme is
+   applied before first paint and there is no flash. The family CSP is
+   script-src 'self', which forbids inline JS, so this lives as a file.
+
+   The localStorage key defaults to "patina-theme"; a tool can scope its own by
+   setting <html data-theme-key="cw-theme"> (so multiple family apps on one
+   origin do not share a preference unexpectedly). Default theme is dark. */
 (function () {
-  var KEY = "gpol-theme";
+  var root = document.documentElement;
+  var KEY = root.getAttribute("data-theme-key") || "patina-theme";
   function get() {
     try { return localStorage.getItem(KEY) || "dark"; } catch (e) { return "dark"; }
   }
-  function apply(t) { document.documentElement.setAttribute("data-theme", t); }
+  function apply(t) { root.setAttribute("data-theme", t); }
 
   apply(get());
 
   function updateIcons() {
-    var dark = document.documentElement.getAttribute("data-theme") === "dark";
+    var dark = root.getAttribute("data-theme") === "dark";
     var d = document.getElementById("theme-icon-dark");
     var l = document.getElementById("theme-icon-light");
     if (d) d.style.display = dark ? "none" : "block";
@@ -23,7 +30,7 @@
     var btn = document.getElementById("theme-toggle");
     if (!btn) return;
     btn.addEventListener("click", function () {
-      var next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
       apply(next);
       try { localStorage.setItem(KEY, next); } catch (e) {}
       updateIcons();
