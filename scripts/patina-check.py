@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# patina:sha256 dab5b461ad26df663634f7534da6d383d096c2d2cca5d5d68e1e26ac4adc5857 rev:21ab0c3
+# patina:sha256 b40835e8dbeb20460e7163082da93d755be985f9c93ab70062d94fb08725b334 rev:96faa7f
 """check_patina.py -- the patina conformance gate (Plan 005).
 
 Verifies that a consuming tool's vendored patina assets have not drifted and
@@ -32,6 +32,13 @@ Checks:
                        ratcheting was considered and deliberately deferred:
                        patterns.md itself specifies px paddings, so a px
                        ratchet is all noise today.
+  5. dead classes   -- a <prefix>- class named in markup with no rule in any
+                       tool CSS renders as an unstyled div, and no other check
+                       here notices. Ratcheted like colour literals, because
+                       every consumer starts with a backlog and a wall of
+                       failures on day one is how a gate gets switched off.
+                       Template-computed names (class="{{ ... }}") are skipped
+                       rather than guessed at.
 
 What check 1 does and does not prove:
 
@@ -410,6 +417,90 @@ def check_contract(gate: Gate, contract: set, sources, prefix: str | None):
         )
 
 
+CLASS_ATTR_RE = re.compile(r"""\bclass\s*=\s*["']([^"']*)["']""", re.IGNORECASE)
+CLASS_DEF_RE = re.compile(r"\.(-?[A-Za-z_][A-Za-z0-9_-]*)")
+
+
+def collect_class_usage(static_dir: Path, extra_dirs, prefix: str):
+    """{class: first location} for prefixed classes literally named in HTML.
+
+    Dynamic values (`class="{{ ... }}"`) are skipped -- a template that builds a
+    name at render time cannot be checked here, and guessing would produce false
+    failures that teach people to distrust the gate.
+    """
+    used = {}
+    for root in (static_dir, *extra_dirs):
+        for p in sorted(root.rglob("*.html")):
+            for i, line in enumerate(p.read_text(encoding="utf-8").splitlines()):
+                for attr in CLASS_ATTR_RE.findall(line):
+                    if "{" in attr:
+                        continue
+                    for name in attr.split():
+                        if name.startswith(f"{prefix}-"):
+                            used.setdefault(name, f"{p.name}:{i + 1}")
+    return used
+
+
+def collect_defined_classes(sources):
+    defined = set()
+    for src in sources:
+        text = strip_comments_keep_lines(src.text)
+        # Only selector text, never declaration values (.5rem is not a class).
+        for chunk in re.split(r"[{}]", text)[::2]:
+            defined.update(CLASS_DEF_RE.findall(chunk))
+    return defined
+
+
+def check_undefined_classes(
+    gate: Gate, static_dir, extra_dirs, sources, prefix, baseline, update=False
+):
+    """A class named in a template with no rule anywhere renders as an unstyled
+    div, and nothing else in this gate notices: token conformance stays green on
+    a page whose primary component has no CSS at all.
+
+    This is a known family failure -- cert-watch shipped `cw-gap-9`/`cw-gap-14`
+    referenced for months while undefined, collapsing gaps to zero -- and
+    gpo-lens's adoption found 16 more, including the entire posture grid on its
+    briefing page. Ratcheted rather than hard-failed, because every consumer
+    starts with a backlog and a wall of failures on day one is how a gate gets
+    switched off.
+    """
+    if not prefix:
+        return {}
+    used = collect_class_usage(static_dir, extra_dirs, prefix)
+    if not used:
+        return {}
+    defined = collect_defined_classes(sources)
+    missing = {n: loc for n, loc in used.items() if n not in defined}
+    found = {
+        fingerprint("class", n): {"n": 1, "where": loc, "sample": n}
+        for n, loc in missing.items()
+    }
+    new = [
+        f"{v['where']}: .{v['sample']} is used but never defined"
+        for fp, v in found.items()
+        if fp not in baseline
+    ]
+    # On a baseline run the whole point is to record what exists; failing here
+    # would make --update-ratchet unusable on any consumer that has a backlog,
+    # which is every consumer.
+    if update:
+        gate.note(f"{len(found)} undefined class(es) recorded in the baseline")
+    elif new:
+        gate.fail(
+            f"{len(new)} class(es) used in markup with no rule in any tool CSS "
+            "-- these render unstyled:\n         " + "\n         ".join(sorted(new)[:8])
+        )
+    elif found:
+        gate.note(
+            f"{len(found)} baselined undefined class(es) -- markup references "
+            "styling that does not exist; see the ratchet file"
+        )
+    else:
+        gate.ok(f"every {prefix}- class named in markup has a rule")
+    return found
+
+
 def fingerprint(label: str, line: str) -> str:
     """Identity of a violation: which file, and what the line says -- not where
     it sits, so reformatting and reordering don't churn the baseline."""
@@ -465,10 +556,17 @@ def load_ratchet(gate: Gate, path: Path):
     return data
 
 
-def write_ratchet(path: Path, violations, allows):
+def write_ratchet(path: Path, violations, allows, classes=None):
     payload = {
         "version": RATCHET_VERSION,
         "allows": allows,
+        "undefined_classes": sorted(
+            (
+                {"fp": fp, "where": v["where"], "sample": v["sample"]}
+                for fp, v in (classes or {}).items()
+            ),
+            key=lambda r: r["sample"],
+        ),
         "color_literals": sorted(
             (
                 {"fp": fp, "n": v["n"], "where": v["where"], "sample": v["sample"]}
@@ -480,12 +578,12 @@ def write_ratchet(path: Path, violations, allows):
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def check_ratchet(gate: Gate, sources, ratchet_file: Path, update: bool):
+def check_ratchet(gate: Gate, sources, ratchet_file: Path, update: bool, classes=None):
     violations, allows = scan_colour_literals(gate, sources)
     total = sum(v["n"] for v in violations.values())
 
     if update:
-        write_ratchet(ratchet_file, violations, allows)
+        write_ratchet(ratchet_file, violations, allows, classes)
         gate.ok(
             f"ratchet baselined: {total} colour literals in {len(violations)} "
             f"lines, {allows} exemption(s) -> {ratchet_file}"
@@ -583,7 +681,14 @@ FACETS = {
 STATE_REQUIRES = {
     "enforced": (),
     "advisory": (),
-    "attested": (),
+    # `attested` needs its evidence, and needs it MORE than the others, not
+    # less. Every repo in this family is agent-written, which makes `reviewed`
+    # -- "a human decided it" -- structurally unreachable for the agent doing
+    # the work. So `attested` is the honest state for most real work here, and
+    # the first version of this schema required nothing of it: the enumeration
+    # behind gpo-lens's claim had nowhere to live but a TOML comment. The state
+    # that fits agent authorship must not also be the one that records least.
+    "attested": ("evidence",),
     "reviewed": ("reviewed_through",),
     "deferred": ("why", "until"),
     "not-applicable": ("why",),
@@ -650,11 +755,15 @@ def load_declaration(gate: Gate, path: Path):
             continue
         for field in STATE_REQUIRES[state]:
             value = str(spec.get(field, "")).strip()
-            if field in ("why", "until") and len(value) < MIN_REASON:
+            if field in ("why", "until", "evidence") and len(value) < MIN_REASON:
+                because = {
+                    "evidence": "an attestation without its evidence is an "
+                    "assertion nobody can check",
+                    "until": "a deferral without a trigger is a graveyard",
+                }.get(field, "an unexplained exemption is just a disabled check")
                 gate.fail(
                     f"{path.name}: [conformance.{name}] is '{state}' and needs a "
-                    f"substantive `{field}`. An unexplained exemption is just a "
-                    "disabled check."
+                    f"substantive `{field}` -- {because}."
                 )
             elif not value:
                 gate.fail(
@@ -756,6 +865,8 @@ def facet_report(decl):
             through = str(spec.get("reviewed_through", "?"))[:12]
             extra = f" -- {spec['_stale']}" if spec.get("_stale") else ""
             lines.append(f"        reviewed through {through}{extra}")
+        if spec.get("evidence"):
+            lines.append(f"        evidence: {spec['evidence']}")
         if spec.get("why"):
             lines.append(f"        why:   {spec['why']}")
         if spec.get("until"):
@@ -862,7 +973,22 @@ def main():
         )
     elif contract:
         check_contract(gate, contract, sources, args.prefix)
-    check_ratchet(gate, sources, ratchet_file, args.update_ratchet)
+    class_baseline = {}
+    if ratchet_file.is_file():
+        try:
+            class_baseline = {
+                r["fp"]
+                for r in json.loads(ratchet_file.read_text(encoding="utf-8")).get(
+                    "undefined_classes", []
+                )
+            }
+        except (json.JSONDecodeError, OSError, TypeError):
+            class_baseline = set()
+    classes = check_undefined_classes(
+        gate, static_dir, args.extra, sources, args.prefix, class_baseline,
+        args.update_ratchet,
+    )
+    check_ratchet(gate, sources, ratchet_file, args.update_ratchet, classes)
 
     for line in gate.notes + gate.failures:
         print(line)

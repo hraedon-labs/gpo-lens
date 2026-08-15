@@ -36,8 +36,14 @@ state = "enforced"
 # One concept, one control holds today. /baseline, /golden, /resultant and /ask
 # accept uploads but compute and discard; they persist nothing.
 [conformance.content_model]
-state = "attested"
-note  = "no UI-INVENTORY.md; enumeration of concepts/controls/endpoints is in the comment above"
+state    = "attested"
+evidence = """snapshot: create via /ingest (ingest.html upload form), delete via \
+/ingest/delete (per-row form). finding triage (status + 2000-char note): one \
+inline form per row, /findings/{id}/triage; finding_occurrence.html displays \
+triage history and offers no second control. /baseline /golden /resultant /ask \
+accept uploads but compute and discard. One concept, one control holds as of \
+2026-08-15."""
+note     = "no UI-INVENTORY.md yet; the enumeration above is the substitute"
 
 # gpo-lens's pages are the reason this facet cannot be enforced anywhere:
 # resultant, baseline_diff, golden_diff, conflicts, admx_coverage and briefing
