@@ -286,9 +286,7 @@ class TestFindingsInboxWeb:
             latest_snapshot_id = cursor.lastrowid
             assert latest_snapshot_id is not None
 
-            target_snapshot_id = (
-                latest_snapshot_id if in_latest_snapshot else older_snapshot_id
-            )
+            target_snapshot_id = latest_snapshot_id if in_latest_snapshot else older_snapshot_id
             TestLatestSnapshotGpoIds._insert_gpo(conn, target_snapshot_id, gpo_id)
             conn.commit()
 

@@ -86,6 +86,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             finding_inbox_count,
             load_triage_status_map,
         )
+
         # Unknown values fall back to "no predicate" rather than 400ing: these
         # arrive from bookmarked URLs, and a stale filter should widen the view,
         # not break it.
