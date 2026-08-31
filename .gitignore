@@ -31,6 +31,7 @@ htmlcov/
 # local denylist for the pre-commit identifier gate (the forbidden work-domain
 # identifiers themselves — must never be committed)
 .identifiers-denylist.local
+/.identifiers-denylist.local.bak-*
 .denylist-review.local
 
 # local store / generated (WAL/SHM sidecars)

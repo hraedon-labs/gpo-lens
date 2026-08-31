@@ -53,6 +53,21 @@ _VALID_LIFECYCLE = {
 }
 
 
+def _latest_snapshot_gpo_ids(conn: sqlite3.Connection) -> set[str]:
+    """Return GPO ids present in the newest snapshot, or an empty set."""
+    return {
+        row[0]
+        for row in conn.execute(
+            """
+            SELECT id FROM gpo
+            WHERE snapshot_id = (
+                SELECT id FROM snapshot ORDER BY id DESC LIMIT 1
+            )
+            """
+        )
+    }
+
+
 def register(app: FastAPI, templates: Jinja2Templates) -> None:
 
     @app.get("/findings", response_class=HTMLResponse, name="findings_inbox")
@@ -71,8 +86,6 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             finding_inbox_count,
             load_triage_status_map,
         )
-        from gpo_lens.store import load_estate
-
         # Unknown values fall back to "no predicate" rather than 400ing: these
         # arrive from bookmarked URLs, and a stale filter should widen the view,
         # not break it.
@@ -111,11 +124,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                 offset=offset,
                 **filters,
             )
-            try:
-                estate = load_estate(conn)
-                resolvable_gpo_ids = {g.id for g in estate.gpos}
-            except ValueError:
-                resolvable_gpo_ids = set()
+            resolvable_gpo_ids = _latest_snapshot_gpo_ids(conn)
         finally:
             conn.close()
 

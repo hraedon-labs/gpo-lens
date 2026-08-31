@@ -15,6 +15,7 @@ from gpo_lens.findings import (
     triage_finding,
 )
 from gpo_lens.store import init_db
+from gpo_lens.web.routes.findings import _latest_snapshot_gpo_ids
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 
@@ -35,6 +36,45 @@ def _make_finding(category: str, gpo_id: str, severity="medium", summary="test")
         detail="",
         subject_key=(),
     )
+
+
+class TestLatestSnapshotGpoIds:
+    @staticmethod
+    def _insert_gpo(conn: sqlite3.Connection, snapshot_id: int, gpo_id: str) -> None:
+        conn.execute(
+            """
+            INSERT INTO gpo (
+                snapshot_id, id, name, domain, computer_enabled, user_enabled,
+                filter_data_available
+            ) VALUES (?, ?, ?, 'example.test', 1, 1, 1)
+            """,
+            (snapshot_id, gpo_id, f"GPO {gpo_id}"),
+        )
+
+    def test_returns_only_latest_snapshot_gpo_ids(self) -> None:
+        conn = _make_db()
+        try:
+            conn.execute(
+                "INSERT INTO snapshot (id, domain, taken_at) "
+                "VALUES (1, 'example.test', '2025-01-01')"
+            )
+            conn.execute(
+                "INSERT INTO snapshot (id, domain, taken_at) "
+                "VALUES (2, 'example.test', '2025-01-02')"
+            )
+            self._insert_gpo(conn, 1, "old-gpo")
+            self._insert_gpo(conn, 2, "current-gpo")
+
+            assert _latest_snapshot_gpo_ids(conn) == {"current-gpo"}
+        finally:
+            conn.close()
+
+    def test_returns_empty_set_without_snapshot(self) -> None:
+        conn = _make_db()
+        try:
+            assert _latest_snapshot_gpo_ids(conn) == set()
+        finally:
+            conn.close()
 
 
 class TestTriage:
@@ -229,6 +269,116 @@ class TestFindingsInboxWeb:
         assert resp.status_code == 200
         html = resp.text
         assert "Findings inbox" in html or "Findings" in html
+
+    def _seed_render_link_case(self, *, gpo_id: str, in_latest_snapshot: bool):
+        from gpo_lens.finding_model import EvidenceRef, FindingCandidate
+        from gpo_lens.findings import create_evaluation_run, run_evaluation
+        from gpo_lens.store import list_snapshots
+
+        client = self._client
+        conn = sqlite3.connect(self._db_path)
+        try:
+            older_snapshot_id = list_snapshots(conn)[0][0]
+            cursor = conn.execute(
+                "INSERT INTO snapshot (domain, taken_at) "
+                "VALUES ('example.test', '2025-02-01T00:00:00+00:00')"
+            )
+            latest_snapshot_id = cursor.lastrowid
+            assert latest_snapshot_id is not None
+
+            target_snapshot_id = (
+                latest_snapshot_id if in_latest_snapshot else older_snapshot_id
+            )
+            TestLatestSnapshotGpoIds._insert_gpo(conn, target_snapshot_id, gpo_id)
+            conn.commit()
+
+            candidate = FindingCandidate(
+                detector_id="route-link-test",
+                detector_version="1",
+                category="route-link-test",
+                severity="medium",
+                subject_type="gpo",
+                subject_key=(gpo_id,),
+                summary=f"Finding for {gpo_id}",
+                evidence_refs=(
+                    EvidenceRef(
+                        snapshot_id=latest_snapshot_id,
+                        gpo_id=gpo_id,
+                        source="test",
+                        field_path="test",
+                        safe_projection="safe test evidence",
+                    ),
+                ),
+                gpo_name=f"GPO {gpo_id}",
+            )
+            run_id = create_evaluation_run(conn, latest_snapshot_id)
+            run_evaluation(conn, run_id, [candidate])
+        finally:
+            conn.close()
+
+        return client
+
+    def test_finding_gpo_only_in_older_snapshot_renders_plain_text(self) -> None:
+        gpo_id = "older-only-gpo"
+        resp = self._seed_render_link_case(
+            gpo_id=gpo_id,
+            in_latest_snapshot=False,
+        ).get(
+            "/findings",
+            headers={"Authorization": "Bearer test-secret-token"},
+        )
+
+        assert resp.status_code == 200
+        assert f"/gpo/{gpo_id}" not in resp.text
+        assert f">GPO {gpo_id}</a>" not in resp.text
+        assert f"GPO {gpo_id}" in resp.text
+
+    def test_finding_gpo_in_latest_snapshot_renders_detail_link(self) -> None:
+        gpo_id = "current-gpo"
+        resp = self._seed_render_link_case(
+            gpo_id=gpo_id,
+            in_latest_snapshot=True,
+        ).get(
+            "/findings",
+            headers={"Authorization": "Bearer test-secret-token"},
+        )
+
+        assert resp.status_code == 200
+        assert f"/gpo/{gpo_id}" in resp.text
+        assert f">GPO {gpo_id}</a>" in resp.text
+
+    def test_findings_page_does_not_reconstruct_estate(self, monkeypatch) -> None:
+        client = self._client
+        monkeypatch.setattr(
+            "gpo_lens.store.load_estate",
+            MagicMock(side_effect=AssertionError("unexpected estate reconstruction")),
+        )
+
+        resp = client.get(
+            "/findings",
+            headers={"Authorization": "Bearer test-secret-token"},
+        )
+
+        assert resp.status_code == 200
+
+    def test_findings_page_renders_without_snapshot(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from gpo_lens.web.app import create_app
+
+        conn = sqlite3.connect(self._db_path)
+        try:
+            init_db(conn)
+        finally:
+            conn.close()
+
+        resp = TestClient(create_app(self._db_path)).get(
+            "/findings",
+            headers={"Authorization": "Bearer test-secret-token"},
+        )
+
+        assert resp.status_code == 200
+        assert "No findings match the current filters" in resp.text
 
     def test_findings_page_has_filter_bar(self) -> None:
         client = self._client
