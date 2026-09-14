@@ -147,8 +147,7 @@ def test_main_fails_closed_when_env_var_empty_and_repo_public(
     difference between them is the declared visibility.
     """
     (tmp_path / "publication.toml").write_text(
-        '[publication]\nremote_owner = "x"\nauthor_email = ["a@b"]\n'
-        'visibility = "public"\n',
+        '[publication]\nremote_owner = "x"\nauthor_email = ["a@b"]\nvisibility = "public"\n',
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -159,6 +158,7 @@ def test_main_fails_closed_when_env_var_empty_and_repo_public(
 
     monkeypatch.setattr(checker.subprocess, "run", fake_run)
     assert checker.main([]) == 1
+
 
 def test_main_exits_one_on_violation(
     monkeypatch: pytest.MonkeyPatch, checker: ModuleType, tmp_path: Path
