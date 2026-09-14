@@ -24,11 +24,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      # This gate is a no-op until the repository secret GPO_LENS_FORBIDDEN_IDENTIFIERS
+      # This gate is a no-op until the repository secret FORBIDDEN_IDENTIFIERS
       # is configured; the script exits 0 when the environment variable is unset.
       - name: Check for committed work-domain identifiers
         env:
-          GPO_LENS_FORBIDDEN_IDENTIFIERS: ${{ secrets.GPO_LENS_FORBIDDEN_IDENTIFIERS }}
+          FORBIDDEN_IDENTIFIERS: ${{ secrets.FORBIDDEN_IDENTIFIERS }}
         run: python scripts/check_committed_identifiers.py
 
   lint-typecheck:
