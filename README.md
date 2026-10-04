@@ -146,5 +146,7 @@ ruff check .
 mypy src
 ```
 
+Inherited a running installation? Start with [`docs/handover.md`](docs/handover.md).
+
 See [`AGENTS.md`](AGENTS.md) for conventions, module map, and build details.
 See [`docs/`](docs/) for the normalized model spec and per-work-item specs.
