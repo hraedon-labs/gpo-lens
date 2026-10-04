@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Handover page for a new operator
+
+- `docs/handover.md`: a start-here page for someone inheriting a running
+  installation, with a site sheet kept outside the repository, the rules that
+  are easy to break (IIS is the only access control, inventory-backed coverage,
+  safe backups, upgrade flags), keeping collection alive, routine, upgrade and
+  rollback, and the data-egress note for optional AI narration.
+
 ### Explore and Tools directories (Plan 025 WI-3)
 
 Two question-oriented landing pages organize every specialist destination
