@@ -14,10 +14,10 @@ threadpool, preventing synchronous SQLite from blocking the event loop.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from gpo_lens.exports import ExportSection, export_context
@@ -65,10 +65,23 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
 
         if as_of is not None and (as_of.tzinfo is None or as_of.utcoffset() is None):
             raise HTTPException(status_code=422, detail="as_of must include a UTC offset")
+        resolved_as_of = as_of or datetime.now(UTC)
+        if format and as_of is None:
+            # Make the export's clock an explicit input, including for direct
+            # download URLs. The resolved URL can be replayed byte for byte.
+            return RedirectResponse(
+                str(request.url.include_query_params(as_of=resolved_as_of.isoformat())),
+                status_code=307,
+            )
         conn = get_ro_conn(app.state.db_path)
         try:
             conn.execute("BEGIN")
-            briefing = build_briefing(conn, as_of_snapshot=snapshot, now=as_of)
+            briefing = build_briefing(
+                conn,
+                as_of_snapshot=snapshot,
+                now=resolved_as_of,
+                stale_after_days=app.state.stale_snapshot_days,
+            )
             snapshots = list_snapshots(conn)
             context = export_context(
                 conn, snapshot_ids=[briefing.snapshot_id] if briefing else [], admx=app.state.admx
@@ -96,7 +109,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                 context=context,
                 filters={
                     "snapshot": snapshot,
-                    "as_of": as_of.isoformat() if as_of else "current triage state",
+                    "as_of": resolved_as_of.isoformat(),
                 },
             )
 
@@ -124,6 +137,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             "briefing.html",
             {
                 "request": request,
+                "export_as_of": request.query_params.get("as_of", resolved_as_of.isoformat()),
                 "briefing": {
                     **safe_data(
                         briefing,

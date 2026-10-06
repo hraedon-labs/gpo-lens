@@ -3,12 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
-import stat
 import sys
 import threading
 import uuid
-import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -18,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from gpo_lens import store as _store
+from gpo_lens.collection_zip import MAX_ARCHIVE_BYTES, MAX_UNCOMPRESSED_BYTES
 from gpo_lens.web import _helpers as _h
 from gpo_lens.web.auth import Principal, _is_loopback
 from gpo_lens.web.rate_limit import RateLimiter, make_rate_limit_middleware
@@ -25,8 +23,8 @@ from gpo_lens.web.rate_limit import RateLimiter, make_rate_limit_middleware
 _logger = logging.getLogger(__name__)
 
 _WEB_DIR = Path(__file__).resolve().parent
-_MAX_UPLOAD_BYTES = 500 * 1024 * 1024
-_MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024  # 2GB
+_MAX_UPLOAD_BYTES = MAX_ARCHIVE_BYTES
+_MAX_UNCOMPRESSED_BYTES = MAX_UNCOMPRESSED_BYTES
 
 # Re-exports — backward compatibility.  Tests import these helpers from
 # ``gpo_lens.web.app`` (e.g. ``from gpo_lens.web.app import _sanitize_question``).
@@ -55,7 +53,7 @@ _stream_upload_to_file = _h.stream_upload_to_file
 # ``_audit_log_configured_path``, ``_safe_extract``.
 
 # ------------------------------------------------------------------
-# Safe zip extraction — stays in app.py because tests patch
+# Safe zip extraction — wrapper preserves tests that patch
 # ``gpo_lens.web.app._MAX_UNCOMPRESSED_BYTES`` and then call ``_safe_extract``.
 # The function reads the constant from *this module's* ``__globals__`` at call
 # time, so the patched value is visible.
@@ -63,82 +61,15 @@ _stream_upload_to_file = _h.stream_upload_to_file
 
 
 def _safe_extract(zip_path: Path, dest: Path) -> None:
-    """Extract a zip to *dest* with defense-in-depth safety checks.
+    """Compatibility wrapper; safety policy is shared with CLI ingestion."""
+    from gpo_lens.collection_zip import safe_extract
 
-    Four layers of protection:
-    1. Symlink check (pre-extract, from header ``external_attr``)
-    2. Path traversal check (pre-extract, resolves member path)
-    3. Streaming decompression size cap via :class:`SizeLimitedReader`
-       — counts *actual* decompressed bytes, immune to ``file_size``
-       header spoofing
-    4. Post-extract symlink and path traversal re-check
-
-    If any check fails (or an error occurs during extraction), all
-    partially-extracted files and directories are removed from *dest*
-    before the exception is re-raised, ensuring no tainted artifacts
-    remain on disk.
-
-    **Memory tradeoff:** Unlike :func:`~gpo_lens.ingest._streaming_zip_read`
-    which buffers decompressed bytes in memory, this function writes
-    directly to disk during extraction — no in-memory buffering of the
-    full content.
-    """
-    from gpo_lens.ingest import SizeLimitedReader
-
-    try:
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            dest_root = dest.resolve()
-            total_bytes_read = 0
-            for info in zf.infolist():
-                member = info.filename
-                mode = info.external_attr >> 16
-                if stat.S_ISLNK(mode):
-                    raise ValueError(f"zip symlink blocked: {member}")
-                target = (dest / member).resolve()
-                if not target.is_relative_to(dest_root):
-                    raise ValueError(f"zip-slip blocked: {member}")
-                if member.endswith("/"):
-                    target.mkdir(parents=True, exist_ok=True)
-                    continue
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with zf.open(member) as src:
-                    wrapped = SizeLimitedReader(src, _MAX_UNCOMPRESSED_BYTES - total_bytes_read)
-                    with open(target, "wb") as out:
-                        while True:
-                            chunk = wrapped.read(65536)
-                            if not chunk:
-                                break
-                            out.write(chunk)
-                    total_bytes_read += wrapped._total
-                    if total_bytes_read > _MAX_UNCOMPRESSED_BYTES:
-                        raise ValueError("zip uncompressed size exceeds limit")
-                if target.is_symlink():
-                    raise ValueError(f"zip symlink blocked: {member}")
-                extracted = target.resolve()
-                if not extracted.is_relative_to(dest_root):
-                    raise ValueError(f"zip-slip blocked: {member}")
-    except BaseException:
-        # Clean up any partially extracted files/dirs before re-raising.
-        # Cleanup errors are warned, not raised, so the *original* extraction
-        # failure (zip-slip, decompression bomb, symlink) propagates — without
-        # this guard a failing ``rmtree`` would mask the root cause. The
-        # outer ``iterdir`` guard is needed because ``dest`` may not exist
-        # (extraction failed before any file was written) or may have been
-        # removed mid-extraction by a concurrent process.
-        if dest.is_dir():
-            for child in dest.iterdir():
-                try:
-                    if child.is_symlink() or not child.is_dir():
-                        child.unlink()
-                    else:
-                        shutil.rmtree(child)
-                except OSError as cleanup_exc:
-                    _logger.warning(
-                        "cleanup of %s after extraction failure failed: %s",
-                        child,
-                        cleanup_exc,
-                    )
-        raise
+    safe_extract(
+        zip_path,
+        dest,
+        max_archive_bytes=_MAX_UPLOAD_BYTES,
+        max_uncompressed_bytes=_MAX_UNCOMPRESSED_BYTES,
+    )
 
 
 # ------------------------------------------------------------------
@@ -307,6 +238,14 @@ class _FileLock:
 def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None) -> FastAPI:
     app = FastAPI(root_path=root_path, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.db_path = db_path
+    try:
+        stale_days = int(os.environ.get("GPO_LENS_STALE_SNAPSHOT_DAYS", "8"))
+        if stale_days <= 0:
+            raise ValueError("threshold must be positive")
+    except ValueError:
+        _logger.warning("Invalid GPO_LENS_STALE_SNAPSHOT_DAYS; using 8 days")
+        stale_days = 8
+    app.state.stale_snapshot_days = stale_days
     if db_path == ":memory:":
         import tempfile
 

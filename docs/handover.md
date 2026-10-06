@@ -115,10 +115,57 @@ what *it* could enumerate. To keep that check honest:
 - Treat any coverage gap as a real finding: a GPO someone has hidden from
   routine readers is exactly what this tool exists to surface.
 
-**Signs collection has stopped:** the newest entry under
-**Tools → Ingest → Snapshots** is
-older than your schedule, or the collector task's last-run result in Task
-Scheduler isn't `0x0`. Check monthly, or alert on the task.
+**Schedule it.** On the DC/RSAT collector host, from an elevated PowerShell
+session, choose one mode:
+
+```powershell
+.\scripts\Register-GpoLensCollection.ps1 -GmsaAccount 'LABDOMAIN\collector$' -OutputRoot C:\GpoExport
+.\scripts\Register-GpoLensCollection.ps1 -ServiceAccount 'LABDOMAIN\svc-collector' -OutputRoot C:\GpoExport
+```
+
+The gMSA must already be installed/usable on that host; it supplies no stored
+password. The service-account command prompts with `Get-Credential` and passes
+credentials only to Windows Task Scheduler, never a file. Both run with
+limited privileges and network-capable logon. Grant batch logon, read access
+to GPO/SYSVOL and scripts, and write access to the output/drop directories.
+Defaults: daily at 02:00 local time, **hard two-hour time limit**, last 14
+successful export pairs, rotating 5 MiB logs with five backups. Customize with
+`-At`, `-EveryDays`, `-ExecutionTimeLimit`, `-Retention`, `-LogMaxBytes` and
+`-LogFiles`. Preview with `-WhatIf`; remove with `-Unregister`.
+
+Use `-InventoryPath C:\GpoInventory\gpo-inventory.json` to overlay the
+periodically refreshed privileged inventory into **both** the routine folder
+and ZIP. Use `-CopyTo '\\lab.example.com\gpo-drop'` to deliver the newest ZIP.
+Delivery is a copy; an operator must still ingest it through **Tools > Ingest**
+or `gpo-lens --db <database> ingest <collector.zip> --diff-latest`. The app does
+not watch an inbox. Use a dedicated output root per task; privileged exports
+and the authoritative inventory belong outside routine retention.
+[The IIS guide](../deploy/iis/README.md#scheduled-collection) has the full
+permissions, manual privileged-inventory refresh and lab validation steps.
+
+**Signs collection has stopped:** **Briefing** shows the newest imported
+snapshot's age and warns with **Collection may have stopped** when it is older
+than eight days, even if no settings changed. Set
+`GPO_LENS_STALE_SNAPSHOT_DAYS` to a positive integer before startup and restart
+the app to change the threshold. Unknown/future timestamps also warn. This
+measures import age; verify the source export age too. An old ZIP re-imported
+today can look fresh by import time.
+
+Verify the task and export age on the collector host:
+
+```powershell
+Get-ScheduledTaskInfo -TaskName GpoLensCollection | Select-Object LastRunTime, LastTaskResult, NextRunTime
+$newest = Get-ChildItem C:\GpoExport -File -Filter '*.zip' | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+if ($newest) { ((Get-Date).ToUniversalTime() - $newest.LastWriteTimeUtc).TotalHours } else { 'No ZIP collected yet' }
+Get-Content C:\GpoExport\collection.log -Tail 20
+```
+
+The task must finish with `LastTaskResult = 0` (`0x0`); confirm a new ZIP and
+`Collection succeeded` log line after that run. Check **Tools > Ingest >
+Snapshots** to verify the import happened too. A hard timeout can leave a
+partial export folder or `.partial` copy; investigate before removing it.
+Routine failures preserve existing exports and do not prune them. Check monthly,
+or wire the task result/newest-export age into your site's monitoring.
 
 **One-off export** on the collector host:
 
@@ -126,8 +173,10 @@ Scheduler isn't `0x0`. Check monthly, or alert on the task.
 .\scripts\Export-GpoEstate.ps1 -OutputRoot C:\GpoExport
 ```
 
-Then upload the zip through **Tools → Ingest**. Real exports are often 50–100 MB+;
-the site's `web.config` allows up to 500 MB.
+Then upload the ZIP through **Tools > Ingest**, or use CLI `ingest <file.zip>`.
+Both safely handle Windows PowerShell 5.1 backslash ZIP entries; no manual
+repacking is needed. Real exports are often 50-100 MB+; the site's
+`web.config` allows up to 500 MB.
 
 ## 4. Routine
 

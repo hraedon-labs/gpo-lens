@@ -74,6 +74,32 @@ class ExpiringAcceptance:
 
 
 @dataclass(frozen=True)
+class SnapshotFreshness:
+    """Newest import age; unknown/future timestamps cannot establish freshness."""
+
+    snapshot_id: int
+    taken_at: datetime | None
+    age_seconds: int | None
+    stale_after_days: int
+    is_stale: bool
+
+    @property
+    def description(self) -> str:
+        if self.age_seconds is None:
+            return (
+                f"Newest snapshot #{self.snapshot_id} freshness cannot be verified; "
+                "check its timestamp and the collector clock."
+            )
+        days, remainder = divmod(self.age_seconds, 86400)
+        hours = remainder // 3600
+        age = _count(days, "day") if days else _count(hours, "hour")
+        return (
+            f"Newest snapshot #{self.snapshot_id} is {age} old "
+            f"(warning threshold: {self.stale_after_days} days)."
+        )
+
+
+@dataclass(frozen=True)
 class Briefing:
     """Typed briefing facts. Prose is derived, never stored."""
 
@@ -96,6 +122,7 @@ class Briefing:
 
     expiring: tuple[ExpiringAcceptance, ...]
     vitals: tuple[BriefingVital, ...]
+    freshness: SnapshotFreshness | None = None
 
     @property
     def has_change(self) -> bool:
@@ -134,6 +161,7 @@ def build_briefing(
     *,
     as_of_snapshot: int | None = None,
     now: datetime | None = None,
+    stale_after_days: int = 8,
 ) -> Briefing | None:
     """Assemble the briefing facts, or ``None`` when no snapshot is ingested.
 
@@ -150,6 +178,11 @@ def build_briefing(
 
     if now is None:
         now = datetime.now(UTC)
+
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must include a UTC offset")
+    if stale_after_days <= 0:
+        raise ValueError("stale_after_days must be positive")
 
     snapshots = list_snapshots(conn)  # newest first
     if not snapshots:
@@ -172,6 +205,28 @@ def build_briefing(
     is_first = prior_snapshot_id is None
 
     problems: list[str] = []
+    newest_id, _, newest_taken = snapshots[0]
+    age = (
+        now - newest_taken
+        if newest_taken is not None
+        and newest_taken.tzinfo is not None
+        and newest_taken.utcoffset() is not None
+        else None
+    )
+    freshness = SnapshotFreshness(
+        snapshot_id=newest_id,
+        taken_at=newest_taken,
+        age_seconds=int(age.total_seconds()) if age is not None and age >= timedelta(0) else None,
+        stale_after_days=stale_after_days,
+        is_stale=age is not None and age > timedelta(days=stale_after_days),
+    )
+    if freshness.is_stale:
+        problems.append(
+            freshness.description
+            + " Collection may have stopped; check the scheduled task and ingest a new export."
+        )
+    elif freshness.age_seconds is None:
+        problems.append(freshness.description)
 
     coverage_gaps = _scalar(
         conn,
@@ -315,6 +370,7 @@ def build_briefing(
         findings_regressed=findings_regressed,
         expiring=expiring,
         vitals=vitals,
+        freshness=freshness,
     )
 
 
@@ -348,6 +404,12 @@ def briefing_lines(briefing: Briefing) -> tuple[str, ...]:
     """
     lines: list[str] = []
     lines.extend(briefing.problems)
+    if (
+        briefing.freshness
+        and briefing.freshness.age_seconds is not None
+        and not briefing.freshness.is_stale
+    ):
+        lines.append(briefing.freshness.description)
 
     if briefing.is_first_snapshot:
         lines.append(

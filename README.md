@@ -18,19 +18,50 @@ On a Windows DC or RSAT box, export the estate:
 .\scripts\Export-GpoEstate.ps1 -OutputRoot C:\GpoExport
 ```
 
-Copy the complete export directory to `./GpoExport` on the analysis machine.
-From the checkout, ingest it and start a local browser session:
+Copy the collector ZIP (or the complete export directory) to the analysis
+machine. From the checkout, ingest it and start a local browser session:
 
 ```bash
-uv run gpo-lens --db ./gpo-lens.sqlite3 ingest ./GpoExport
+uv run gpo-lens --db ./gpo-lens.sqlite3 ingest ./lab.example.com-20261006-020000.zip
 uv run gpo-lens --db ./gpo-lens.sqlite3 doctor
 uv run gpo-lens --db ./gpo-lens.sqlite3 serve --open
 ```
 
 The local server listens on `127.0.0.1:8000`. Browser upload through
-**Tools → Ingest** accepts the collector ZIP instead of a directory. Keep
+**Tools → Ingest** also accepts collector ZIPs. CLI ingest still accepts directories.
+Both ZIP paths share traversal/symlink rejection, a 500 MiB archive limit,
+2 GiB total expansion limit and 1000:1 per-entry compression ratio limit.
+Windows PowerShell 5.1 `Compress-Archive` backslash paths are safely normalized
+before validation; a single enclosing export folder is supported. Temporary
+extraction directories are removed after ingest, including on failure. Keep
 original exports in restricted storage for later re-ingestion. Use one estate
 and one app instance per database; multiple snapshots describe that same estate.
+
+## Keep collection running
+
+On a Windows DC/RSAT host, run either command in an elevated PowerShell session:
+
+```powershell
+# Already installed gMSA; Windows manages its password.
+.\scripts\Register-GpoLensCollection.ps1 -GmsaAccount 'LABDOMAIN\collector$' -OutputRoot C:\GpoExport
+# Standard service account; prompts securely with Get-Credential.
+.\scripts\Register-GpoLensCollection.ps1 -ServiceAccount 'LABDOMAIN\svc-collector' -OutputRoot C:\GpoExport
+```
+
+Defaults: daily at 02:00 host local time, a hard two-hour runtime limit, last
+14 successful exports, and a 5 MiB log with five rotated backups. Configure
+`-At`, `-EveryDays`, `-ExecutionTimeLimit`, `-Retention`, `-LogMaxBytes` and
+`-LogFiles`. Use `-CopyTo '\\lab.example.com\gpo-drop'` for ZIP delivery,
+`-WhatIf` to preview, or `-Unregister` to remove the task. Delivery requires a
+separate ingest step; dropping a ZIP in an inbox does not import it.
+
+[The IIS collection guide](deploy/iis/README.md#scheduled-collection) covers
+permissions, privileged inventory overlay, verification and lab validation.
+[The handover checklist](docs/handover.md#3-keeping-collection-alive) explains
+how to keep coverage honest. Briefing shows the newest imported snapshot's age
+and warns after eight days. Set `GPO_LENS_STALE_SNAPSHOT_DAYS` to a positive
+integer and restart the app to change that threshold. An unchanged estate can
+still be stale; import age does not prove when the source data was collected.
 
 ## Feature tour
 

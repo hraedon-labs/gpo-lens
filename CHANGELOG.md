@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Scheduled read-only collection under gMSA or service-account credentials, with
+  an explicit two-hour task limit, retention, rotating logs, optional atomic ZIP
+  delivery, privileged inventory overlay, dry-run and unregister support.
+- Briefing snapshot age and stale-collection warning after a configurable number
+  of days (`GPO_LENS_STALE_SNAPSHOT_DAYS`, default 8), including in evidence exports.
+
+### Fixed
+
+- CLI ingest accepts collector ZIPs using the same bounded extraction helper as
+  web uploads. Windows backslash paths and wrapped export folders are supported;
+  traversal, symlinks, duplicate paths, excessive expansion/ratios are rejected,
+  and temporary files are cleaned up on success or failure.
+
 ## v1.3.0 — 2026-10-06
 
 Draft **v1.3.0** — release date TBD by coordinator. This section remains
