@@ -233,10 +233,6 @@ def test_no_secret_cli_read_commands_do_not_redact(tmp_path, capsys, monkeypatch
         status = main(["--db", str(db), *json_args, *argv])
         captured = capsys.readouterr()
         assert status == 0, (name, captured.err)
-        # WI-101: the existing text "Cpassword" count header masks numeric
-        # counts as credentials. Keep that separate from the UNC hotfix.
-        if name == "trends" and not as_json:
-            continue
         if REDACTED in captured.out or REDACTED in captured.err:
             failures.append(name)
     assert not failures, failures

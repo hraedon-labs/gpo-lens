@@ -11,6 +11,7 @@ import dataclasses
 import html
 import re
 from collections.abc import Iterable, Mapping
+from numbers import Number
 from typing import Any
 from urllib.parse import unquote
 
@@ -103,6 +104,11 @@ def _mapping(value: object) -> Mapping[str, Any] | None:
 
 def _credential_name(name: object) -> bool:
     return bool(_SECRET_KEY.fullmatch(str(name))) or str(name).lower() in _WINDOWS_CREDENTIAL_NAMES
+
+
+def _credential_material(value: object) -> bool:
+    """Typed aggregates are not credentials; numeric password strings still are."""
+    return not isinstance(value, Number) and value not in (None, "")
 
 
 def _registry_payload(mapping: Mapping[str, Any]) -> tuple[str, ...]:
@@ -284,7 +290,8 @@ def safe_data(value: object, *, include_audit: bool = True, secrets: Iterable[st
                     m = _mapping(child)
                     if m is not None:
                         return any(
-                            (_SECRET_KEY.fullmatch(str(k)) and bool(v)) or contains_secret(v)
+                            (_SECRET_KEY.fullmatch(str(k)) and _credential_material(v) and bool(v))
+                            or contains_secret(v)
                             for k, v in m.items()
                         )
                     if isinstance(child, (list, tuple)):
@@ -298,7 +305,7 @@ def safe_data(value: object, *, include_audit: bool = True, secrets: Iterable[st
                     result[key] = REDACTED
                 elif (
                     _SECRET_KEY.fullmatch(str(key)) or (sensitive and key in _VALUE)
-                ) and child not in (None, ""):
+                ) and _credential_material(child):
                     result[key] = REDACTED
                 else:
                     result[key] = project(child)
