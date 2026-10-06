@@ -218,3 +218,26 @@ class TestAdmxCoverageDirectCall:
         assert len(gaps) == 1
         assert gaps[0]["registry_key"] == "HKLM\\SOFTWARE\\Policies\\Example\\GapValue"
         assert gaps[0]["value_name"] == "data"
+
+
+@pytest.mark.parametrize("command", ["admx-gaps", "danger", "admx-coverage"])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_cli_poisoned_templates(admx_db, tmp_path, capsys, command, as_json):
+    from gpo_lens.cli import main
+
+    pd_dir = tmp_path / "PolicyDefinitions"
+    pd_dir.mkdir()
+    (pd_dir / "poison.admx").write_bytes(b'<?xml version="1.0" encoding="unicode"?><x>\xff</x>')
+    args = ["--db", str(admx_db), command, "--admx-dir", str(pd_dir)]
+    if as_json:
+        args.insert(0, "--json")
+    assert main(args) == 0
+    captured = capsys.readouterr()
+    assert "1 template files could not be read" in captured.err
+    if as_json:
+        data = json.loads(captured.out)
+        if command == "admx-coverage":
+            assert data["data"]["summary"]["unreadable_file_count"] == 1
+            assert data["data"]["skipped_files"] == [
+                {"filename": "poison.admx", "reason_class": "UnicodeDecodeError"}
+            ]

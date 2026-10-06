@@ -23,8 +23,11 @@ policy names.
 
 from __future__ import annotations
 
+import codecs
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from xml.etree.ElementTree import Element
 
 import defusedxml.ElementTree as ET
 
@@ -33,6 +36,62 @@ from gpo_lens.normalize import localname
 _ADMX_NS = "http://schemas.microsoft.com/GroupPolicy/2006/07/PolicyDefinitions"
 
 _localname = localname
+
+_XML_DECLARATION = re.compile(r"\A<\?xml\s+[^?]*\?>")
+_XML_ENCODING = re.compile(r"\s+encoding\s*=\s*(['\"])([^'\"]+)\1")
+
+
+@dataclass(frozen=True)
+class TemplateFileSkip:
+    """A template that could not be read; no file contents in diagnostics."""
+
+    filename: str  # relative to PolicyDefinitions, including the ADML locale
+    reason_class: str
+
+
+def _read_template(path: Path) -> Element:
+    """Decode XML bytes before parsing, retaining defusedxml protections.
+
+    BOMs take precedence over declarations. Without a BOM, the opening XML
+    byte pattern identifies UTF-16/32. Other files use their declared codec,
+    falling back to UTF-8 only for unknown codec names (including "unicode").
+    Decoding stays strict so corrupt bytes are reported instead of replaced.
+    """
+    data = path.read_bytes()
+    if data.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        encoding = "utf-32"
+    elif data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        encoding = "utf-16"
+    elif data.startswith(codecs.BOM_UTF8):
+        encoding = "utf-8-sig"
+    elif data.startswith(b"<\x00\x00\x00"):
+        encoding = "utf-32-le"
+    elif data.startswith(b"\x00\x00\x00<"):
+        encoding = "utf-32-be"
+    elif data.startswith(b"<\x00"):
+        encoding = "utf-16-le"
+    elif data.startswith(b"\x00<"):
+        encoding = "utf-16-be"
+    else:
+        encoding = "utf-8"
+        # Only the ASCII XML declaration is inspected before decoding.
+        declaration = _XML_DECLARATION.match(
+            data[: data.find(b"?>") + 2].decode("ascii", errors="ignore")
+        )
+        declared = _XML_ENCODING.search(declaration.group()) if declaration else None
+        if declared:
+            try:
+                codecs.lookup(declared[2])
+            except LookupError:
+                pass
+            else:
+                encoding = declared[2]
+
+    xml = data.decode(encoding)
+    # The bytes have already been decoded; a declaration must not re-encode
+    # the Unicode input or send an unsupported name to the XML parser.
+    xml = _XML_DECLARATION.sub(lambda m: _XML_ENCODING.sub("", m.group()), xml, count=1)
+    return ET.fromstring(xml)
 
 
 @dataclass(frozen=True)
@@ -57,6 +116,7 @@ class PolicyDefinitions:
         default_factory=dict,
         repr=False,
     )
+    skipped_files: list[TemplateFileSkip] = field(default_factory=list)
 
     def lookup(self, key: str, value_name: str) -> list[AdmxPolicy]:
         """Find policies matching a registry key and value name.
@@ -103,10 +163,7 @@ def _ref_to_key(ref: str) -> str:
 
 def _parse_adml_strings(adml_path: Path) -> dict[str, str]:
     """Parse an ADML file and return {string_id: text}."""
-    tree = ET.parse(adml_path)
-    root = tree.getroot()
-    if root is None:
-        return {}
+    root = _read_template(adml_path)
     strings: dict[str, str] = {}
     ns = _ADMX_NS
     for st in root.iter(f"{{{ns}}}stringTable"):
@@ -158,6 +215,7 @@ def parse_admx_dir(policy_defs_dir: str | Path) -> PolicyDefinitions:
 
     # 1. Parse ADML strings — prefer en-US, fall back to first locale
     adml_strings: dict[str, str] = {}
+    skipped_files: list[TemplateFileSkip] = []
     en_us = base / "en-US"
     try:
         adml_dir = en_us if en_us.is_dir() else None
@@ -178,13 +236,18 @@ def parse_admx_dir(policy_defs_dir: str | Path) -> PolicyDefinitions:
                 continue
     if adml_dir is not None:
         try:
-            adml_files = list(adml_dir.glob("*.adml"))
+            adml_files = sorted(adml_dir.glob("*.adml"))
         except OSError:
             adml_files = []
         for adml_file in adml_files:
             try:
                 adml_strings.update(_parse_adml_strings(adml_file))
-            except (ET.ParseError, OSError):
+            except Exception as exc:
+                # A template is optional enrichment; isolate every file failure,
+                # including codec errors and defusedxml rejections.
+                skipped_files.append(
+                    TemplateFileSkip(str(adml_file.relative_to(base)), type(exc).__name__)
+                )
                 continue
 
     # 2. Parse ADMX files
@@ -195,35 +258,42 @@ def parse_admx_dir(policy_defs_dir: str | Path) -> PolicyDefinitions:
         admx_files = []
     for admx_file in admx_files:
         try:
-            tree = ET.parse(admx_file)
-        except (ET.ParseError, OSError):
-            continue
-        root = tree.getroot()
-        if root is None:
-            continue
-        ns = _ADMX_NS
-        for pol in root.iter(f"{{{ns}}}policy"):
-            name = pol.get("name", "")
-            class_scope = pol.get("class", "Both")
-            key = pol.get("key", "")
-            value_name = pol.get("valueName", "")
-            display_ref = pol.get("displayName", "")
-            explain_ref = pol.get("explainText", "")
-
-            display_name = adml_strings.get(_ref_to_key(display_ref), display_ref)
-            explain_text = adml_strings.get(_ref_to_key(explain_ref), "")
-
-            policies.append(
-                AdmxPolicy(
-                    name=name,
-                    class_scope=class_scope,
-                    key=key,
-                    value_name=value_name,
-                    display_name_ref=display_ref,
-                    display_name=display_name,
-                    explain_text=explain_text,
-                )
+            policies.extend(_parse_admx_policies(admx_file, adml_strings))
+        except Exception as exc:
+            skipped_files.append(
+                TemplateFileSkip(str(admx_file.relative_to(base)), type(exc).__name__)
             )
+            continue
 
-    pd = PolicyDefinitions(policies=policies)
-    return pd
+    return PolicyDefinitions(policies=policies, skipped_files=skipped_files)
+
+
+def _parse_admx_policies(admx_file: Path, adml_strings: dict[str, str]) -> list[AdmxPolicy]:
+    """Build one file's policies atomically so failures cannot leak partial rows."""
+    root = _read_template(admx_file)
+    policies: list[AdmxPolicy] = []
+    ns = _ADMX_NS
+    for pol in root.iter(f"{{{ns}}}policy"):
+        name = pol.get("name", "")
+        class_scope = pol.get("class", "Both")
+        key = pol.get("key", "")
+        value_name = pol.get("valueName", "")
+        display_ref = pol.get("displayName", "")
+        explain_ref = pol.get("explainText", "")
+
+        display_name = adml_strings.get(_ref_to_key(display_ref), display_ref)
+        explain_text = adml_strings.get(_ref_to_key(explain_ref), "")
+
+        policies.append(
+            AdmxPolicy(
+                name=name,
+                class_scope=class_scope,
+                key=key,
+                value_name=value_name,
+                display_name_ref=display_ref,
+                display_name=display_name,
+                explain_text=explain_text,
+            )
+        )
+
+    return policies

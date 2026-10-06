@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import codecs
 from pathlib import Path
+
+import pytest
 
 from gpo_lens.admx_parser import PolicyDefinitions, parse_admx_dir
 
@@ -195,3 +198,93 @@ def test_policy_definitions_lookup_empty():
     pd = PolicyDefinitions()
     assert pd.lookup("any", "thing") == []
     assert pd.resolve_display_name("any:thing") is None
+
+
+@pytest.mark.parametrize(
+    "encoding,bom",
+    [
+        ("utf-8", b""),
+        ("utf-8-sig", b""),
+        ("utf-16-le", codecs.BOM_UTF16_LE),
+        ("utf-16-be", codecs.BOM_UTF16_BE),
+        ("utf-16-le", b""),
+        ("utf-16-be", b""),
+        ("utf-32-le", codecs.BOM_UTF32_LE),
+        ("utf-32-be", codecs.BOM_UTF32_BE),
+        ("utf-32-le", b""),
+        ("utf-32-be", b""),
+    ],
+)
+@pytest.mark.parametrize("declared", ["unicode", "synthetic-unknown-encoding"])
+def test_unrecognized_declaration_decodes_both_templates(tmp_path, encoding, bom, declared):
+    pd_dir = _write_policy_defs(tmp_path)
+    for path, sample in [
+        (pd_dir / "TestPolicies.admx", _ADMX_SAMPLE),
+        (pd_dir / "en-US" / "TestPolicies.adml", _ADML_SAMPLE),
+    ]:
+        path.write_bytes(
+            bom + sample.replace('encoding="utf-8"', f"encoding='{declared}'").encode(encoding)
+        )
+    pd = parse_admx_dir(pd_dir)
+    assert len(pd.policies) == 4
+    assert pd.policies[0].display_name == "Account Lockout Threshold"
+    assert pd.skipped_files == []
+
+
+def test_known_encoding_and_bom_precedence(tmp_path):
+    pd_dir = _write_policy_defs(tmp_path)
+    sample = _ADML_SAMPLE.replace("Account Lockout Threshold", "Synthetic café")
+    path = pd_dir / "en-US" / "TestPolicies.adml"
+    path.write_bytes(sample.replace("utf-8", "iso-8859-1").encode("iso-8859-1"))
+    assert parse_admx_dir(pd_dir).policies[0].display_name == "Synthetic café"
+    path.write_bytes(sample.replace("utf-8", "ascii").encode("utf-32"))
+    assert parse_admx_dir(pd_dir).policies[0].display_name == "Synthetic café"
+
+
+def test_poisoned_files_are_counted_and_good_files_survive(tmp_path):
+    pd_dir = _write_policy_defs(tmp_path)
+    poisons = {
+        "garbage": (b"\xff\xfe\xff", "UnicodeDecodeError"),
+        "truncated": (b"<policyDefinitions>", "ParseError"),
+        "unknown": (
+            b'<?xml version="1.0" encoding="unknown-synthetic"?><x>\xff</x>',
+            "UnicodeDecodeError",
+        ),
+        "entity": (
+            b'<!DOCTYPE x [<!ENTITY label "synthetic">]><x>&label;</x>',
+            "EntitiesForbidden",
+        ),
+    }
+    expected = {}
+    for directory, suffix in [(pd_dir, "admx"), (pd_dir / "en-US", "adml")]:
+        for name, (payload, reason) in poisons.items():
+            path = directory / f"{name}.{suffix}"
+            path.write_bytes(payload)
+            expected[str(path.relative_to(pd_dir))] = reason
+    pd = parse_admx_dir(pd_dir)
+    assert len(pd.policies) == 4
+    assert pd.policies[0].display_name == "Account Lockout Threshold"
+    assert {skip.filename: skip.reason_class for skip in pd.skipped_files} == expected
+
+
+@pytest.mark.parametrize("suffix", ["admx", "adml"])
+@pytest.mark.parametrize("error", [LookupError, UnicodeError, ValueError, OSError, RuntimeError])
+def test_file_exception_is_isolated(tmp_path, monkeypatch, suffix, error):
+    pd_dir = _write_policy_defs(tmp_path)
+    directory = pd_dir if suffix == "admx" else pd_dir / "en-US"
+    poison = directory / f"poison.{suffix}"
+    poison.touch()
+    read_bytes = Path.read_bytes
+
+    def poisoned_read(path):
+        if path == poison:
+            raise error("synthetic failure")
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", poisoned_read)
+    pd = parse_admx_dir(pd_dir)
+    assert len(pd.policies) == 4
+    assert pd.policies[0].display_name == "Account Lockout Threshold"
+    assert [(s.filename, s.reason_class) for s in pd.skipped_files] == [
+        (str(poison.relative_to(pd_dir)), error.__name__)
+    ]

@@ -317,18 +317,31 @@ def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None
 
     admx_path = admx_dir or os.environ.get("GPO_LENS_ADMX_DIR")
     app.state.admx = None
-    if admx_path and Path(admx_path).is_dir():
-        from gpo_lens.admx_parser import parse_admx_dir
-
-        app.state.admx = parse_admx_dir(admx_path)
-    else:
+    app.state.admx_notice = ""
+    try:
         from gpo_lens.admx_parser import find_admx_dir, parse_admx_dir
 
-        auto = find_admx_dir(Path.cwd())
-        if auto is None and db_path != ":memory:":
-            auto = find_admx_dir(Path(db_path).resolve().parent)
-        if auto is not None:
-            app.state.admx = parse_admx_dir(auto)
+        if admx_path and Path(admx_path).is_dir():
+            app.state.admx = parse_admx_dir(admx_path)
+        else:
+            auto = find_admx_dir(Path.cwd())
+            if auto is None and db_path != ":memory:":
+                auto = find_admx_dir(Path(db_path).resolve().parent)
+            if auto is not None:
+                app.state.admx = parse_admx_dir(auto)
+        if app.state.admx is not None and app.state.admx.skipped_files:
+            app.state.admx_notice = (
+                f"{len(app.state.admx.skipped_files)} template files could not be read; "
+                "ADMX names and coverage may be incomplete. See ADMX Coverage for details."
+            )
+    except Exception as exc:
+        # Templates are optional enrichment and must never prevent startup.
+        app.state.admx = None
+        app.state.admx_notice = (
+            f"ADMX templates could not be loaded ({type(exc).__name__}). "
+            "Policy names are unavailable; ADMX coverage may be incomplete."
+        )
+        _logger.warning("ADMX template loading failed: %s", type(exc).__name__)
 
     # Ensure the DB file exists and is initialized. A file may exist but be
     # empty (e.g. ``touch gpo-lens.sqlite3``) — init_db is idempotent
