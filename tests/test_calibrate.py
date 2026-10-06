@@ -120,7 +120,7 @@ def test_homelab_style_unknown_identifiers_never_project(tmp_path: Path) -> None
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     with calibrate.private_output(calibrate.Capture(calibrate.source_formats())):
-        report, _ = calibrate.calibrate([archive], scratch)
+        report, denylist = calibrate.calibrate([archive], scratch)
     assert report["ingest"][0]["exit_status"] == 0
     counts = report["ingest"][0]["counts"]
     assert counts["extensions"]["unknown_guid_count"] == 1
@@ -140,6 +140,11 @@ def test_homelab_style_unknown_identifiers_never_project(tmp_path: Path) -> None
     assert classes["registry_credential"] >= 1
     assert classes["uri_userinfo"] >= 1
     assert classes["credential_field"] >= 1
+    calibrate.self_check(report, denylist)
+    mutated = copy.deepcopy(report)
+    mutated["ingest"][0]["planted"] = "PRIVATE-SYNTHETIC-EXTENSION"
+    with pytest.raises(calibrate.SanitizationError):
+        calibrate.self_check(mutated, denylist)
 
 
 @pytest.mark.parametrize(
@@ -147,10 +152,8 @@ def test_homelab_style_unknown_identifiers_never_project(tmp_path: Path) -> None
     [
         {"payload": "GPO-CPASSWORD"},
         {"payload": "prefix-gpo-cpassword-suffix"},
-        {"gpo-cpassword": 0},
         {"payload": ["gpo-cpassword"]},
         {"payload": "leak-\u00e9xample"},
-        {"payload": 12345678},
     ],
 )
 def test_self_check_blocks_planted_leak(planted) -> None:
@@ -259,12 +262,30 @@ def test_archive_paths_cannot_escape(tmp_path: Path, entry: str) -> None:
     assert not (tmp_path / "escape.xml").exists()
 
 
-def test_literal_gate_rejects_source_identifier_collisions(fixture_run) -> None:
+def test_literal_gate_exempts_source_identifier_collisions(fixture_run) -> None:
     report, denylist, _ = fixture_run
-    # The literal user contract has no exemption even for fixed schema keys.
     assert "normal" in denylist
+    assert json.loads(calibrate.self_check(report, denylist)) == report
+    mutated = copy.deepcopy(report)
+    mutated["analysis"][0]["planted"] = "gpo-cpassword"
     with pytest.raises(calibrate.SanitizationError):
-        calibrate.self_check(report, denylist)
+        calibrate.self_check(mutated, denylist)
+
+
+def test_gate_exemptions_are_exact_and_independent_of_data() -> None:
+    allowed = calibrate.own_vocabulary()
+    assert {"normal", "blocked", "inaccessible", "confirmed", "doctor", "/gpo/{gpo_id}"} <= allowed
+    assert "gpo-cpassword" not in allowed
+    report = {"gpo-cpassword": [False, 12345678, "normal", "doctor"]}
+    assert (
+        json.loads(
+            calibrate.self_check(report, {"gpo-cpassword", "1234", "false", "normal", "doctor"})
+        )
+        == report
+    )
+    for value in ("prefix-normal-suffix", "NORMAL", "some-doctor"):
+        with pytest.raises(calibrate.SanitizationError):
+            calibrate.self_check({"value": value}, {"normal", "doctor"})
 
 
 def test_main_refusal_blocks_report_preserves_requested_db_and_cleans_scratch(
@@ -292,8 +313,7 @@ def test_main_refusal_blocks_report_preserves_requested_db_and_cleans_scratch(
 
 def test_report_projection_does_not_contain_fixture_identifiers(fixture_run) -> None:
     report, _, _ = fixture_run
-    # Independently check identifiers, even while the literal gate also rejects
-    # collisions with source-defined enums. This catches accidental projections.
+    # Independently check identifiers as well as the mechanically exempted gate.
     serialized = json.dumps(report).casefold()
     with sqlite3.connect(fixture_run[2] / "estate.sqlite3") as conn:
         for query in (
@@ -339,25 +359,54 @@ def test_web_probe_counts_planted_response_leak_and_crash(fixture_run, monkeypat
         def crashed():
             raise RuntimeError(secret)
 
+        @app.get("/calibration-logged-crash")
+        def logged_crash():
+            from fastapi.responses import JSONResponse
+
+            try:
+                raise RuntimeError(secret)
+            except RuntimeError:
+                logging.exception("Synthetic caught API failure")
+                return JSONResponse({"error": "internal error"}, status_code=500)
+
         return app
 
     monkeypatch.setattr(web_app, "create_app", instrumented)
     with sqlite3.connect(scratch / "estate.sqlite3") as conn:
         estate = load_estate(conn)
-    with calibrate.private_output(calibrate.Capture(calibrate.source_formats())):
-        records, leaks = calibrate.web_probe(
-            scratch / "estate.sqlite3",
-            estate,
-            scratch.parent / "synthetic.zip",
-            calibrate.source_formats(),
-            {secret},
-            scratch / "PolicyDefinitions",
-        )
+    detail = calibrate.Detail()
+    token = calibrate.DETAIL.set(detail)
+    try:
+        with calibrate.private_output(calibrate.Capture(calibrate.source_formats())):
+            records, leaks = calibrate.web_probe(
+                scratch / "estate.sqlite3",
+                estate,
+                scratch.parent / "synthetic.zip",
+                calibrate.source_formats(),
+                {secret},
+                scratch / "PolicyDefinitions",
+            )
+    finally:
+        calibrate.DETAIL.reset(token)
     assert leaks["/calibration-leak"] == 1
     crash = next(r for r in records if r["route_template"] == "/calibration-crash")
     assert crash["status_code"] == 500
     assert crash["exceptions"][0]["class"] == "RuntimeError"
     assert secret not in json.dumps([records, leaks])
+    categories = detail.report()["categories"]
+    assert {"route": "/calibration-leak", "field": "$.value"} in categories["redaction_leaks"]
+    assert secret not in json.dumps(categories["redaction_leaks"])
+    failure = next(r for r in categories["web_5xx"] if r["route"] == "/calibration-crash")
+    assert failure["exceptions"][0]["message"] == secret
+    assert all(
+        frame["file"].startswith("gpo_lens/") for frame in failure["exceptions"][0]["traceback"]
+    )
+    assert len(categories["slowest_routes"]) == 10
+    logged = next(r for r in categories["web_5xx"] if r["route"] == "/calibration-logged-crash")
+    assert logged["exceptions"][0]["message"] == secret
+    assert all(
+        frame["file"].startswith("gpo_lens/") for frame in logged["exceptions"][0]["traceback"]
+    )
 
 
 def test_duplicate_fingerprint_signal_is_measured(fixture_zip, tmp_path: Path, monkeypatch) -> None:
@@ -418,3 +467,182 @@ def test_output_cannot_replace_input(tmp_path: Path, capsys) -> None:
     assert calibrate.main(["--out", str(archive), str(archive)]) == 1
     assert archive.read_bytes() == b"synthetic-input"
     assert "private.zip" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("symlink", [False, True])
+def test_detail_output_refuses_worktree_before_ingest(tmp_path, monkeypatch, capsys, symlink):
+    destination = ROOT / "private-calibration-detail.json"
+    if symlink:
+        link = tmp_path / "repo-link"
+        link.symlink_to(ROOT, target_is_directory=True)
+        destination = link / "private-calibration-detail.json"
+
+    def forbidden(*args):
+        pytest.fail("guard must refuse before opening any input")
+
+    monkeypatch.setattr(calibrate, "calibrate", forbidden)
+    assert (
+        calibrate.main(
+            [
+                "--out",
+                str(tmp_path / "report.json"),
+                "--detail",
+                "--detail-out",
+                str(destination),
+                "unused.zip",
+            ]
+        )
+        == 1
+    )
+    assert not destination.exists()
+    out = capsys.readouterr()
+    assert not out.out
+    assert "private-calibration-detail" not in out.err
+
+
+def test_detail_guard_refuses_another_git_repo(tmp_path):
+    import subprocess
+
+    repo = tmp_path / "another-repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    with pytest.raises(ValueError):
+        calibrate.detail_destination(repo / "nested" / "detail.json")
+    assert calibrate.detail_destination(tmp_path / "private" / "detail.json").is_absolute()
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--detail"],
+        ["--detail-out", "outside.json"],
+    ],
+)
+def test_detail_flags_must_be_paired(tmp_path, monkeypatch, options):
+    monkeypatch.setattr(calibrate, "calibrate", lambda *args: pytest.fail("must refuse first"))
+    assert calibrate.main(["--out", str(tmp_path / "report.json"), *options, "unused.zip"]) == 1
+
+
+def test_detail_output_cannot_alias_sanitized_report(tmp_path, monkeypatch):
+    output = tmp_path / "report.json"
+    monkeypatch.setattr(calibrate, "calibrate", lambda *args: pytest.fail("must refuse first"))
+    assert (
+        calibrate.main(
+            [
+                "--out",
+                str(output),
+                "--detail",
+                "--detail-out",
+                str(output),
+                "unused.zip",
+            ]
+        )
+        == 1
+    )
+    assert not output.exists()
+
+
+def test_detail_warning_templates_examples_and_caps():
+    detail = calibrate.Detail()
+    for index in range(20):
+        detail.warning(
+            f"Unexpected top-level str in /synthetic/domain-{index}.test/input.json; "
+            "expected object or array"
+        )
+        detail.add("admx_gaps", {"key_path": f"Software\\Synthetic\\{index}"})
+    rows = detail.report()["categories"]["warnings"]
+    assert len(rows) == 1
+    assert (
+        rows[0]["template"] == "Unexpected top-level <value> in <value>; expected object or array"
+    )
+    assert len(rows[0]["examples"]) == 3
+    assert "/synthetic/domain-0.test/input.json" in rows[0]["examples"][0]
+    assert len(detail.report()["categories"]["admx_gaps"]) == 10
+
+
+def test_detail_real_pipeline_separate_from_sanitized_report(tmp_path, capsys):
+    archive = homelab_style_zip(tmp_path)
+    output = tmp_path / "report.json"
+    private = tmp_path / "detail.json"
+    assert (
+        calibrate.main(
+            [
+                "--out",
+                str(output),
+                "--detail",
+                "--detail-out",
+                str(private),
+                str(archive),
+            ]
+        )
+        == 0
+    )
+    detail = json.loads(private.read_text())
+    assert "CONTAINS ESTATE DATA" in detail["label"]
+    categories = detail["categories"]
+    assert all(len(rows) <= 10 for rows in categories.values())
+    assert all(len(r["examples"]) <= 3 for r in categories["warnings"])
+    extensions = categories["extensions"]
+    unknown = "{98765432-1234-5678-90ab-123456789abc}"
+    assert any(unknown.strip("{}") in r.get("guids", []) for r in extensions)
+    assert any(r.get("element_names") for r in extensions)
+    assert categories["blocked_or_unparsed_settings"]
+    assert categories["admx_gaps"]
+    assert categories["skipped_content"]
+    assert categories["slowest_routes"]
+    assert all(r["url"].startswith("/") for r in categories["slowest_routes"])
+    assert "PRIVATE-SYNTHETIC-EXTENSION" in private.read_text()
+    assert "PRIVATE-SYNTHETIC" not in output.read_text()
+    assert "PRIVATE-SYNTHETIC" not in capsys.readouterr().out
+    assert calibrate.DETAIL.get() is None
+
+
+def test_detail_leak_locations_omit_values_even_in_keys():
+    secret = "SYNTHETIC-SECRET-CALIBRATION"
+    body = json.dumps({"outer": [{"value": secret}], secret: "safe"})
+    fields = calibrate.leak_fields(body, {secret}, "json")
+    assert "$.outer[0].value" in fields
+    assert "$[key:1]" in fields
+    assert secret not in json.dumps(fields)
+    assert calibrate.leak_fields(f"<p>{secret}</p>", {secret}, "") == ["response.body"]
+
+
+@pytest.mark.parametrize(
+    "cse, block",
+    [
+        (
+            "Registry",
+            '<RegistrySettings><Registry><Properties hive="HKLM" key="Software\\Synthetic" '
+            'name="Valid" value="1"/></Registry><Registry><Properties name="Dropped" value="2"/>'
+            "</Registry></RegistrySettings>",
+        ),
+        (
+            "Drive Maps",
+            '<Drives clsid="synthetic-container"><Drive uid="synthetic-item" name="Valid">'
+            '<Properties path="synthetic-path"/></Drive><Drive name="Dropped">'
+            '<Properties path="synthetic-other-path"/></Drive></Drives>',
+        ),
+    ],
+)
+def test_detail_captures_mixed_gpp_skips(cse, block):
+    from gpo_lens import ingest
+
+    element = calibrate.ET.fromstring(
+        f"<GPO><Computer><Enabled>true</Enabled><ExtensionData><Name>{cse}</Name>"
+        f"<Extension>{block}</Extension></ExtensionData></Computer></GPO>"
+    )
+    detail = calibrate.Detail()
+    token = calibrate.DETAIL.set(detail)
+    try:
+        with calibrate.detail_ingest():
+            settings = ingest._parse_settings(element, "synthetic-gpo-id")
+    finally:
+        calibrate.DETAIL.reset(token)
+    assert len(settings) == 1
+    assert settings[0].display_name == "Valid"
+    rows = detail.report()["categories"]["skipped_content"]
+    assert len(rows) == 1
+    assert rows[0]["extension"] == cse
+    assert rows[0]["side"] == "Computer"
+    assert "Dropped" in rows[0]["setting_names"]
+    assert "not emitted" in rows[0]["reason"]
