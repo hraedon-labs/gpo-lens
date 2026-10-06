@@ -34,6 +34,7 @@ This module is a core module — no ``narration`` or ``web`` imports.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import sqlite3
@@ -462,6 +463,14 @@ def run_evaluation(
             continue
         fingerprint_map[fp] = c
 
+    warnings: list[str] = []
+    if duplicate_count:
+        run_status = "partial"
+        warnings.append(
+            f"Degraded analysis: {duplicate_count} duplicate fingerprint(s); "
+            "colliding candidates omitted and unseen findings left unresolved."
+        )
+
     # Load all active (non-resolved) occurrences.
     # NOTE: Each run_evaluation call is expected to include candidates from
     # ALL detector families (see evaluate_finding_lifecycle_v2). Filtering
@@ -495,6 +504,23 @@ def run_evaluation(
             "predecessor_id": row[12],
             "gpo_id": row[13],
         }
+
+    # A legacy GPO-wide enforced-link acceptance cannot identify a link.
+    # Keep its occurrence/events intact for history; new per-link identities
+    # deliberately start open. Do not copy a blanket acceptance onto every link.
+    legacy_link_ids: set[int] = set()
+    for candidate in fingerprint_map.values():
+        if candidate.detector_id == "enforced_link" and candidate.dimensions:
+            old_fp = compute_fingerprint(dataclasses.replace(candidate, dimensions=()))
+            if old_fp in active_by_fp:
+                legacy_link_ids.add(active_by_fp[old_fp]["id"])
+    if legacy_link_ids:
+        warnings.append(
+            "Legacy enforced-link identities replaced by per-link findings. "
+            "Prior triage remains in occurrence history; review each new link "
+            "before accepting risk. Historical occurrence IDs: "
+            + ", ".join(str(oid) for oid in sorted(legacy_link_ids))
+        )
 
     new_count = 0
     persisting_count = 0
@@ -665,6 +691,11 @@ def run_evaluation(
                 )
                 resolved_count += 1
 
+        if warnings:
+            conn.execute(
+                "UPDATE evaluation_run SET status = ?, error_summary = ? WHERE id = ?",
+                (run_status, " ".join(warnings), run_id),
+            )
         conn.commit()
     except Exception:
         conn.rollback()
@@ -758,6 +789,11 @@ def append_triage_event(
     return cursor.lastrowid
 
 
+def _triage_order(event: TriageEvent) -> tuple[datetime, int]:
+    """Chronological order with immutable event ID as the stable tie-breaker."""
+    return event.occurred_at, event.id
+
+
 def fold_triage(events: list[TriageEvent]) -> TriageStatus:
     """Deterministically fold triage events into current status.
 
@@ -778,7 +814,7 @@ def fold_triage(events: list[TriageEvent]) -> TriageStatus:
     expires_at: datetime | None = None
     rationale = ""
 
-    for ev in events:
+    for ev in sorted(events, key=_triage_order):
         updated_at = ev.occurred_at
         actor = ev.actor
         if ev.action == "commented":
@@ -825,23 +861,26 @@ def load_triage_events(
         "SELECT id, occurrence_id, action, actor, occurred_at, note, "
         "rationale, expires_at, supersedes_event_id "
         "FROM finding_triage_event WHERE occurrence_id = ? "
-        "ORDER BY id ASC",
+        "ORDER BY occurred_at, id ASC",
         (occurrence_id,),
     ).fetchall()
-    return [
-        TriageEvent(
-            id=r[0],
-            occurrence_id=r[1],
-            action=r[2],
-            actor=r[3],
-            occurred_at=_parse_dt(r[4]) or datetime.min.replace(tzinfo=UTC),
-            note=r[5],
-            rationale=r[6],
-            expires_at=_parse_dt(r[7]),
-            supersedes_event_id=r[8],
-        )
-        for r in rows
-    ]
+    return sorted(
+        [
+            TriageEvent(
+                id=r[0],
+                occurrence_id=r[1],
+                action=r[2],
+                actor=r[3],
+                occurred_at=_parse_dt(r[4]) or datetime.min.replace(tzinfo=UTC),
+                note=r[5],
+                rationale=r[6],
+                expires_at=_parse_dt(r[7]),
+                supersedes_event_id=r[8],
+            )
+            for r in rows
+        ],
+        key=_triage_order,
+    )
 
 
 def get_triage_status(
@@ -866,7 +905,7 @@ def load_triage_status_map(
     rows = conn.execute(
         "SELECT id, occurrence_id, action, actor, occurred_at, note, "
         "rationale, expires_at, supersedes_event_id "
-        "FROM finding_triage_event ORDER BY occurrence_id, id ASC"
+        "FROM finding_triage_event ORDER BY occurrence_id, occurred_at, id ASC"
     ).fetchall()
     events_by_occ: dict[int, list[TriageEvent]] = {}
     for r in rows:
@@ -1513,7 +1552,7 @@ def accepted_risk_register(
         "f.finding_key, f.rule_id, f.severity, f.summary "
         "FROM finding_triage_event e "
         "JOIN finding f ON f.id = e.occurrence_id "
-        "ORDER BY e.occurrence_id, e.id"
+        "ORDER BY e.occurrence_id, e.occurred_at, e.id"
     ).fetchall()
     events_by_occurrence: dict[int, list[tuple[TriageEvent, tuple[Any, ...]]]] = {}
     for row in rows:
@@ -1537,7 +1576,7 @@ def accepted_risk_register(
         revoked_ev: TriageEvent | None = None
         explicitly_expired = False
         finding_row: tuple[Any, ...] | None = None
-        for ev, details in event_rows:
+        for ev, details in sorted(event_rows, key=lambda row: _triage_order(row[0])):
             if ev.action == "accepted_risk":
                 accepted_ev = ev
                 revoked_ev = None
@@ -1896,7 +1935,15 @@ def evaluate_finding_lifecycle_v2(
             collected_gpo_ids={g.id for g in estate.gpos},
             coverage_complete=not estate.coverage_gaps,
         )
-        complete_evaluation_run(conn, run_id)
+        warning_row = conn.execute(
+            "SELECT error_summary FROM evaluation_run WHERE id = ?", (run_id,)
+        ).fetchone()
+        complete_evaluation_run(
+            conn,
+            run_id,
+            status="partial" if result.duplicate_fingerprint_count else "completed",
+            error_summary=warning_row[0] if warning_row else "",
+        )
     except Exception:
         complete_evaluation_run(
             conn,

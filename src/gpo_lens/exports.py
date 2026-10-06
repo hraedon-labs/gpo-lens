@@ -133,7 +133,7 @@ def export_metadata(
     for run_id in sorted(set(run_ids)):
         row = conn.execute(
             "SELECT id,snapshot_id,evaluation_kind,detector_set_digest,comparator_input_id,"
-            "application_version,status FROM evaluation_run WHERE id=?",
+            "application_version,status,error_summary FROM evaluation_run WHERE id=?",
             (run_id,),
         ).fetchone()
         if row is not None:
@@ -145,6 +145,7 @@ def export_metadata(
                 "comparator_input_id",
                 "application_version",
                 "status",
+                "error_summary",
             )
             runs.append(dict(zip(keys, row, strict=True)))
     snapshots = sorted(set(snapshots) | {r["snapshot_id"] for r in runs})
@@ -298,15 +299,24 @@ def snapshot_secrets(conn: sqlite3.Connection, snapshot_ids: Iterable[int]) -> t
     """Read credential context a setting at a time; never include raw fragments."""
     values: set[str] = set()
     for snapshot_id in sorted(set(snapshot_ids)):
-        for identity, display_value, raw in conn.execute(
-            "SELECT identity,display_value,raw FROM setting WHERE snapshot_id=?", (snapshot_id,)
+        for identity, display_name, display_value, cse, raw in conn.execute(
+            "SELECT identity,display_name,display_value,cse,raw FROM setting WHERE snapshot_id=?",
+            (snapshot_id,),
         ):
             try:
                 source = json.loads(raw)
             except (ValueError, TypeError):
                 source = None
             values.update(
-                secret_values({"identity": identity, "display_value": display_value, "raw": source})
+                secret_values(
+                    {
+                        "identity": identity,
+                        "display_name": display_name,
+                        "display_value": display_value,
+                        "cse": cse,
+                        "raw": source,
+                    }
+                )
             )
     return tuple(sorted(values, key=lambda s: (-len(s), s)))
 

@@ -8,9 +8,11 @@ fields explicitly. This module is independent of the web and narration.
 from __future__ import annotations
 
 import dataclasses
+import html
 import re
 from collections.abc import Iterable, Mapping
 from typing import Any
+from urllib.parse import unquote
 
 from gpo_lens.display import serialize_result
 
@@ -28,6 +30,22 @@ _SECRET_IDENTITY = re.compile(
 _ASSIGNMENT = re.compile(
     r"""(?i)\b(cpassword|password|passwd|pwd|secret|token|api[_-]?key)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s;,<>]+)"""
 )
+# Exact registry value names, never a substring search for "password".
+# The parser's Registry/Registry.pol/GPP records establish value context;
+# password-policy settings (e.g. PasswordComplexity) are not credential values.
+_WINDOWS_CREDENTIAL_NAMES = frozenset(
+    {
+        "defaultpassword",
+        "altdefaultpassword",
+        "proxypassword",
+        "servicepassword",
+        "bindpassword",
+        "adminpassword",
+        "databasepassword",
+        "sqlpassword",
+    }
+)
+_USERINFO = re.compile(r"(?i)(?:[a-z][a-z0-9+.-]*://|\\\\|//)[^\s/@\\:]*:([^\s/@\\]+)@")
 _RAW_FRAGMENT = re.compile(r"</?[A-Za-z][^>]*>|^[OGDS]:.*\([A-Z]+;", re.S)
 _OMIT = {
     "raw",
@@ -72,6 +90,35 @@ def _mapping(value: object) -> Mapping[str, Any] | None:
     return None
 
 
+def _credential_name(name: object) -> bool:
+    return bool(_SECRET_KEY.fullmatch(str(name))) or str(name).lower() in _WINDOWS_CREDENTIAL_NAMES
+
+
+def _registry_payload(mapping: Mapping[str, Any]) -> tuple[str, ...]:
+    """Read concrete credential values from the supported parser record shapes."""
+    values: list[str] = []
+    attrs = mapping.get("@attr")
+    if isinstance(attrs, Mapping) and ("key" in attrs or "hive" in attrs):
+        if _credential_name(attrs.get("name", attrs.get("ValueName", ""))):
+            for key in ("value", "data", "Value"):
+                if isinstance(attrs.get(key), str) and attrs[key]:
+                    values.append(attrs[key])
+    # GPMC's <Value><Name>DefaultPassword</Name><String>...</String></Value>.
+    children = mapping.get("children")
+    if str(mapping.get("tag", "")).lower() == "value" and isinstance(children, list):
+        if any(
+            isinstance(child, Mapping)
+            and child.get("tag") == "Name"
+            and _credential_name(child.get("text", ""))
+            for child in children
+        ):
+            for child in children:
+                if isinstance(child, Mapping) and child.get("tag") in {"String", "Data", "Value"}:
+                    if isinstance(child.get("text"), str) and child["text"]:
+                        values.append(child["text"])
+    return tuple(values)
+
+
 def secret_values(value: object) -> tuple[str, ...]:
     """Discover credential values while retaining no raw source fragments."""
     secrets: set[str] = set()
@@ -80,6 +127,7 @@ def secret_values(value: object) -> tuple[str, ...]:
         mapping = _mapping(obj)
         if mapping is not None:
             sensitive = _sensitive(mapping)
+            secrets.update(_registry_payload(mapping))
             for key, child in mapping.items():
                 if (
                     (_SECRET_KEY.fullmatch(str(key)) or (sensitive and key in _VALUE))
@@ -91,16 +139,66 @@ def secret_values(value: object) -> tuple[str, ...]:
         elif isinstance(obj, (list, tuple, set, frozenset)):
             for child in obj:
                 discover(child)
+        elif isinstance(obj, str):
+            for match in _USERINFO.finditer(obj):
+                secrets.add(match[1])
+                secrets.add(unquote(match[1]))
 
     discover(value)
     return tuple(sorted(secrets, key=lambda s: (-len(s), s)))
 
 
 def _sensitive(mapping: Mapping[str, Any]) -> bool:
-    return any(
+    if any(
         _SECRET_IDENTITY.search(str(mapping.get(k, "")))
         for k in ("identity", "reg_value_name", "field_path", "value_name")
-    ) or bool(_SECRET_KEY.fullmatch(str(mapping.get("display_name", ""))))
+    ) or bool(_SECRET_KEY.fullmatch(str(mapping.get("display_name", "")))):
+        return True
+    identity = str(mapping.get("identity", ""))
+    registry_context = (
+        str(mapping.get("cse", "")).lower() in {"registry", "windows registry"}
+        or "\\" in identity
+        or "reg_value_name" in mapping
+        or ("key" in mapping and "value_name" in mapping)
+    )
+    if registry_context and any(
+        _credential_name(name)
+        for name in (
+            identity.rsplit(":", 1)[-1],
+            mapping.get("display_name", ""),
+            mapping.get("reg_value_name", ""),
+            mapping.get("value_name", ""),
+        )
+    ):
+        return True
+    return bool(_registry_payload(mapping))
+
+
+def safe_text(value: str, *, secrets: Iterable[str] = ()) -> str:
+    """Mask credentials in already-rendered text without destroying its markup.
+
+    Structured projections omit raw fragments before rendering. CLI reports
+    have already rendered their HTML/Markdown and must retain that structure.
+    """
+    values = set(secrets) | set(secret_values(value))
+    # Older report generators escape at their own render boundary. Include
+    # those known renderings so output files and stdout cannot reveal an
+    # entity-encoded copy of a credential. Structured views mask before render.
+    variants: set[str] = set()
+    for secret in values:
+        variants.update(
+            {
+                secret,
+                html.escape(secret),
+                html.escape(secret, quote=False),
+                secret.replace("`", "&#96;"),
+                html.escape(secret.replace("|", "\\|").replace("\n", " "), quote=False),
+            }
+        )
+    values = variants
+    for secret in sorted((s for s in values if s and s != REDACTED), key=lambda s: (-len(s), s)):
+        value = value.replace(secret, REDACTED)
+    return _ASSIGNMENT.sub(lambda m: m[1] + "=" + REDACTED, value)
 
 
 def safe_data(value: object, *, include_audit: bool = True, secrets: Iterable[str] = ()) -> Any:
@@ -152,9 +250,7 @@ def safe_data(value: object, *, include_audit: bool = True, secrets: Iterable[st
                 return obj
             if _RAW_FRAGMENT.search(obj):
                 return REDACTED
-            for secret in ordered_secrets:
-                obj = obj.replace(secret, REDACTED)
-            return _ASSIGNMENT.sub(lambda m: m[1] + "=" + REDACTED, obj)
+            return safe_text(obj, secrets=ordered_secrets)
         return serialize_result(obj)
 
     return project(value)

@@ -6,6 +6,7 @@ import argparse
 import sqlite3
 
 from gpo_lens.cli._helpers import _print_table, _render_json
+from gpo_lens.cli._helpers import _safe_print as print
 from gpo_lens.trend import changes_only, compute_trend
 
 

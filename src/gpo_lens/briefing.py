@@ -202,6 +202,9 @@ def build_briefing(
             "a clean delta."
         )
 
+    if current_run is not None and current_run[1] == "completed" and current_run[2]:
+        problems.append(current_run[2])
+
     gpos_added = gpos_removed = gpos_changed = 0
     findings_new = findings_resolved = findings_regressed = 0
 
@@ -231,17 +234,20 @@ def build_briefing(
                 "can be computed against it."
             )
 
-    active_findings = _scalar(
-        conn,
-        "SELECT COUNT(*) FROM finding WHERE resolved_run_id IS NULL "
-        "AND resolved_in_snapshot IS NULL AND first_seen_run_id IS NOT NULL",
-    )
-    critical_findings = _scalar(
-        conn,
-        "SELECT COUNT(*) FROM finding WHERE resolved_run_id IS NULL "
-        "AND resolved_in_snapshot IS NULL AND first_seen_run_id IS NOT NULL "
-        "AND severity = 'critical'",
-    )
+    # Scope presence and severity to the selected evaluation, including runs
+    # preserved by later resolution/regression. Current occurrence severity is
+    # mutable; the observation is the historical evidence.
+    selected_run_id = current_run[0] if current_run else 0
+    historical_counts = conn.execute(
+        "SELECT COUNT(*), COALESCE(SUM(o.severity = 'critical'), 0) "
+        "FROM finding f JOIN finding_observation o ON o.occurrence_id = f.id "
+        "AND o.run_id = (SELECT MAX(o2.run_id) FROM finding_observation o2 "
+        "WHERE o2.occurrence_id = f.id AND o2.run_id <= ?) "
+        "WHERE f.first_seen_run_id <= ? "
+        "AND (f.resolved_run_id IS NULL OR f.resolved_run_id > ?)",
+        (selected_run_id, selected_run_id, selected_run_id),
+    ).fetchone()
+    active_findings, critical_findings = historical_counts
     gpo_count = _scalar(conn, "SELECT COUNT(*) FROM gpo WHERE snapshot_id = ?", (snapshot_id,))
 
     register = accepted_risk_register(conn, as_of=now)

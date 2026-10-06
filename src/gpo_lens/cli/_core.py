@@ -20,7 +20,8 @@ from gpo_lens.cli._diff import (
 from gpo_lens.cli._estate import cmd_ingest, cmd_summary
 from gpo_lens.cli._events import cmd_events, cmd_events_export
 from gpo_lens.cli._export import EXPORT_VIEWS, cmd_export
-from gpo_lens.cli._helpers import DEFAULT_DB, _set_json_kind
+from gpo_lens.cli._helpers import DEFAULT_DB, _begin_output, _end_output, _set_json_kind
+from gpo_lens.cli._helpers import _safe_print as print
 from gpo_lens.cli._hygiene import (
     cmd_blocked,
     cmd_broken_refs,
@@ -707,7 +708,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     _set_json_kind(getattr(args, "command", None))
     args.json = bool(args.json) or bool(getattr(args, "_sub_json", False))
+    output_token = None
     try:
+        output_token = _begin_output(args)
         return args.func(args) or 0
     except SystemExit:
         raise
@@ -717,6 +720,9 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if output_token is not None:
+            _end_output(output_token)
 
 
 if __name__ == "__main__":

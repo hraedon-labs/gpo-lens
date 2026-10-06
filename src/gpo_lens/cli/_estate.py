@@ -7,6 +7,7 @@ import sys
 
 from gpo_lens import ingest, queries, snapshot_diff, store
 from gpo_lens.cli._helpers import _get_admx, _get_estate, _render_json
+from gpo_lens.cli._helpers import _safe_print as print
 
 
 def cmd_summary(args: argparse.Namespace) -> None:

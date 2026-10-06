@@ -9,7 +9,8 @@ import sys
 from pathlib import Path
 
 from gpo_lens import snapshot_diff, store
-from gpo_lens.cli._helpers import _get_admx, _get_estate
+from gpo_lens.cli._helpers import _add_secret_source, _get_admx, _get_estate, _safe_document
+from gpo_lens.cli._helpers import _safe_print as print
 
 
 def cmd_report(args: argparse.Namespace) -> int:
@@ -54,6 +55,7 @@ def cmd_report(args: argparse.Namespace) -> int:
             for entry in data
         ]
 
+        _add_secret_source(baseline_settings)
         admx = _get_admx(args)
         baseline = baseline_diff(estate, baseline_settings, admx)
     if args.since is not None:
@@ -72,27 +74,22 @@ def cmd_report(args: argparse.Namespace) -> int:
         finally:
             conn.close()
 
-    from gpo_lens.report import generate_report, write_report
+    from gpo_lens.report import generate_report
 
     fmt = args.format
     output = getattr(args, "output", None)
-    if output:
-        write_report(
+    text = _safe_document(
+        generate_report(
             estate,
-            output,
             baseline=baseline,
             changelog_entries=changelog_entries,
             format=fmt,
             max_settings=max_settings,
         )
+    )
+    if output:
+        Path(output).write_text(text, encoding="utf-8")
         print(f"Report written to {output}")
     else:
-        text = generate_report(
-            estate,
-            baseline=baseline,
-            changelog_entries=changelog_entries,
-            format=fmt,
-            max_settings=max_settings,
-        )
         print(text)
     return 0

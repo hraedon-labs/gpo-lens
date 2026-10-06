@@ -91,3 +91,16 @@ Measured on Python 3.14.8, 256 GPOs / 51,200 settings, seven repetitions:
 
 Both return identical ID sets. This measures only GPO-link resolution, not total
 request latency, and deliberately has no flaky wall-clock threshold in CI.
+
+## Mixed API reopen upgrade regression (F-01)
+
+`v1.2.0-with-reopen.sqlite3` starts as a copy of `v1.2.0.sqlite3`.
+`scripts/build_v120_reopen_fixture.py` archives the `v1.2.0` tag into a temporary
+source directory and runs that release's public `triage_finding` (legacy risk
+acceptance) and `append_triage_event` (newer reopen) on the same occurrence.
+The fixture contains only the original synthetic lab estate. Existing released
+rows and IDs remain intact; operational timestamps come from the released API.
+The upgrade regression verifies the latest withdrawal wins, the actionable
+inbox and risk register agree, reversed fold input gives the same answer, and
+reopening the upgraded DB is idempotent. It does not require git tags at test
+time: the fixture is prepared by released code, never today's schema builder.

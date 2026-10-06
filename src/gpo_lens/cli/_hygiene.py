@@ -7,6 +7,7 @@ import sys
 
 from gpo_lens import queries
 from gpo_lens.cli._helpers import _get_estate, _print_table, _render_json
+from gpo_lens.cli._helpers import _safe_print as print
 from gpo_lens.detection import local_group_mods, mask_cpassword, scheduled_tasks
 
 

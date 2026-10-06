@@ -6,7 +6,8 @@ import argparse
 import sqlite3
 import sys
 
-from gpo_lens.cli._helpers import _print_table, _render_json
+from gpo_lens.cli._helpers import _print_table, _project_output, _render_json
+from gpo_lens.cli._helpers import _safe_print as print
 from gpo_lens.events import query_events
 from gpo_lens.sinks import HecSink, emit_events
 
@@ -54,7 +55,7 @@ def cmd_events_export(args: argparse.Namespace) -> int:
 
     ndjson_path = getattr(args, "ndjson", None)
     results = emit_events(
-        events,
+        _project_output(events),  # type: ignore[arg-type]
         ndjson_path=ndjson_path,
         hec_sink=hec_sink,
     )

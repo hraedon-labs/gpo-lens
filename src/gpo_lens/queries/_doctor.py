@@ -248,6 +248,11 @@ def estate_doctor(
                 gpo_name="",
                 summary=f"Enforced link at {som.name} (order {link.order})",
                 detail=f"Target: {link.target}",
+                dimensions=(
+                    ("som_path", som.path),
+                    ("order", str(link.order)),
+                    ("target", link.target),
+                ),
             )
         )
 
