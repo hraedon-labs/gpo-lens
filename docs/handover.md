@@ -179,7 +179,9 @@ Get-Content C:\GpoExport\collection.log -Tail 20
 ```
 
 The task must finish with `LastTaskResult = 0` (`0x0`); confirm a new ZIP and
-`Collection succeeded` log line after that run. Check **Tools > Ingest >
+`Collection succeeded` log line after that run. A `0x0` result can still be a partial
+collection: check the log's `Failed` list and the `coverage_gap` findings after
+ingest. ZIPs delivered with `-CopyTo` are never pruned. Check **Tools > Ingest >
 Snapshots** to verify the import happened too. A hard timeout can leave a
 partial export folder or `.partial` copy; investigate before removing it.
 Routine failures preserve existing exports and do not prune them. Check monthly,

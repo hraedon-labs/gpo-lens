@@ -95,3 +95,16 @@ the locked web/build closure, identifier gate, Pester 5.7.1, and Docker build
 plus `deploy/container/smoke.py`. Also run the opt-in full-scale benchmark.
 Preserve exact commands, exit codes and output in the final session transcript;
 do not claim a gate passed from a partial or earlier run.
+
+## Live lab validation: scheduled collection (2026-10-06)
+
+On a domain-joined Windows Server 2025 lab VM (RSAT GroupPolicy present), from an elevated session:
+`Register-GpoLensCollection.ps1 -ServiceAccount <lab domain>\<collector account> -Credential … -OutputRoot … -CopyTo … -Retention 2 -TaskName …`.
+
+- The registered task had principal `Password` / `Limited`, `ExecutionTimeLimit` PT2H, `MultipleInstances` IgnoreNew, `StartWhenAvailable`, a daily 02:00 trigger, and quoted absolute paths in the action. No credential appeared in the action arguments or the log.
+- Three `Start-ScheduledTask` runs each ended `0x0` in 66–88 s. A ZIP of about 18 MB was delivered to the drop folder every time.
+- Retention kept exactly two folder+ZIP pairs in the output root. The drop folder kept all three ZIPs, because delivered ZIPs are not pruned (now documented).
+- The collector account was denied SYSVOL read on three security-filtered GPOs. The run still reported success. The log's `Failed` list and `collection-errors.json` recorded the three, and after `gpo-lens ingest <zip>` (the CLI ZIP path) they appeared as three `coverage_gap` findings. These partial-success semantics are now documented in the IIS guide and the handover.
+- `-Unregister -WhatIf` left the task in place. `-Unregister` removed it and kept the exports and logs.
+
+Not validated live: the gMSA mode (the lab's KDS clock-skew defect blocks new gMSAs), UNC delivery, `-InventoryPath`, and hard-timeout behaviour.

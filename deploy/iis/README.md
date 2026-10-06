@@ -164,6 +164,17 @@ uv run gpo-lens --db C:\inetpub\gpo-lens\data\gpo-lens.sqlite3 ingest C:\inetpub
 Use your site's actual database path. No inbox watcher, automatic ingest,
 alert transport or privileged recurring task is installed by this script.
 
+**Partial collections still succeed.** If the account cannot read some GPOs
+(for example SYSVOL folders of security-filtered policies that deny it), the
+collector records them in `collection-errors.json`, the log's export summary
+lists them under `Failed`, and the task still finishes `0x0` with
+`Collection succeeded`. After ingest they appear as `coverage_gap` findings
+(`gpo-lens doctor`, **Findings**). Check for those, not only the task result.
+Use the privileged inventory overlay below or grant read access to close them.
+
+**The drop folder is not pruned.** Retention applies only to the output root;
+ZIPs delivered with `-CopyTo` accumulate until the ingest side removes them.
+
 ### Authoritative inventory (manual, less frequent)
 
 A routine least-privilege inventory sees only what that account can enumerate.

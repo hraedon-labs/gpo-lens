@@ -95,6 +95,8 @@ Describe 'Collection scheduling' {
 
 Describe 'Collection runner' {
     BeforeAll {
+        # Windows PowerShell 5.1 does not preload System.IO.Compression.FileSystem.
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
         . "$PSScriptRoot/../../scripts/Run-GpoLensCollection.ps1"
     }
     BeforeEach {
@@ -107,6 +109,7 @@ $export = Join-Path $OutputRoot 'lab.example.com-20261006-120000'
 New-Item -ItemType Directory -Path $export | Out-Null
 '<GPOs/>' | Set-Content (Join-Path $export 'AllGPOs.xml')
 '[]' | Set-Content (Join-Path $export 'gpo-inventory.json')
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::CreateFromDirectory($export, "$export.zip")
 Write-Output 'synthetic export complete'
 '@ | Set-Content $script:Collector
@@ -168,6 +171,8 @@ Write-Output 'synthetic export complete'
 
 Describe 'Collection inventory and retention boundaries' {
     BeforeAll {
+        # Windows PowerShell 5.1 does not preload System.IO.Compression.FileSystem.
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
         . "$PSScriptRoot/../../scripts/Run-GpoLensCollection.ps1"
         $script:RealGetChildItem = Get-Command Get-ChildItem -CommandType Cmdlet
         $script:RealGetItem = Get-Command Get-Item -CommandType Cmdlet
@@ -182,6 +187,7 @@ $export = Join-Path $OutputRoot 'lab.example.com-20261006-120000'
 New-Item -ItemType Directory -Path $export | Out-Null
 '<GPOs/>' | Set-Content (Join-Path $export 'AllGPOs.xml')
 '[]' | Set-Content (Join-Path $export 'gpo-inventory.json')
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::CreateFromDirectory($export, "$export.zip")
 '@ | Set-Content $script:Collector
     }
