@@ -243,7 +243,10 @@ def test_transfer_uses_collector_zip_and_changelog_covers_shipped_fixes() -> Non
     assert "folder" in transfer and "shorter" in transfer
     assert "Windows PowerShell 5.1" in transfer
     assert "-NoZip" in transfer
-    changelog = (ROOT / "CHANGELOG.md").read_text().split("## v", 1)[0]
+    # Shipped deployment fixes belong to the released v1.3.0 notes, even when
+    # an Unreleased section is opened for the next feature streams.
+    changelog = (ROOT / "CHANGELOG.md").read_text().split("## v1.3.0", 1)[1]
+    changelog = changelog.split("\n## ", 1)[0]
     for term in ("double-conversion", "snapshot-scoped", "batched persistence"):
         assert term in changelog
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Advanced Audit Configuration and Public Key parsers (F1).** Audit
+  subcategories use stable GUID identities and named 0–3 values; copied
+  `audit.csv` evidence is reconciled with reports, with disagreements flagged.
+  EFS, root certificate trust, autoenrollment and certificate entries become
+  readable settings in existing search, ledgers, exports and comparisons.
+  A Microsoft-cited authoring caveat flags audit subcategories without the
+  force-subcategory option in the same GPO. Legacy Internet Explorer Maintenance
+  is explicitly classified as deprecated, with an informational note. Existing
+  databases remain compatible; no schema migration or dependency is added.
+
 ## v1.3.0 — 2026-10-06
 
 Draft **v1.3.0** — release date TBD by coordinator. This section remains

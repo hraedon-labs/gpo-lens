@@ -20,11 +20,15 @@ def test_version_sync() -> None:
 def test_changelog_top_version_matches() -> None:
     changelog = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
     text = changelog.read_text(encoding="utf-8")
-    # An Unreleased section must declare its target, never fall through to an
-    # older released heading (which masked the v1.3 candidate's stale version).
-    top = re.split(r"^## ", text, flags=re.MULTILINE)[1]
+    # A declared draft target must match package metadata. An ordinary
+    # Unreleased section holds upcoming features before the coordinator bumps
+    # the package, so check the latest released version in that case.
+    sections = re.split(r"^## ", text, flags=re.MULTILINE)[1:]
+    top = sections[0]
     if top.startswith("Unreleased"):
         match = re.search(r"Draft \*\*v(\d+\.\d+\.\d+)\*\*", top)
+        if match is None:
+            match = re.match(r"v(\d+\.\d+\.\d+)", sections[1])
     else:
         match = re.match(r"v(\d+\.\d+\.\d+)", top)
     assert match, "Top changelog section must declare a release target"

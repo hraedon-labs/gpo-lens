@@ -1,0 +1,15 @@
+[
+  ["EFSSettings:AllowEFS", "Allow Encrypting File System (EFS)", "true"],
+  ["EFSSettings:Options", "EFS options", "2"],
+  ["EFSSettings:CacheTimeout", "EFS cache timeout", "3600"],
+  ["EFSSettings:KeyLen", "EFS key length", "2048"],
+  ["RootCertificateSettings:AllowNewCAs", "Allow new root certificate authorities", "false"],
+  ["RootCertificateSettings:TrustThirdPartyCAs", "Trust third-party root certificate authorities", "true"],
+  ["RootCertificateSettings:RequireUPNNamingConstraints", "Require UPN naming constraints", "true"],
+  ["AutoEnrollmentSettings:Enabled", "Certificate autoenrollment: Enabled", "true"],
+  ["AutoEnrollmentSettings:RenewExpiredCertificates", "Certificate autoenrollment: Renew expired certificates", "true"],
+  ["AutoEnrollmentSettings:UpdatePendingCertificates", "Certificate autoenrollment: Update pending certificates", "false"],
+  ["CertificateTrustSettings:TrustModel", "Certificate trust: Trust model", "2"],
+  ["CertificateTrustSettings:AllowUserTrust", "Certificate trust: Allow user trust", "false"],
+  ["TrustedRootCertificates:Certificate:aabbccdd", "TrustedRootCertificates: Lab Root CA", "IssuedBy: Lab Root CA; IssuedTo: Lab Root CA; Thumbprint: AA BB CC DD"]
+]

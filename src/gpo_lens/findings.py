@@ -1747,6 +1747,10 @@ def _doctor_finding_to_candidate(
             "ilt_gpo",
             "stale_gpo",
             "admx_gap",
+            "audit_source_disagreement",
+            "audit_parse_warning",
+            "pki_parse_warning",
+            "legacy_extension",
         }
     )
     probable_categories = frozenset(
