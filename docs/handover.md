@@ -231,6 +231,11 @@ produces deterministic findings or exports.
 
 ## 6. Upgrading
 
+v1.4 migrates the database to schema 10. A pre-upgrade backup of the database
+and separate `audit.log` is required before upgrading. v1.3.1 and earlier cannot open
+a migrated database. To roll back, restore the pre-upgrade backup of the database
+and `audit.log` while stopped, before starting the previous release.
+
 **Target v1.4.0 once published. Back up first.** The upgrade suite covers releases since
 v0.5.0 with actual databases created by v0.5.0, v0.7.0, v0.7.1, v1.0.0,
 v1.1.0, v1.2.0 and v1.3.1 (including the latest released schema). This is the tested upgrade

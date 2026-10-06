@@ -95,7 +95,7 @@ Draft **v1.4.0** — release date to be assigned by the coordinator.
   the uncovered-setting list changes.
 - Evaluation pipeline digests include detector versions; re-observation updates
   each occurrence's evaluating version while retaining its fingerprint and
-  triage. No schema migration is needed.
+  triage.
 
 - Trend numeric aggregates and presentation headers survive redaction (WI-101);
   numeric password strings, SYSVOL-only credentials and copied secrets stay masked.
@@ -125,10 +125,14 @@ Draft **v1.4.0** — release date to be assigned by the coordinator.
 
 ### Upgrade notes
 
-- Back up the database and separate `audit.log` before upgrading. Released-DB
+- A pre-upgrade backup of the database and separate `audit.log` is required
+  before upgrading. Released-DB
   preservation and WAL backup/restore tests cover v0.5.0–v1.2.0 schema generations
   and a fixture produced through v1.3.1's public CLI/web/triage APIs.
-- No new schema migration or runtime dependency is required. Re-ingest copied
+- v1.4 migrates the database to schema 10. v1.3.1 and earlier cannot open a
+  migrated database. To roll back, restore the pre-upgrade backup of the database
+  and `audit.log` before starting the previous release.
+- No new runtime dependency is required. Re-ingest copied
   inputs to obtain audit/PKI identities; historical snapshots keep their original
   parser output.
 - On a completed evaluation with meaningful coverage, superseded UNC and

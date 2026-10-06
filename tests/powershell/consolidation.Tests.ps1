@@ -23,6 +23,7 @@ Describe "Installer estate guidance" {
 
 Describe "Collector ZIP completeness" {
     BeforeAll {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
         # Load the real archive helper without running the AD collection body.
         $ast = [System.Management.Automation.Language.Parser]::ParseFile(
             "$PSScriptRoot/../../scripts/Export-GpoEstate.ps1", [ref]$null, [ref]$null)

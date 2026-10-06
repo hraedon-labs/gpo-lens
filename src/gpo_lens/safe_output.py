@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import dataclasses
 import html
+import json
 import re
 from collections.abc import Iterable, Mapping
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import quote, quote_plus, unquote
 
 from gpo_lens.display import serialize_result
 
@@ -278,8 +279,25 @@ def _secret_variants(secrets: Iterable[str]) -> tuple[tuple[str, bool], ...]:
     variants: dict[str, bool] = {}
     for secret in secrets:
         substring_mask = len(secret) >= 6 and not secret.isnumeric()
+        percent = quote(secret, safe="")
+        plus = quote_plus(secret, safe="")
+        utf16 = secret.encode("utf-16-be", errors="surrogatepass")
+        unicode_lower = "".join(
+            rf"\u{int.from_bytes(utf16[i : i + 2], 'big'):04x}" for i in range(0, len(utf16), 2)
+        )
+        unicode_upper = "".join(
+            rf"\u{int.from_bytes(utf16[i : i + 2], 'big'):04X}" for i in range(0, len(utf16), 2)
+        )
         for variant in {
             secret,
+            percent,
+            re.sub(r"%[0-9A-F]{2}", lambda m: m[0].lower(), percent),
+            plus,
+            re.sub(r"%[0-9A-F]{2}", lambda m: m[0].lower(), plus),
+            json.dumps(secret, ensure_ascii=True)[1:-1],
+            json.dumps(secret, ensure_ascii=False)[1:-1],
+            unicode_lower,
+            unicode_upper,
             html.escape(secret),
             html.escape(secret, quote=False),
             secret.replace("`", "&#96;"),

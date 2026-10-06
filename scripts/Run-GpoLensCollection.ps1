@@ -23,6 +23,8 @@ param(
     [int]$LogFiles = 5
 )
 
+. (Join-Path $PSScriptRoot 'GpoLensCollectionMarker.ps1')
+
 function Write-GpoLensCollectionLog {
     param([string]$LogPath, [string]$Message, [int]$LogMaxBytes, [int]$LogFiles)
     $encoding = [Text.UTF8Encoding]::new($false)
@@ -89,10 +91,8 @@ function Assert-GpoLensCollectionOwner {
     if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
         throw 'Collection refuses an output root without an owner marker. Re-register the task.'
     }
-    if ((Get-Item -LiteralPath $marker -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
-        throw 'Collection refuses a linked owner marker.'
-    }
-    $owner = [IO.File]::ReadAllText($marker).TrimEnd([char[]]"`r`n")
+    $bytes = Read-GpoLensOwnerMarkerBytes -Marker $marker
+    $owner = [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF).TrimEnd([char[]]"`r`n")
     if (-not [string]::Equals($owner, $TaskName, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Collection refuses output root owner '$owner' for task '$TaskName'."
     }

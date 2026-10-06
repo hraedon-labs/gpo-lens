@@ -461,7 +461,7 @@ def evaluate_danger_rules(
     for rule in active_rules:
         for g in estate.gpos:
             for s in g.settings:
-                if s.source_state == "blocked":
+                if s.source_state == "blocked" or s.from_disabled_side:
                     continue
                 if not is_registry_cse(s.cse):
                     continue
@@ -489,7 +489,7 @@ def evaluate_danger_rules(
         found_any = False
         for g in estate.gpos:
             for s in g.settings:
-                if s.source_state == "blocked":
+                if s.source_state == "blocked" or s.from_disabled_side:
                     continue
                 if not is_registry_cse(s.cse):
                     continue

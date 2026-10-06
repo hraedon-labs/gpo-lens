@@ -57,6 +57,8 @@ param(
     [int]$LogFiles = 5
 )
 
+. (Join-Path $PSScriptRoot 'GpoLensCollectionMarker.ps1')
+
 function ConvertTo-GpoLensTaskArgument {
     param([string]$Value)
     if ($Value -match '["\r\n]') { throw 'Task paths cannot contain quotes or newlines.' }
@@ -85,23 +87,20 @@ function Set-GpoLensCollectionOwner {
         $marker = Join-Path $OutputRoot '.gpo-lens-collection-owner'
         $previousBytes = $null
         if (Test-Path -LiteralPath $marker) {
-            if ((Get-Item -LiteralPath $marker -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
-                throw 'Registration refuses a linked owner marker.'
-            }
-            $owner = [IO.File]::ReadAllText($marker).TrimEnd([char[]]"`r`n")
-            $previousBytes = [IO.File]::ReadAllBytes($marker)
+            $previousBytes = Read-GpoLensOwnerMarkerBytes -Marker $marker
+            $owner = [Text.Encoding]::UTF8.GetString($previousBytes).TrimStart([char]0xFEFF).TrimEnd([char[]]"`r`n")
             if (-not [string]::Equals($owner, $TaskName, [StringComparison]::OrdinalIgnoreCase)) {
                 if (-not $Force) { throw "Output root owner is '$owner', not '$TaskName'. Use a separate root or explicit -Force." }
                 Write-Warning "Changing output root owner from '$owner' to '$TaskName'; the previous task will refuse to run. Existing exports become subject to this task's retention."
             }
         }
         try {
-            [IO.File]::WriteAllText($marker, $TaskName, [Text.UTF8Encoding]::new($false))
+            Write-GpoLensOwnerMarkerBytes -OutputRoot $OutputRoot -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($TaskName))
             & $RegisterTask
         } catch {
             # Keep the prior task runnable if Scheduler rejects the replacement.
-            if ($null -ne $previousBytes) { [IO.File]::WriteAllBytes($marker, $previousBytes) }
-            elseif (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
+            if ($null -ne $previousBytes) { Write-GpoLensOwnerMarkerBytes -OutputRoot $OutputRoot -Bytes $previousBytes }
+            else { [IO.File]::Delete($marker) }
             throw
         }
     } finally { $lock.Dispose() }
