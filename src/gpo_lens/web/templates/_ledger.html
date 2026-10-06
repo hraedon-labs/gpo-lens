@@ -10,8 +10,13 @@
            placeholder="Filter by name, path, or value…"
            aria-label="Filter settings"
            autocomplete="off"
+           value="{{ f_ledger_q|default('') }}"
            data-ledger-filter>
     <span class="gp-ledger-count" data-ledger-count aria-live="polite">{{ ledger|length }} settings</span>
+  </div>
+  <div role="group" aria-label="Export settings ledger">
+    <a class="gp-btn" data-ledger-export href="{{ request.url.include_query_params(format='md', view='ledger') }}">Ledger Markdown</a>
+    <a class="gp-btn" data-ledger-export href="{{ request.url.include_query_params(format='csv', view='ledger') }}">Ledger CSV</a>
   </div>
   <div class="gp-table-wrap">
     <table class="gp-table gp-ledger-table">
@@ -47,7 +52,7 @@
               <div class="gp-ledger-evidence">
                 <table class="gp-kv">
                   <tbody>
-                    <tr><th>Identity</th><td class="mono">{{ row.identity }}</td></tr>
+                    <tr><th>Identity</th><td class="mono"><a href="{{ url_for('setting_detail') }}?identity={{ row.identity|urlencode }}&amp;cse={{ row.cse|urlencode }}&amp;side={{ row.side|urlencode }}{% if request.query_params.get('snapshot') %}&amp;snapshot={{ request.query_params.get('snapshot')|urlencode }}{% endif %}">{{ row.identity }}</a></td></tr>
                     {% if row.reg_key %}
                     <tr><th>Registry key</th><td class="mono">{{ row.reg_key }}</td></tr>
                     {% endif %}

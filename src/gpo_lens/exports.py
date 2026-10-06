@@ -275,6 +275,25 @@ def compare_ledgers(a: Iterable[LedgerRow], b: Iterable[LedgerRow]) -> list[dict
     return result
 
 
+def occurrence_run_ids(conn: sqlite3.Connection, occurrence_ids: Iterable[int]) -> list[int]:
+    """Workflow rows may survive newer snapshots; retain their source evaluations."""
+    runs: set[int] = set()
+    for occurrence_id in sorted(set(occurrence_ids)):
+        row = conn.execute(
+            "SELECT first_seen_run_id,last_seen_run_id,resolved_run_id FROM finding WHERE id=?",
+            (occurrence_id,),
+        ).fetchone()
+        if row is not None:
+            runs.update(run for run in row if run is not None)
+        runs.update(
+            row[0]
+            for row in conn.execute(
+                "SELECT run_id FROM finding_observation WHERE occurrence_id=?", (occurrence_id,)
+            )
+        )
+    return sorted(runs)
+
+
 def snapshot_secrets(conn: sqlite3.Connection, snapshot_ids: Iterable[int]) -> tuple[str, ...]:
     """Read credential context a setting at a time; never include raw fragments."""
     values: set[str] = set()

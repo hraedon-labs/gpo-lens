@@ -14,17 +14,20 @@ import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from fastapi import Depends, FastAPI, File, Request, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
 import gpo_lens.web.app as _app_module
 from gpo_lens import ingest as _ingest
 from gpo_lens import queries
 from gpo_lens import store as _store
+from gpo_lens.exports import ExportSection, export_context
+from gpo_lens.safe_output import safe_data
 from gpo_lens.web._helpers import get_ro_conn, stream_upload_to_file
 from gpo_lens.web.app import _audit
 from gpo_lens.web.auth import Permission, Principal, requires
+from gpo_lens.web.routes.export import view_export
 
 _logger = logging.getLogger(__name__)
 
@@ -51,8 +54,9 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
     async def golden_diff_post(
         request: Request,
         file: UploadFile = File(...),
+        format: str = Form(""),
         _principal: Principal = Depends(requires(Permission.INGEST)),
-    ) -> HTMLResponse:
+    ) -> Response:
         from gpo_lens.model import Estate as _Estate
 
         try:
@@ -76,7 +80,17 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                 golden_estate = _Estate(domain="golden", gpos=golden_gpos)
                 conn = get_ro_conn(app.state.db_path)
                 try:
+                    conn.execute("BEGIN")
                     estate = _store.load_estate(conn)
+                    snapshot_id = conn.execute(
+                        "SELECT id FROM snapshot ORDER BY id DESC LIMIT 1"
+                    ).fetchone()[0]
+                    context = export_context(
+                        conn,
+                        snapshot_ids=[snapshot_id],
+                        admx=app.state.admx,
+                        comparator=golden_estate,
+                    )
                 finally:
                     conn.close()
                 diff = queries.golden_diff(estate, golden_estate, admx=app.state.admx)
@@ -85,9 +99,11 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                 summ = queries.golden_diff_summary(
                     diff, matched_gpo_count=len(live_names & golden_names)
                 )
-                return diff, summ
+                return diff, summ, golden_estate, snapshot_id, context
 
-            diff_entries, summary = await asyncio.to_thread(_compute_diff)
+            diff_entries, summary, comparator, snapshot_id, context = await asyncio.to_thread(
+                _compute_diff
+            )
             detail = (
                 f"{summary.gpos_matched} matched, {summary.gpos_added} added, "
                 f"{summary.gpos_removed} removed"
@@ -114,6 +130,23 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                     "error": "Invalid golden zip file.",
                 },
             )
+
+        if format:
+            return view_export(
+                request,
+                _principal,
+                "Golden diff",
+                (ExportSection("comparison", diff_entries),),
+                format=format,
+                snapshot_ids=[snapshot_id],
+                comparator=comparator,
+                context=context,
+                filters={
+                    "comparison": "golden",
+                    "evaluation": "ad hoc; no persisted comparison run",
+                },
+            )
+        diff_entries = safe_data(diff_entries, secrets=context.secrets)
 
         return templates.TemplateResponse(
             request,

@@ -19,6 +19,7 @@ from gpo_lens.cli._diff import (
 )
 from gpo_lens.cli._estate import cmd_ingest, cmd_summary
 from gpo_lens.cli._events import cmd_events, cmd_events_export
+from gpo_lens.cli._export import EXPORT_VIEWS, cmd_export
 from gpo_lens.cli._helpers import DEFAULT_DB, _set_json_kind
 from gpo_lens.cli._hygiene import (
     cmd_blocked,
@@ -621,6 +622,43 @@ _COMMANDS: list[CliCommand] = [
         ],
     ),
 ]
+
+
+_COMMANDS.append(
+    CliCommand(
+        name="export",
+        func=cmd_export,
+        help="Deterministic redacted Markdown/CSV from a stored view",
+        positional_args=[CliArg(name="view", choices=EXPORT_VIEWS)],
+        args=[
+            CliArg(name="--format", choices=["md", "csv"], default="md"),
+            CliArg(name="--gpo-id"),
+            CliArg(name="--compare", default=""),
+            CliArg(name="--snapshot", type=int),
+            CliArg(name="--snapshot-a", type=int),
+            CliArg(name="--snapshot-b", type=int),
+            CliArg(name="--occurrence-id", type=int),
+            CliArg(name="--identity"),
+            CliArg(name="--side", default=""),
+            CliArg(name="--cse", default=""),
+            CliArg(name="--q", default=""),
+            CliArg(name="--category", default=""),
+            CliArg(name="--severity", default=""),
+            CliArg(name="--gpo-name", default=""),
+            CliArg(name="--lifecycle", default="new_or_regressed"),
+            CliArg(name="--triage", default="open"),
+            CliArg(name="--page", type=int, default=1),
+            CliArg(name="--per-page", type=int, default=50),
+            CliArg(
+                name="--as-of", help="Explicit ISO timestamp for time-sensitive briefing/risk facts"
+            ),
+            CliArg(name="--admx-dir"),
+            CliArg(name="--comparator"),
+            CliArg(name="--file-a"),
+            CliArg(name="--file-b"),
+        ],
+    )
+)
 
 
 def main(argv: list[str] | None = None) -> int:

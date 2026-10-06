@@ -19,6 +19,12 @@
 {% endif %}
 
 <form id="baseline-form" action="{{ url_for('baseline_post') }}" method="post" enctype="multipart/form-data">
+  <label class="gp-label" for="export-format">Comparison output</label>
+  <select name="format" id="export-format" class="gp-select">
+    <option value="">View comparison</option>
+    <option value="md">Export Markdown</option>
+    <option value="csv">Export CSV</option>
+  </select>
   <div id="drop-zone" class="gp-drop">
     <div class="ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg></div>
     <div>Drop a baseline .zip here, or <strong>browse</strong></div>

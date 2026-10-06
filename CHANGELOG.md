@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Deterministic exports (Plan 025 WI-6)
+
+- Markdown/CSV downloads for dossiers and ledgers, filtered findings, occurrence
+  history, accepted risks, briefings, exact settings and snapshot/GPO/comparison
+  differences. Upload comparisons include an output selector; `gpo-lens export`
+  provides CLI equivalents without changing existing `--json` output.
+- Downloads carry snapshot/evaluation provenance, active filters and scope
+  caveats. Secret/raw-source redaction is shared with HTML, API and narration;
+  CSV formula cells are neutralized for spreadsheet use. Audit attribution is
+  restricted to triage-authorized callers. Output streams and omits volatile
+  generated-at timestamps; explicit as-of inputs support repeatable risk/briefing
+  classification.
+
 ### Handover page for a new operator
 
 - `docs/handover.md`: a start-here page for someone inheriting a running

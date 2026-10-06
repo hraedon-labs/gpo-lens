@@ -18,9 +18,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from gpo_lens.exports import ExportSection, export_context
+from gpo_lens.safe_output import safe_data
 from gpo_lens.web._helpers import (
     _MAX_SEARCH_LEN,
     base_qs,
@@ -29,6 +31,7 @@ from gpo_lens.web._helpers import (
     parse_pagination,
 )
 from gpo_lens.web.auth import Permission, Principal, requires
+from gpo_lens.web.routes.export import view_export
 
 if TYPE_CHECKING:
     from gpo_lens.model import Setting
@@ -48,11 +51,12 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
     @app.get("/search", response_class=HTMLResponse, name="search")
     def search_page(
         request: Request,
+        format: str = "",
         q: str = "",
         cse: str = "",
         side: str = "",
         _principal: Principal = Depends(requires(Permission.VIEW)),
-    ) -> HTMLResponse:
+    ) -> Response:
         from gpo_lens.queries import who_sets
         from gpo_lens.store import load_estate
 
@@ -61,12 +65,15 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
         cse_facets: list[tuple[str, int]] = []
         side_facets: list[tuple[str, int]] = []
         total_hits = 0
+        context = None
 
         if q:
             conn = get_ro_conn(app.state.db_path)
             try:
                 try:
+                    conn.execute("BEGIN")
                     estate = load_estate(conn)
+                    context = export_context(conn, admx=app.state.admx)
                     names = estate.gpo_names
                     settings = who_sets(estate, q)
                     total_hits = len(settings)
@@ -95,12 +102,30 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
         page_groups, pag = paginate(groups, page, per_page_int, per_page_raw)
         search_qs = base_qs(request, "page", "per_page")
 
+        if format:
+            return view_export(
+                request,
+                _principal,
+                "Settings search",
+                (ExportSection("settings", (s for g in page_groups for s in g.results)),),
+                format=format,
+                context=context,
+                snapshot_ids=[] if context is None else None,
+                filters={
+                    "q": q,
+                    "cse": cse,
+                    "side": side,
+                    "page": pag["page"] if pag else 1,
+                    "per_page": per_page_raw,
+                },
+            )
+
         return templates.TemplateResponse(
             request,
             "search.html",
             {
                 "request": request,
-                "groups": page_groups,
+                "groups": safe_data(page_groups),
                 "f_q": q,
                 "f_cse": cse,
                 "f_side": side,

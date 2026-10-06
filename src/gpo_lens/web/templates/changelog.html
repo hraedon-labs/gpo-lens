@@ -3,6 +3,7 @@
 {% block title %}gpo-lens — Changelog{% endblock %}
 
 {% block content %}
+{% include "_exports.html" %}
 <div class="gp-page-head">
   <div>
     <div class="gp-eyebrow">Snapshot comparison</div>
@@ -108,10 +109,22 @@
   </div>
   {% endfor %}
 </section>
-{% elif snap_a is not none and snap_b is not none %}
+{% elif snap_a is not none and snap_b is not none and not settings_changes %}
 <div class="gp-empty">
   <div class="title">No changes</div>
   <div class="sub">These two snapshots are identical for the tracked fields.</div>
 </div>
+{% endif %}
+{% if settings_changes %}
+<section class="gp-section">
+  <h2>Setting differences <span class="count">{{ settings_changes|length }}</span></h2>
+  <div class="gp-table-wrap"><table class="gp-table">
+    <thead><tr><th>GPO</th><th>Side</th><th>CSE</th><th>Identity</th><th>Change</th><th>Old</th><th>New</th></tr></thead>
+    <tbody>{% for sc in settings_changes %}<tr>
+      <td>{{ sc.gpo_name }}</td><td>{{ sc.side }}</td><td>{{ sc.cse }}</td><td class="mono">{{ sc.identity }}</td>
+      <td>{{ sc.change_type }}</td><td>{{ sc.old_value or '—' }}</td><td>{{ sc.new_value or '—' }}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+</section>
 {% endif %}
 {% endblock %}

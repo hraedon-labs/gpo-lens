@@ -21,9 +21,11 @@ from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from gpo_lens.exports import ExportSection, export_context, occurrence_run_ids
+from gpo_lens.safe_output import safe_data
 from gpo_lens.web._helpers import (
     _MAX_SEARCH_LEN,
     base_qs,
@@ -33,6 +35,7 @@ from gpo_lens.web._helpers import (
     parse_pagination,
 )
 from gpo_lens.web.auth import Permission, Principal, requires
+from gpo_lens.web.routes.export import view_export
 
 _VALID_TRIAGE = {"open", "acknowledged", "accepted_risk"}
 _VALID_SEVERITIES = {"critical", "high", "medium", "low", "info"}
@@ -73,13 +76,14 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
     @app.get("/findings", response_class=HTMLResponse, name="findings_inbox")
     def findings_inbox(
         request: Request,
+        format: str = "",
         severity: str = "",
         category: str = "",
         lifecycle: str = _DEFAULT_LIFECYCLE,
         triage: str = "open",
         q: str = "",
         principal: Principal = Depends(requires(Permission.VIEW)),
-    ) -> HTMLResponse:
+    ) -> Response:
         from gpo_lens.findings import (
             finding_inbox,
             finding_inbox_categories,
@@ -101,6 +105,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
 
         conn = get_ro_conn(app.state.db_path)
         try:
+            conn.execute("BEGIN")
             # One triage fold, shared by the count and the page query, so the
             # two can never disagree about which occurrences are open.
             status_map = load_triage_status_map(conn)
@@ -126,8 +131,60 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                 **filters,
             )
             resolvable_gpo_ids = _latest_snapshot_gpo_ids(conn)
+            context = export_context(
+                conn,
+                run_ids=occurrence_run_ids(conn, (v.occurrence_id for v in views)),
+                admx=app.state.admx,
+            )
         finally:
             conn.close()
+
+        if format:
+            return view_export(
+                request,
+                principal,
+                "Findings",
+                (
+                    ExportSection("findings", views),
+                    ExportSection(
+                        "evidence_refs",
+                        (
+                            {
+                                "occurrence_id": v.occurrence_id,
+                                "run_id": v.last_seen_run_id,
+                                "gpo_id": v.gpo_id,
+                                "source": "finding_observation",
+                                "redaction": "raw source [REDACTED]",
+                            }
+                            for v in views
+                        ),
+                    ),
+                    ExportSection(
+                        "triage_state",
+                        (
+                            {
+                                "occurrence_id": v.occurrence_id,
+                                "state": status_map.get(v.occurrence_id),
+                            }
+                            for v in views
+                        ),
+                    ),
+                ),
+                format=format,
+                run_ids=sorted({v.last_seen_run_id for v in views}),
+                context=context,
+                filters={
+                    "severity": severities,
+                    "category": category,
+                    "lifecycle": lifecycle_state,
+                    "triage": triage_status,
+                    "q": q,
+                    "page": page,
+                    "per_page": per_page_raw,
+                    "total": filtered_count,
+                    "window_limit": per_page_int if per_page_int > 0 else 10_000,
+                },
+            )
 
         all_count = sum(count for _, count in categories)
 
@@ -163,7 +220,9 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             "findings.html",
             {
                 "request": request,
-                "rows": rows,
+                "rows": safe_data(
+                    rows, include_audit=principal.has(Permission.TRIAGE), secrets=context.secrets
+                ),
                 "all_count": all_count,
                 "filtered_count": filtered_count,
                 "resolvable_gpo_ids": resolvable_gpo_ids,
@@ -187,8 +246,9 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
     def finding_occurrence(
         request: Request,
         occurrence_id: int,
+        format: str = "",
         principal: Principal = Depends(requires(Permission.VIEW)),
-    ) -> HTMLResponse:
+    ) -> Response:
         """Plan 025 WI-1: one occurrence's observations, provenance, and triage.
 
         Answers "why does this finding say what it says, and has that changed?"
@@ -203,12 +263,19 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
 
         conn = get_ro_conn(app.state.db_path)
         try:
+            conn.execute("BEGIN")
             try:
                 history = finding_history(conn, occurrence_id)
             except ValueError:
                 return HTMLResponse("Finding not found", status_code=404)
             observations = finding_observation_history(conn, occurrence_id)
             status = load_triage_status_map(conn).get(occurrence_id)
+            context = export_context(
+                conn,
+                snapshot_ids=sorted({o["snapshot_id"] for o in observations}),
+                run_ids=sorted({o["run_id"] for o in observations}),
+                admx=app.state.admx,
+            )
 
             # A regression's predecessor is the same finding_key in an earlier,
             # resolved interval. Show enough to justify the "regression" label.
@@ -233,6 +300,28 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                 gpo_names = {}
         finally:
             conn.close()
+
+        if format:
+            return view_export(
+                request,
+                principal,
+                "Occurrence history",
+                (
+                    ExportSection("occurrence", (history.occurrence,)),
+                    ExportSection("observations", observations),
+                    ExportSection(
+                        "triage_events",
+                        history.triage_events
+                        if principal.has(Permission.TRIAGE)
+                        else ({"audit": "[REDACTED]"},),
+                    ),
+                ),
+                format=format,
+                snapshot_ids=sorted({o["snapshot_id"] for o in observations}),
+                run_ids=sorted({o["run_id"] for o in observations}),
+                context=context,
+                filters={"occurrence_id": occurrence_id},
+            )
 
         # The occurrence row carries no GPO columns; take the subject from the
         # newest observation's evidence, which is where the detector recorded it.
@@ -266,8 +355,10 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             {
                 "request": request,
                 "occ": history.occurrence,
-                "observations": observations,
-                "triage_events": history.triage_events,
+                "observations": safe_data(observations, secrets=context.secrets),
+                "triage_events": safe_data(history.triage_events)
+                if principal.has(Permission.TRIAGE)
+                else [],
                 "triage_status": status,
                 "predecessor": predecessor,
                 "changes": changes,
