@@ -33,8 +33,13 @@ That single command:
    location the app pool can read.
 2. Creates `C:\ProgramData\gpo-lens` (data dir + logs) and a venv, and
    `pip install --require-hashes` installs the committed `requirements-web.lock.txt`
-   exported from `uv.lock`, then installs the checkout with `--no-deps`. uv is
-   not needed on the IIS server; the shared-Python design is unchanged.
+   exported from `uv.lock`. It also installs `requirements-build.lock.txt`
+   (Hatchling and its closure) with hashes, then installs the checkout with
+   `--no-deps --no-build-isolation`. No build backend is resolved separately.
+   uv is not needed on the IIS server; the shared-Python design is unchanged.
+   For an offline install, pre-download both lock files' wheels for the server's
+   Python/Windows platform and set `PIP_NO_INDEX=1` and `PIP_FIND_LINKS` to that
+   wheel directory before running the installer.
 3. Lays down `web.config` in `C:\inetpub\gpo-lens` (paths rewritten to your
    `-InstallDir`).
 4. Creates the `gpo-lens` app pool (No Managed Code, AlwaysRunning) and IIS site

@@ -17,6 +17,7 @@ dev = [
     "mypy>=2.1,<3",
     "httpx>=0.28",
     "types-defusedxml>=0.7",
+    "hatchling>=1.32.4",
 ]
 web = [
     "fastapi>=0.115",
@@ -75,3 +76,8 @@ ignore = [
 [tool.mypy]
 python_version = "3.12"
 strict = true
+
+[dependency-groups]
+iis-build = [
+    "hatchling>=1.32.4",
+]

@@ -9,10 +9,17 @@ from __future__ import annotations
 import ast
 import configparser
 import json
+import os
 import re
+import shutil
 import subprocess
+import sys
+import sysconfig
+import tomllib
 import zipfile
 from pathlib import Path
+
+import pytest
 
 from gpo_lens.ingest import load_estate
 from gpo_lens.web.app import _safe_extract
@@ -145,7 +152,125 @@ def test_iis_requirements_match_lock(tmp_path: Path) -> None:
     assert exported.read_bytes() == (ROOT / "deploy/iis/requirements-web.lock.txt").read_bytes()
     installer = (ROOT / "scripts/install-windows.ps1").read_text()
     assert "pip install --require-hashes -r $requirements" in installer
-    assert "pip install --upgrade --no-deps $pkg" in installer
+    assert "pip install --upgrade --no-deps --no-build-isolation $pkg" in installer
+
+
+def test_iis_build_backend_is_in_hash_pinned_closure(tmp_path: Path) -> None:
+    exported = tmp_path / "build.txt"
+    subprocess.run(
+        [
+            "uv",
+            "export",
+            "--locked",
+            "--only-group",
+            "iis-build",
+            "--no-header",
+            "--no-emit-project",
+            "-o",
+            str(exported),
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    assert exported.read_bytes() == (ROOT / "deploy/iis/requirements-build.lock.txt").read_bytes()
+    assert "hatchling==" in exported.read_text()
+    installer = (ROOT / "scripts/install-windows.ps1").read_text()
+    assert "pip install --require-hashes -r $buildRequirements" in installer
+    assert "pip install --upgrade --no-deps --no-build-isolation $pkg" in installer
+    assert tomllib.loads((ROOT / "pyproject.toml").read_text())["build-system"]["requires"] == [
+        "hatchling"
+    ]
+
+
+def test_iis_checkout_install_succeeds_with_no_index(tmp_path: Path) -> None:
+    """glv2/buildprobe*: execute the installer's project step offline.
+
+    The test environment supplies the locked backend via the dev extra. A
+    disposable venv receives it via PYTHONPATH, but build isolation ignores it and
+    try to download Hatchling. No network or wheel cache can rescue that error.
+    """
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in ("pyproject.toml", "README.md"):
+        shutil.copyfile(ROOT / name, source / name)
+    shutil.copytree(ROOT / "src", source / "src", ignore=shutil.ignore_patterns("__pycache__"))
+    venv = tmp_path / "venv"
+    subprocess.run([sys.executable, "-m", "venv", "--system-site-packages", str(venv)], check=True)
+    python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    installer = (ROOT / "scripts/install-windows.ps1").read_text()
+    command = next(
+        line for line in installer.splitlines() if line.endswith(" $pkg") and "pip install" in line
+    )
+    flags = command.split("pip install", 1)[1].split()[:-1]
+    result = subprocess.run(
+        [str(python), "-m", "pip", "install", *flags, str(source) + "[web]"],
+        env={
+            **os.environ,
+            "PIP_NO_INDEX": "1",
+            "PIP_NO_CACHE_DIR": "1",
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+            "PYTHONPATH": sysconfig.get_path("purelib"),
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Installing build dependencies" not in result.stdout
+    version = subprocess.check_output(
+        [
+            str(python),
+            "-c",
+            "import importlib.metadata; print(importlib.metadata.version('gpo-lens'))",
+        ],
+        text=True,
+    ).strip()
+    assert version == tomllib.loads((source / "pyproject.toml").read_text())["project"]["version"]
+
+
+def test_transfer_documents_partial_zip_fallback() -> None:
+    transfer = (ROOT / "deploy/README.md").read_text().split("## Moving collector exports")[1]
+    transfer = transfer.split("## Backup")[0]
+    for term in ("Windows PowerShell 5.1", "260", "partial ZIP", "shorter", "folder", "-NoZip"):
+        assert term in transfer
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell helper integration")
+def test_concrete_iis_ip_host_policy_accepts_bound_addresses() -> None:
+    """Reuse glv2's Get-WebBinding probe and feed its result into ASGI."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from gpo_lens.web.allowed_hosts import HostAllowListMiddleware
+
+    probe = """
+function Get-WebBinding { @(
+    [pscustomobject]@{protocol='https'; bindingInformation='192.0.2.10:8443:'},
+    [pscustomobject]@{protocol='https'; bindingInformation='[2001:db8::10]:9443:'}
+) }
+. './scripts/install-windows.ps1'
+Get-IisAllowedHosts -SiteName 'gpo-lens' -MachineFqdn 'lens.lab.example.com' -MachineName 'LENS'
+"""
+    policy = subprocess.check_output(
+        ["pwsh", "-NoProfile", "-Command", probe],
+        cwd=ROOT,
+        text=True,
+    ).strip()
+    app = FastAPI()
+    app.get("/")(lambda: {"ok": True})
+    app.add_middleware(HostAllowListMiddleware, allowed_hosts=policy)
+    with TestClient(app) as client:
+        for host in ("192.0.2.10:8443", "[2001:db8::10]:9443", "lens:8443"):
+            assert client.get("/", headers={"Host": host}).status_code == 200
+        assert client.get("/", headers={"Host": "192.0.2.11:8443"}).status_code == 400
+
+
+def test_installer_uses_the_tested_endpoint_transition() -> None:
+    installer = (ROOT / "scripts/install-windows.ps1").read_text()
+    body = installer.split("# 5. Create / update the IIS site.", 1)[1]
+    assert "Set-IisTlsEndpoint -SiteName $siteName" in body
+    assert "-CertThumbprint $effCert -Existing $existing" in body
+    assert "-Name bindings" not in body
 
 
 def test_transfer_uses_collector_zip_and_changelog_covers_shipped_fixes() -> None:

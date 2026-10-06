@@ -342,22 +342,27 @@ Describe "install-windows.ps1" {
         BeforeAll {
             function Clear-WebBinding { }
             function New-WebBinding { }
+            function Set-WebBinding { }
         }
 
-        It "applies the SNI binding when there is no existing config" {
+        It "sets the SNI bit on the fresh site's existing binding" {
             Mock Clear-WebBinding { }
             Mock New-WebBinding { }
-            Set-SniBinding -SiteName "gpo-lens" -Port "8443" -HostName "gpo-lens.local" -Sni $true -Existing $null
-            Should -Invoke Clear-WebBinding -Exactly 1
-            Should -Invoke New-WebBinding -Exactly 1
+            Mock Set-WebBinding { }
+            Set-SniBinding -SiteName "gpo-lens" -Port "8443" -HostName "gpo-lens.local" -Sni $true -Existing $null -BindingAlreadyCreated $true
+            Should -Invoke Clear-WebBinding -Exactly 0
+            Should -Invoke New-WebBinding -Exactly 0
+            Should -Invoke Set-WebBinding -Exactly 1
         }
 
         It "re-applies the SNI binding when the current binding is not SNI" {
             Mock Clear-WebBinding { }
             Mock New-WebBinding { }
+            Mock Set-WebBinding { }
             Set-SniBinding -SiteName "gpo-lens" -Port "8443" -HostName "gpo-lens.local" -Sni $true -Existing @{ Port = "8443"; Host = "gpo-lens.local"; Sni = $false }
-            Should -Invoke Clear-WebBinding -Exactly 1
-            Should -Invoke New-WebBinding -Exactly 1
+            Should -Invoke Clear-WebBinding -Exactly 0
+            Should -Invoke New-WebBinding -Exactly 0
+            Should -Invoke Set-WebBinding -Exactly 1
         }
 
         It "preserves the SNI binding when it already matches" {
@@ -368,10 +373,10 @@ Describe "install-windows.ps1" {
             Should -Invoke New-WebBinding -Exactly 0
         }
 
-        It "does nothing when Sni is `$false" {
+        It "does nothing for an already created fresh non-SNI binding" {
             Mock Clear-WebBinding { }
             Mock New-WebBinding { }
-            Set-SniBinding -SiteName "gpo-lens" -Port "8443" -HostName "" -Sni $false -Existing $null
+            Set-SniBinding -SiteName "gpo-lens" -Port "8443" -HostName "" -Sni $false -Existing $null -BindingAlreadyCreated $true
             Should -Invoke Clear-WebBinding -Exactly 0
             Should -Invoke New-WebBinding -Exactly 0
         }
@@ -406,7 +411,7 @@ Describe "install-windows.ps1" {
             $hn     | Should -Be $null
         }
 
-        It "removes stale hostnameport for a non-SNI binding with a hostname" {
+        It "leaves hostname endpoints to the transition helper on a non-SNI cert assignment" {
             Set-TlsCertBinding -CertThumbprint "ABCDEF123456" -Port "8443" -HostName "gpo-lens.local" -Sni $false
 
             $deleteIp    = $global:NetshCalls | Where-Object { ($_ -join " ") -match 'delete sslcert ipport=0\.0\.0\.0:8443' }
@@ -414,7 +419,7 @@ Describe "install-windows.ps1" {
             $add         = $global:NetshCalls | Where-Object { ($_ -join " ") -match 'add sslcert ipport=0\.0\.0\.0:8443' }
 
             $deleteIp   | Should -Not -Be $null
-            $deleteHost | Should -Not -Be $null
+            $deleteHost | Should -Be $null
             $add        | Should -Not -Be $null
         }
 

@@ -61,7 +61,7 @@ from gpo_lens.finding_model import (
     compute_fingerprint,
     series_key,
 )
-from gpo_lens.normalize import parse_dt as _parse_dt
+from gpo_lens.normalize import parse_dt
 
 if TYPE_CHECKING:
     from gpo_lens.danger import DangerFinding
@@ -789,9 +789,29 @@ def append_triage_event(
     return cursor.lastrowid
 
 
-def _triage_order(event: TriageEvent) -> tuple[datetime, int]:
-    """Chronological order with immutable event ID as the stable tie-breaker."""
-    return event.occurred_at, event.id
+def _utc(value: datetime) -> datetime:
+    """Legacy timestamps without an offset are interpreted as UTC."""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _parse_dt(text: str | None) -> datetime | None:
+    value = parse_dt(text)
+    return _utc(value) if value is not None else None
+
+
+def _triage_order(event: TriageEvent) -> tuple[datetime, bool, int]:
+    """Equal-instant removal wins over approval, including migrated approvals.
+
+    IDs remain immutable (supersedes references rely on them). When the clocks
+    cannot establish causal order, retain visibility rather than reinstate risk
+    acceptance. IDs break ties only within the same precedence class.
+    """
+    removes_acceptance = event.action in {
+        "reopened",
+        "risk_acceptance_expired",
+        "risk_acceptance_revoked",
+    }
+    return _utc(event.occurred_at), removes_acceptance, event.id
 
 
 def fold_triage(events: list[TriageEvent]) -> TriageStatus:
@@ -815,7 +835,7 @@ def fold_triage(events: list[TriageEvent]) -> TriageStatus:
     rationale = ""
 
     for ev in sorted(events, key=_triage_order):
-        updated_at = ev.occurred_at
+        updated_at = _utc(ev.occurred_at)
         actor = ev.actor
         if ev.action == "commented":
             note = ev.note
@@ -829,7 +849,7 @@ def fold_triage(events: list[TriageEvent]) -> TriageStatus:
             status = "accepted_risk"
             note = ev.note
             rationale = ev.rationale
-            expires_at = ev.expires_at
+            expires_at = _utc(ev.expires_at) if ev.expires_at is not None else None
         elif ev.action == "reopened":
             status = "open"
             note = ev.note

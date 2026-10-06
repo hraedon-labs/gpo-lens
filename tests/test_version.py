@@ -50,3 +50,12 @@ def test_cli_version_flag() -> None:
     assert __version__ in result.stdout.strip(), (
         f"CLI --version output {result.stdout.strip()!r} does not contain {__version__!r}"
     )
+
+
+def test_release_documents_report_current_metadata() -> None:
+    root = Path(__file__).resolve().parents[1]
+    verification = (root / "docs/release-v1.3.0-verification.md").read_text()
+    plan = (root / "plans/027-road-to-generous-1x.md").read_text()
+    assert f"Package metadata reports **{__version__}**" in verification
+    assert f"Package metadata reports **{__version__}**" in plan
+    assert "bump package metadata" not in plan

@@ -2,8 +2,9 @@
 
 Verified **2026-10-06** on `release/v1.3.0-candidate`, integrated product base
 `d271cf7`. This pass changes documentation and plan bookkeeping only; no
-product, dependency, CI or test file was changed. Package metadata remains
-1.2.0 for the coordinator's release bump. No tracker write, PR or tag was made.
+product, dependency, CI or test file was changed in that documentation pass.
+Package metadata reports **1.3.0** following the first fix round. No tracker
+write, PR or tag was made.
 
 See [Plan 027](../plans/027-road-to-generous-1x.md) for the complete old/new
 plan-status table, all 12 nonterminal WI dispositions and the coordinator's

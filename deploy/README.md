@@ -65,6 +65,14 @@ described in the [IIS guide](iis/README.md#optional-per-user-audit-attribution).
    so Linux recognizes the directory tree. Repacking with Windows PowerShell's
    generic archive command can store backslashes as literal Linux filenames,
    causing SYSVOL content to be missed. Keep the collector's ZIP unchanged.
+   Check the collector's warnings before transfer: **Windows PowerShell 5.1**
+   can skip paths longer than **260** characters and leave a **partial ZIP**.
+   If it warns about skipped paths or an incomplete archive, do not upload that
+   ZIP. Recollect using a **shorter** output root and verify the warning is gone,
+   or use `-NoZip`, transfer the complete export **folder**, and ingest it with
+   `gpo-lens ingest /path/to/export` on the server. Confirm the folder contains
+   the expected SYSVOL files before transfer; keep the inventory and error
+   sidecars so coverage gaps remain visible.
 3. Open the local URL or authenticated HTTPS proxy, choose **Ingest**, and
    upload the ZIP. No SMB share, domain account, or collector credentials are
    required on the analysis server. Transfers and stored exports contain

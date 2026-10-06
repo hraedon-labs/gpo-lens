@@ -123,12 +123,12 @@ param(
 function Parse-BindingInformation {
     <#
     .SYNOPSIS
-        Parse an IIS bindingInformation string into port and host.
+        Parse an IIS bindingInformation string into IP, port and host.
         bindingInformation is "IP:Port:HostHeader". The IP is "*", an IPv4
         literal, or a bracketed "[ipv6]" literal.
     #>
     param([string]$BindingInformation)
-    $exPort = ""; $exHost = ""
+    $exIp = ""; $exPort = ""; $exHost = ""
     $bi = "$BindingInformation"
     if ($bi.StartsWith("[")) {
         # Bracketed IPv6 IP: "[addr]:port:host"
@@ -136,17 +136,18 @@ function Parse-BindingInformation {
         if ($close -gt 0 -and ($close + 1) -lt $bi.Length -and $bi.Substring($close + 1, 1) -eq ":") {
             $rest = $bi.Substring($close + 2)
             $c = $rest.IndexOf(":")
-            if ($c -ge 0) { $exPort = $rest.Substring(0, $c); $exHost = $rest.Substring($c + 1) }
+            if ($c -ge 0) { $exIp = $bi.Substring(0, $close + 1); $exPort = $rest.Substring(0, $c); $exHost = $rest.Substring($c + 1) }
         }
     } else {
         $i1 = $bi.IndexOf(":")
         $i2 = if ($i1 -ge 0) { $bi.IndexOf(":", $i1 + 1) } else { -1 }
         if ($i1 -ge 0 -and $i2 -gt $i1) {
+            $exIp = $bi.Substring(0, $i1)
             $exPort = $bi.Substring($i1 + 1, $i2 - $i1 - 1)
             $exHost = $bi.Substring($i2 + 1)
         }
     }
-    @{ Port = $exPort; Host = $exHost }
+    @{ Ip = $exIp; Port = $exPort; Host = $exHost }
 }
 
 function Get-ExistingBindingConfig {
@@ -175,7 +176,7 @@ function Get-ExistingBindingConfig {
             } else {
                 $exSni = $rawFlags -match "Sni"
             }
-            $existing = @{ Port = $parsed.Port; Host = $parsed.Host; Sni = $exSni; Cert = "" }
+            $existing = @{ Ip = $parsed.Ip; Port = $parsed.Port; Host = $parsed.Host; Sni = $exSni; Flags = $flagsVal; Cert = "" }
             # Read the currently bound cert hash. Try the IIS binding's
             # certificateHash first (most reliable), then fall back to netsh
             # http.sys queries (hostnameport for SNI/host bindings, ipport for
@@ -190,7 +191,8 @@ function Get-ExistingBindingConfig {
                     $show = & netsh http show sslcert hostnameport="$($parsed.Host)`:$($parsed.Port)" 2>&1 | Out-String
                 }
                 if ($show -notmatch "(?m)^\s*Certificate Hash\s*:\s*([0-9A-Fa-f]+)") {
-                    $show = & netsh http show sslcert ipport="0.0.0.0:$($parsed.Port)" 2>&1 | Out-String
+                    $certIp = if ($parsed.Ip -eq "*") { "0.0.0.0" } else { $parsed.Ip }
+                    $show = & netsh http show sslcert ipport="$certIp`:$($parsed.Port)" 2>&1 | Out-String
                 }
                 if ($show -match "(?m)^\s*Certificate Hash\s*:\s*([0-9A-Fa-f]+)") {
                     $existing.Cert = $Matches[1]
@@ -246,15 +248,16 @@ function Test-SniConsistency {
 function Test-BindingChanged {
     <#
     .SYNOPSIS
-        Return $true when the existing binding differs from the effective port
-        or host and therefore needs to be rewritten.
+        Return $true when the existing binding differs from the effective port,
+        host or SNI state and therefore needs to be updated.
     #>
     param(
         [hashtable]$Existing,
         [string]$EffectivePort,
-        [string]$EffectiveHost
+        [string]$EffectiveHost,
+        [bool]$EffectiveSni = [bool]$Existing.Sni
     )
-    if (-not $Existing -or "$($Existing.Port)" -ne "$EffectivePort" -or "$($Existing.Host)" -ne "$EffectiveHost") {
+    if (-not $Existing -or "$($Existing.Port)" -ne "$EffectivePort" -or "$($Existing.Host)" -ne "$EffectiveHost" -or [bool]$Existing.Sni -ne $EffectiveSni) {
         return $true
     }
     return $false
@@ -273,29 +276,106 @@ function Compare-CertThumbprint {
 function Set-SniBinding {
     <#
     .SYNOPSIS
-        Apply the SNI IIS binding when the effective configuration differs from
-        the existing binding. sslFlags=1 must be set before the netsh
-        hostnameport sslcert add, so this is called before Set-TlsCertBinding.
+        Apply the effective IIS binding and SNI bit in either direction.
+        Set sslFlags before the netsh certificate bind. Retain the previous
+        IIS endpoint until Set-IisTlsEndpoint verifies the new certificate.
     #>
     param(
         [string]$SiteName,
         [string]$Port,
         [string]$HostName,
         [bool]$Sni,
-        [hashtable]$Existing
+        [hashtable]$Existing,
+        [bool]$BindingAlreadyCreated = $false
     )
-    if ($Sni) {
-        if ($Existing -and $Existing.Sni -and "$($Existing.Port)" -eq "$Port" -and "$($Existing.Host)" -eq "$HostName") {
-            Write-Host "  SNI binding already configured (host=$HostName, port=$Port); preserving."
-        } else {
-            Write-Host "  Configuring SNI binding (sslFlags=1, host=$HostName) on port $Port ..."
-            # Clear-WebBinding removes only THIS site's https bindings -- the
-            # catch-all ipport binding on a shared port belongs to a different site.
-            Clear-WebBinding -Name $SiteName -Protocol https -ErrorAction SilentlyContinue
-            New-WebBinding -Name $SiteName -Protocol https -Port $Port -HostHeader $HostName -SslFlags 1 | Out-Null
-            Write-Host "    SNI binding installed."
+    if ($Existing -and -not (Test-BindingChanged -Existing $Existing -EffectivePort $Port -EffectiveHost $HostName -EffectiveSni $Sni)) {
+        Write-Host "  HTTPS binding already configured; preserving."
+        return
+    }
+    # A fresh site already has its binding from New-Item. Set its SNI bit
+    # without attempting to create a duplicate binding.
+    if (-not $Existing -and $BindingAlreadyCreated) {
+        if ($Sni) {
+            Set-WebBinding -Name $SiteName -BindingInformation "*:$Port`:$HostName" -PropertyName sslFlags -Value 1
+        }
+        return
+    }
+    $ip = if ($Existing -and $Existing.Ip) { "$($Existing.Ip)" } else { "*" }
+    $flags = if ($Existing -and $Existing.Flags) { [int]$Existing.Flags } else { 0 }
+    $flags = ($flags -band (-bnot 1)) -bor [int]$Sni
+    if ($Existing -and "$($Existing.Port)" -eq "$Port" -and "$($Existing.Host)" -eq "$HostName") {
+        # SNI can be enabled AND disabled. Keep unrelated sslFlags bits.
+        Set-WebBinding -Name $SiteName -BindingInformation "$ip`:$Port`:$HostName" -PropertyName sslFlags -Value $flags
+    } else {
+        # Keep the old binding until the new certificate has been verified.
+        New-WebBinding -Name $SiteName -Protocol https -IPAddress $ip -Port $Port -HostHeader $HostName -SslFlags $flags | Out-Null
+    }
+}
+
+function Set-IisTlsEndpoint {
+    <# Update the endpoint tuple and certificate together. Plain upgrades are no-ops. #>
+    param(
+        [string]$SiteName, [string]$Port, [string]$HostName, [bool]$Sni,
+        [string]$CertThumbprint, [hashtable]$Existing,
+        [bool]$BindingAlreadyCreated = $false
+    )
+    $changed = Test-BindingChanged -Existing $Existing -EffectivePort $Port -EffectiveHost $HostName -EffectiveSni $Sni
+    $ip = if ($Existing -and $Existing.Ip) { "$($Existing.Ip)" } else { "*" }
+    Set-SniBinding -SiteName $SiteName -Port $Port -HostName $HostName -Sni $Sni -Existing $Existing -BindingAlreadyCreated $BindingAlreadyCreated
+    if (-not $CertThumbprint) {
+        Write-Host "  [warn] No TLS certificate configured. Assign one via IIS Manager or -TlsCertThumbprint."
+        return
+    }
+    $currentCert = if ($Existing) { "$($Existing.Cert)" } else { "" }
+    if ($changed -or -not (Compare-CertThumbprint -Current $currentCert -Desired $CertThumbprint)) {
+        try {
+            Set-TlsCertBinding -CertThumbprint $CertThumbprint -Port $Port -HostName $HostName -Sni $Sni -IPAddress $ip
+        } catch {
+            # Restore the previous IIS tuple if the new certificate failed.
+            if ($Existing -and $changed) {
+                if ("$($Existing.Port)" -ne "$Port" -or "$($Existing.Host)" -ne "$HostName") {
+                    Remove-WebBinding -Name $SiteName -Protocol https -BindingInformation "$ip`:$Port`:$HostName"
+                } else {
+                    $oldFlags = if ($Existing.Flags) { [int]$Existing.Flags } else { [int][bool]$Existing.Sni }
+                    Set-WebBinding -Name $SiteName -BindingInformation "$ip`:$Port`:$HostName" -PropertyName sslFlags -Value $oldFlags
+                }
+            }
+            throw
         }
     }
+    if ($Existing -and $changed) {
+        if ("$($Existing.Port)" -ne "$Port" -or "$($Existing.Host)" -ne "$HostName") {
+            Remove-WebBinding -Name $SiteName -Protocol https -BindingInformation "$ip`:$($Existing.Port)`:$($Existing.Host)"
+        }
+        # Delete only an old http.sys endpoint that differs from the new one.
+        # A host change on non-SNI keeps the same IP:port certificate endpoint.
+        if (Test-TlsEndpointStillUsed -Existing $Existing) { return }
+        if ($Existing.Sni -and (-not $Sni -or "$($Existing.Port)" -ne "$Port" -or "$($Existing.Host)" -ne "$HostName")) {
+            & netsh http delete sslcert hostnameport="$($Existing.Host)`:$($Existing.Port)" 2>$null | Out-Null
+        } elseif (-not $Existing.Sni -and ($Sni -or "$($Existing.Port)" -ne "$Port")) {
+            $oldIp = if ($ip -eq "*") { "0.0.0.0" } else { $ip }
+            & netsh http delete sslcert ipport="$oldIp`:$($Existing.Port)" 2>$null | Out-Null
+        }
+    }
+}
+
+function Test-TlsEndpointStillUsed {
+    <# http.sys endpoints may be shared by sites. Never delete one still in use. #>
+    param([hashtable]$Existing)
+    $oldIp = if ($Existing.Ip) { "$($Existing.Ip)" } else { "*" }
+    foreach ($binding in (Get-WebBinding -Protocol https -ErrorAction Stop)) {
+        $parsed = Parse-BindingInformation -BindingInformation "$($binding.bindingInformation)"
+        if ($parsed.Port -ne "$($Existing.Port)") { continue }
+        $flags = 0
+        $usesSni = if ([int]::TryParse("$($binding.sslFlags)", [ref]$flags)) { ($flags -band 1) -ne 0 } else { "$($binding.sslFlags)" -match "Sni" }
+        if ($Existing.Sni) {
+            if ($usesSni -and $parsed.Host -eq "$($Existing.Host)") { return $true }
+        } elseif (-not $usesSni) {
+            # Wildcard families can overlap (including IPv6 dual-stack).
+            if ($oldIp -in @("*", "0.0.0.0", "[::]") -or $parsed.Ip -in @("*", "0.0.0.0", "[::]") -or $parsed.Ip -eq $oldIp) { return $true }
+        }
+    }
+    return $false
 }
 
 function Set-TlsCertBinding {
@@ -308,7 +388,8 @@ function Set-TlsCertBinding {
         [string]$CertThumbprint,
         [string]$Port,
         [string]$HostName,
-        [bool]$Sni
+        [bool]$Sni,
+        [string]$IPAddress = "*"
     )
     $bindPort = "$Port"
     $appId = "{B2C3D4E5-F6A7-8901-BCDE-F23456789012}"
@@ -330,11 +411,9 @@ function Set-TlsCertBinding {
         Write-Host "    TLS certificate bound to $hostnameport (SNI, store: MY)."
     } else {
         # Non-SNI catch-all: bind the cert to ipport=0.0.0.0:Port.
-        $ipport = "0.0.0.0:$bindPort"
+        $certIp = if ($IPAddress -eq "*") { "0.0.0.0" } else { $IPAddress }
+        $ipport = "$certIp`:$bindPort"
         & netsh http delete sslcert ipport="$ipport" 2>$null | Out-Null
-        if ($HostName) {
-            & netsh http delete sslcert hostnameport="$HostName`:$bindPort" 2>$null | Out-Null
-        }
         $addOut = & netsh http add sslcert ipport="$ipport" certhash="$CertThumbprint" appid="$appId" certstorename=MY 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host ($addOut | Out-String)
@@ -412,6 +491,7 @@ function Get-IisAllowedHosts {
         if (-not $parsed.Port) { continue }
         $names = @($MachineFqdn, $MachineName)
         if ($parsed.Host) { $names += $parsed.Host }
+        if ($parsed.Ip -and $parsed.Ip -notin @("*", "0.0.0.0", "[::]")) { $names += $parsed.Ip }
         foreach ($name in $names) {
             $authorities += $name
             $authorities += "$name`:$($parsed.Port)"
@@ -730,13 +810,19 @@ $requirements = Join-Path $repoRoot "deploy\iis\requirements-web.lock.txt"
 if ($LASTEXITCODE -ne 0) {
     throw "Hash-pinned web dependency install failed (exit $LASTEXITCODE)."
 }
+# Install the complete locked build closure before disabling build isolation.
+$buildRequirements = Join-Path $repoRoot "deploy\iis\requirements-build.lock.txt"
+& $venvPy -m pip install --require-hashes -r $buildRequirements
+if ($LASTEXITCODE -ne 0) {
+    throw "Hash-pinned build dependency install failed (exit $LASTEXITCODE)."
+}
 # The [web] extra pulls fastapi/uvicorn/jinja2/python-multipart needed to serve.
 $pkg = "$repoRoot[web]"
 # --upgrade so an in-place re-install actually refreshes the package metadata.
 # Without it pip could leave a prior version's dist-info in place, which is what
 # the app reports as its version (the GUI then shows a stale version after an
 # upgrade that otherwise appeared to succeed).
-& $venvPy -m pip install --upgrade --no-deps $pkg
+& $venvPy -m pip install --upgrade --no-deps --no-build-isolation $pkg
 if ($LASTEXITCODE -ne 0) {
     throw "pip install of gpo-lens failed (exit $LASTEXITCODE)."
 }
@@ -931,39 +1017,11 @@ if ($ConfigureIIS) {
             Write-Host "  IIS site `"$siteName`" already exists."
             Set-ItemProperty $sitePathIIS -Name applicationPool -Value $AppPool
             Set-ItemProperty $sitePathIIS -Name physicalPath -Value $SitePath
-            # Only rewrite the binding when port/host actually change. The
-            # bindings collection carries no sslFlags, so an unconditional
-            # Set-ItemProperty would drop SNI on a no-op upgrade and churn a
-            # healthy endpoint.
-            if (Test-BindingChanged -Existing $existing -EffectivePort $effPort -EffectiveHost $effHost) {
-                Write-Host "    Updating site binding to $bindingInfo ..."
-                Set-ItemProperty $sitePathIIS -Name bindings -Value @{protocol="https"; bindingInformation=$bindingInfo}
-            } else {
-                Write-Host "    Site binding already matches (port $effPort, host `"$effHost`"); preserving."
-            }
         }
 
-        # 6. SNI binding (sslFlags=1). Re-apply only when the live binding is
-        # not already SNI with the right host/port, so a no-op upgrade does not
-        # drop it. sslFlags must be set BEFORE the netsh hostnameport sslcert
-        # add or http.sys rejects it with error 87.
-        Set-SniBinding -SiteName $siteName -Port $effPort -HostName $effHost -Sni $effSni -Existing $existing
-
-        # 7. TLS cert binding. Rebind only when the cert changed (idempotent);
-        # an omitted -TlsCertThumbprint preserves the existing cert via $effCert.
-        if ($effCert) {
-            $curCert = if ($existing) { "$($existing.Cert)" } else { "" }
-            $same = Compare-CertThumbprint -Current $curCert -Desired $effCert
-            if ($same) {
-                Write-Host "  TLS certificate already bound ($effCert); preserving."
-            } else {
-                Write-Host "  Binding TLS certificate $effCert to port $effPort ..."
-                Set-TlsCertBinding -CertThumbprint $effCert -Port $effPort -HostName $effHost -Sni $effSni
-            }
-        } else {
-            Write-Host "  [warn] No TLS certificate configured. HTTPS binding exists but no certificate is assigned."
-            Write-Host "         Assign one via IIS Manager or re-run with -TlsCertThumbprint."
-        }
+        # Rebind a preserved certificate whenever port/host/SNI changes. The
+        # helper retains the old endpoint until the new certificate verifies.
+        Set-IisTlsEndpoint -SiteName $siteName -Port $effPort -HostName $effHost -Sni $effSni -CertThumbprint $effCert -Existing $existing -BindingAlreadyCreated (-not $existingSite)
 
         # Merge the host policy after bindings are effective; preserve an operator's value.
         $allowedHosts = Get-IisAllowedHosts -SiteName $siteName

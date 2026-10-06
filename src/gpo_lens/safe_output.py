@@ -47,6 +47,24 @@ _WINDOWS_CREDENTIAL_NAMES = frozenset(
 )
 _USERINFO = re.compile(r"(?i)(?:[a-z][a-z0-9+.-]*://|\\\\|//)[^\s/@\\:]*:([^\s/@\\]+)@")
 _RAW_FRAGMENT = re.compile(r"</?[A-Za-z][^>]*>|^[OGDS]:.*\([A-Z]+;", re.S)
+_COMMAND_TOKEN = re.compile(r'^\s*(?:"([^"]+)"|(\S+))\s*(.*)$', re.S)
+_TASK_PASSWORD_OPTIONS = {
+    "schtasks": r"/(?:rp|p)",
+    "cmdkey": r"/pass",
+    "powershell": r"-(?:password|proxypassword)",
+    "pwsh": r"-(?:password|proxypassword)",
+}
+_POWERSHELL_ESCAPES = {
+    "0": "\0",
+    "a": "\a",
+    "b": "\b",
+    "e": "\x1b",
+    "f": "\f",
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "v": "\v",
+}
 _OMIT = {
     "raw",
     "raw_xml",
@@ -119,6 +137,67 @@ def _registry_payload(mapping: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(values)
 
 
+def _command_secrets(command: str, arguments: str = "") -> tuple[str, ...]:
+    """Recognize credential switches only for the executables owning them.
+
+    Windows paths are not POSIX shell tokens. Preserve backslashes and quoted
+    spaces; match an entire switch so /PasswordPolicy and -PasswordComplexity
+    cannot be mistaken for credentials.
+    """
+    # Task XML stores the executable separately, without shell quoting even
+    # when its path contains spaces. Check that entire field before tokenizing
+    # a flattened command line.
+    executable = re.split(r"[\\/]", command.strip().strip('"'))[-1].lower().removesuffix(".exe")
+    text = arguments
+    if executable not in _TASK_PASSWORD_OPTIONS:
+        token = _COMMAND_TOKEN.match(command)
+        if token is None:
+            return ()
+        executable = re.split(r"[\\/]", token[1] or token[2])[-1].lower().removesuffix(".exe")
+        text = token[3] + " " + arguments
+    options = _TASK_PASSWORD_OPTIONS.get(executable)
+    if options is None:
+        return ()
+    pattern = re.compile(
+        rf"""(?:^|\s){options}(?:\s*[:=]\s*|\s+)(?:"((?:\\.|`.|""|[^"\\`])*)"|'((?:''|[^'])*)'|([^\s]+))""",
+        re.I,
+    )
+    values: set[str] = set()
+    for match in pattern.finditer(text):
+        raw = next(v for v in match.groups() if v is not None)
+        values.add(raw)
+        if executable in {"powershell", "pwsh"}:
+            if match[2] is not None:
+                decoded = raw.replace("''", "'")
+            else:
+                decoded = re.sub(r"`(.)", lambda m: _POWERSHELL_ESCAPES.get(m[1], m[1]), raw)
+        else:
+            # Windows command-line escaping: pairs of backslashes before a
+            # quote become literal backslashes; an odd one escapes the quote.
+            decoded = re.sub(
+                r'(\\+)"',
+                lambda m: "\\" * (len(m[1]) // 2) + ('"' if len(m[1]) % 2 else ""),
+                raw,
+            ).replace('""', '"')
+        values.add(decoded)
+    return tuple(values)
+
+
+def _task_payload(mapping: Mapping[str, Any]) -> tuple[str, ...]:
+    fields = {str(k).lower(): v for k, v in mapping.items()}
+    # Structured inventory, classic GPP Properties attributes, and Task V2 Exec.
+    children = mapping.get("children")
+    if isinstance(children, list):
+        for child in children:
+            if isinstance(child, Mapping):
+                fields[str(child.get("tag", "")).rsplit("}", 1)[-1].lower()] = child.get("text", "")
+    command = fields.get("command", fields.get("appname", ""))
+    arguments = fields.get("arguments", "")
+    if isinstance(command, str) and isinstance(arguments, str):
+        return _command_secrets(command, arguments)
+    return ()
+
+
 def secret_values(value: object) -> tuple[str, ...]:
     """Discover credential values while retaining no raw source fragments."""
     secrets: set[str] = set()
@@ -128,6 +207,7 @@ def secret_values(value: object) -> tuple[str, ...]:
         if mapping is not None:
             sensitive = _sensitive(mapping)
             secrets.update(_registry_payload(mapping))
+            secrets.update(_task_payload(mapping))
             for key, child in mapping.items():
                 if (
                     (_SECRET_KEY.fullmatch(str(key)) or (sensitive and key in _VALUE))
@@ -140,6 +220,7 @@ def secret_values(value: object) -> tuple[str, ...]:
             for child in obj:
                 discover(child)
         elif isinstance(obj, str):
+            secrets.update(_command_secrets(obj))
             for match in _USERINFO.finditer(obj):
                 secrets.add(match[1])
                 secrets.add(unquote(match[1]))
