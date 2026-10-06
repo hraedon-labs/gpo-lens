@@ -26,6 +26,8 @@ import gpo_lens.web.app as _app_module
 from gpo_lens import events as _events
 from gpo_lens import ingest as _ingest
 from gpo_lens import store as _store
+from gpo_lens.collection_zip import collector_root
+from gpo_lens.model import Estate
 from gpo_lens.web._helpers import get_ro_conn, get_rw_conn, stream_upload_to_file
 
 # _audit and _safe_extract reference module-level state on app.py that tests
@@ -103,7 +105,11 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                     )
 
                 try:
-                    estate = await asyncio.to_thread(_ingest.load_estate, extract_dir)
+
+                    def _load_upload() -> Estate:
+                        return _ingest.load_estate(collector_root(extract_dir))
+
+                    estate = await asyncio.to_thread(_load_upload)
                 except (FileNotFoundError, ValueError, KeyError) as exc:
                     _logger.warning("Invalid estate data: %s", exc)
                     _audit("ingest", principal, "failure", type(exc).__name__, request)

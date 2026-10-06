@@ -62,17 +62,17 @@ described in the [IIS guide](iis/README.md#optional-per-user-audit-attribution).
 2. Transfer the **collector-produced ZIP** (created by default). It preserves
    `SYSVOL-Policies`, inventory and collection-errors sidecars, with
    `AllGPOs.xml` at the archive root. Its archive entries use **forward slashes**
-   so Linux recognizes the directory tree. Repacking with Windows PowerShell's
-   generic archive command can store backslashes as literal Linux filenames,
-   causing SYSVOL content to be missed. Keep the collector's ZIP unchanged.
+   so Linux recognizes the directory tree. CLI and web ingest also normalize
+   Windows backslash separators before validating paths, supporting older
+   archives safely. Keep the collector's ZIP unchanged.
    On Windows PowerShell 5.1, paths over 260 characters can be skipped. If the
    collector encounters any file enumeration error, it fails with a clear error
    and removes the **partial ZIP**. Collect again under a shorter `-OutputRoot`
    (for example `C:\GpoExport`), or run with `-NoZip` and transfer the output folder.
    Confirm that collection succeeds before transferring a new ZIP.
-   Ingest a transferred folder on the server with
-   `gpo-lens --db <server-db> ingest <transferred-folder>`, using the same
-   database path as the running service.
+   Ingest a transferred ZIP on the server with
+   `gpo-lens --db <server-db> ingest <collector.zip> --diff-latest`, using the
+   same database path as the running service. Directories are also accepted.
 3. Open the local URL or authenticated HTTPS proxy, choose **Ingest**, and
    upload the ZIP. No SMB share, domain account, or collector credentials are
    required on the analysis server. Transfers and stored exports contain
@@ -80,7 +80,8 @@ described in the [IIS guide](iis/README.md#optional-per-user-audit-attribution).
 4. Check the snapshot/domain and coverage findings after ingest. An empty
    installation is expected before its first upload; a partial collection must
    still be reported as partial. The app allows ZIP uploads up to 500 MiB and
-   expanded contents up to 2 GiB. Allow temporary space for both; see each
+   expanded contents up to 2 GiB, with a 1000:1 per-entry compression ratio
+   limit shared by CLI and web. Allow temporary space for both; see each
    guide's storage notes. Keep original exports for re-ingestion: the upload's
    temporary extraction is removed after ingest.
 

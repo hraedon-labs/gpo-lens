@@ -100,7 +100,7 @@ _COMMANDS: list[CliCommand] = [
         name="ingest",
         func=cmd_ingest,
         help="",
-        positional_args=[CliArg(name="sample_dir")],
+        positional_args=[CliArg(name="sample_dir", help="Collector export directory or ZIP")],
         args=[
             CliArg(
                 name="--json",

@@ -1,5 +1,6 @@
 {# Downloads preserve snapshot, filters and pagination on this view URL. #}
+{% set export_url = request.url.include_query_params(as_of=export_as_of) if export_as_of is defined else request.url %}
 <div class="gp-export-controls" role="group" aria-label="Export this view">
-  <a class="gp-btn"{% if ledger is defined %} data-ledger-export{% endif %} href="{{ request.url.include_query_params(format='md') }}">Export Markdown</a>
-  <a class="gp-btn"{% if ledger is defined %} data-ledger-export{% endif %} href="{{ request.url.include_query_params(format='csv') }}">Export CSV</a>
+  <a class="gp-btn"{% if ledger is defined %} data-ledger-export{% endif %} href="{{ export_url.include_query_params(format='md') }}">Export Markdown</a>
+  <a class="gp-btn"{% if ledger is defined %} data-ledger-export{% endif %} href="{{ export_url.include_query_params(format='csv') }}">Export CSV</a>
 </div>

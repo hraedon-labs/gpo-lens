@@ -8,6 +8,7 @@ import sys
 from gpo_lens import ingest, queries, snapshot_diff, store
 from gpo_lens.cli._helpers import _get_admx, _get_estate, _render_json
 from gpo_lens.cli._helpers import _safe_print as print
+from gpo_lens.collection_zip import collector_source
 
 
 def cmd_summary(args: argparse.Namespace) -> None:
@@ -132,63 +133,66 @@ def _emit_ingest_events(
 
 
 def cmd_ingest(args: argparse.Namespace) -> None:
-    estate = ingest.load_estate(args.sample_dir)
-    conn = sqlite3.connect(args.db)
-    try:
-        store.init_db(conn)
-        sid = store.save_estate(conn, estate)
-        from gpo_lens.findings import evaluate_finding_lifecycle_v2
-
+    with collector_source(args.sample_dir) as source:
+        estate = ingest.load_estate(source)
+        conn = sqlite3.connect(args.db)
         try:
-            evaluate_finding_lifecycle_v2(conn, sid, estate, admx=_get_admx(args))
-        except Exception as exc:
-            print(
-                f"Warning: snapshot {sid} was saved, but finding lifecycle "
-                f"evaluation failed: {exc}",
-                file=sys.stderr,
-            )
-        domain = estate.domain or "unknown"
-        msg = f"{domain}, {len(estate.gpos)} GPOs, {len(estate.soms)} SOMs, snapshot={sid}"
-        if args.json:
-            out = {
-                "domain": domain,
-                "gpo_count": len(estate.gpos),
-                "som_count": len(estate.soms),
-                "snapshot_id": sid,
-            }
-            if args.diff_latest:
-                prev = _latest_snapshot_before(conn, sid)
-                if prev:
-                    entries = snapshot_diff.snapshot_changelog(conn, prev, sid)
-                    out["changelog"] = [
-                        {
-                            "gpo_id": e.gpo_id,
-                            "gpo_name": e.gpo_name,
-                            "kind": e.kind,
-                            "side": e.side,
-                            "summary": e.summary,
-                        }
-                        for e in entries
-                    ]
-                    _emit_ingest_events(conn, prev, sid, len(estate.gpos))
-            _render_json(out)
-        else:
-            print(msg)
-            if args.diff_latest:
-                prev = _latest_snapshot_before(conn, sid)
-                if prev:
-                    entries = snapshot_diff.snapshot_changelog(conn, prev, sid)
-                    if entries:
-                        print("\nChanges since previous snapshot:")
-                        for e in entries:
-                            prefix = "[DETAIL]" if e.kind == "settings_detail" else "[META]"
-                            print(f"  {prefix} {e.gpo_name} — {e.summary}")
-                            for sc in e.setting_changes:
-                                print(f"    [{sc.side}/{sc.cse}] {sc.identity}: {sc.change_type}")
+            store.init_db(conn)
+            sid = store.save_estate(conn, estate)
+            from gpo_lens.findings import evaluate_finding_lifecycle_v2
+
+            try:
+                evaluate_finding_lifecycle_v2(conn, sid, estate, admx=_get_admx(args))
+            except Exception as exc:
+                print(
+                    f"Warning: snapshot {sid} was saved, but finding lifecycle "
+                    f"evaluation failed: {exc}",
+                    file=sys.stderr,
+                )
+            domain = estate.domain or "unknown"
+            msg = f"{domain}, {len(estate.gpos)} GPOs, {len(estate.soms)} SOMs, snapshot={sid}"
+            if args.json:
+                out = {
+                    "domain": domain,
+                    "gpo_count": len(estate.gpos),
+                    "som_count": len(estate.soms),
+                    "snapshot_id": sid,
+                }
+                if args.diff_latest:
+                    prev = _latest_snapshot_before(conn, sid)
+                    if prev:
+                        entries = snapshot_diff.snapshot_changelog(conn, prev, sid)
+                        out["changelog"] = [
+                            {
+                                "gpo_id": e.gpo_id,
+                                "gpo_name": e.gpo_name,
+                                "kind": e.kind,
+                                "side": e.side,
+                                "summary": e.summary,
+                            }
+                            for e in entries
+                        ]
+                        _emit_ingest_events(conn, prev, sid, len(estate.gpos))
+                _render_json(out)
+            else:
+                print(msg)
+                if args.diff_latest:
+                    prev = _latest_snapshot_before(conn, sid)
+                    if prev:
+                        entries = snapshot_diff.snapshot_changelog(conn, prev, sid)
+                        if entries:
+                            print("\nChanges since previous snapshot:")
+                            for e in entries:
+                                prefix = "[DETAIL]" if e.kind == "settings_detail" else "[META]"
+                                print(f"  {prefix} {e.gpo_name} — {e.summary}")
+                                for sc in e.setting_changes:
+                                    print(
+                                        f"    [{sc.side}/{sc.cse}] {sc.identity}: {sc.change_type}"
+                                    )
+                        else:
+                            print("\nNo changes since previous snapshot.")
+                        _emit_ingest_events(conn, prev, sid, len(estate.gpos))
                     else:
-                        print("\nNo changes since previous snapshot.")
-                    _emit_ingest_events(conn, prev, sid, len(estate.gpos))
-                else:
-                    print("\nNo previous snapshot to diff against.")
-    finally:
-        conn.close()
+                        print("\nNo previous snapshot to diff against.")
+        finally:
+            conn.close()
