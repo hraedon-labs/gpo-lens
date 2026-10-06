@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.3.0 — 2026-10-06
 
 Draft **v1.3.0** — release date TBD by coordinator. This section remains
 Unreleased until the release is dated and tagged.
