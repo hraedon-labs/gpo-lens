@@ -238,3 +238,32 @@ Start-WebAppPool gpo-lens
 The schema is additive-migrated on open (`_migrate_schema`), so a DB from an
 older gpo-lens version can be restored into a newer install without manual
 steps. The reverse (newer DB into older gpo-lens) is not guaranteed.
+
+
+## Reversible navigation rollout
+
+The default primary navigation is Briefing / Findings / Explore / History /
+Tools; existing specialist URLs retain their handlers and query parameters.
+To restore the earlier primary links at work, add this environment variable to
+the HttpPlatformHandler `environmentVariables` block in `web.config`:
+
+```xml
+<environmentVariable name="GPO_LENS_LEGACY_NAV" value="1" />
+```
+
+Recycle the application pool to apply it. Remove the variable and recycle to
+return to the new navigation. Ask remains under Tools in either mode. The flag
+changes presentation only: IIS remains the only access control in this
+loopback deployment; do not add an application token.
+
+Optional **Explain these facts** actions require `GPO_LENS_API_KEY`. Without it,
+they are absent. Actions open a separate tab and send only bounded counts,
+fixed caveats, and snapshot/analysis provenance to the configured narration
+endpoint. Raw evidence, names, setting values and rendered HTML are excluded.
+The model may only select supplied fact IDs; unsupported claims are rejected.
+No narration request runs while a deterministic page loads. Forms are signed
+by the serving process, expire after one hour and become invalid on recycle;
+reload the original page in that case. This follows the existing single-process
+IIS deployment. Ask remains the separate exploratory workbench; its query results are never
+sent to narration. It routes the user question to a deterministic query, then
+offers the same checked explain action over result counts.

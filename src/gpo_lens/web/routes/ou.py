@@ -21,14 +21,28 @@ from gpo_lens.web._helpers import (
     cse_facets,
     filter_settings,
     filter_soms,
-    get_estate,
+    get_ro_conn,
     paginate,
     parse_pagination,
 )
 from gpo_lens.web.auth import Permission, Principal, requires
+from gpo_lens.web.page_narration import make_action
 
 if TYPE_CHECKING:
     from gpo_lens.model import Estate
+
+
+def _estate_for_ou(request: Request) -> Estate:
+    from gpo_lens.store import list_snapshots, load_estate
+
+    conn = get_ro_conn(request.app.state.db_path)
+    try:
+        snapshots = list_snapshots(conn)
+        snapshot_id = snapshots[0][0] if snapshots else None
+        request.state.ou_snapshot_id = snapshot_id
+        return load_estate(conn, snapshot_id)
+    finally:
+        conn.close()
 
 
 def register(app: FastAPI, templates: Jinja2Templates) -> None:
@@ -40,7 +54,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
         type: str = "",
         sort: str = "name",
         _principal: Principal = Depends(requires(Permission.VIEW)),
-        estate: Estate = Depends(get_estate),
+        estate: Estate = Depends(_estate_for_ou),
     ) -> HTMLResponse:
         if type and type not in _VALID_OU_TYPES:
             type = ""
@@ -74,7 +88,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
         q: str = "",
         cse: str = "",
         _principal: Principal = Depends(requires(Permission.VIEW)),
-        estate: Estate = Depends(get_estate),
+        estate: Estate = Depends(_estate_for_ou),
     ) -> HTMLResponse:
         target_som = None
         for som in estate.soms:
@@ -117,6 +131,19 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             request,
             "ou_detail.html",
             {
+                "narration_payload": make_action(
+                    request,
+                    _principal,
+                    "ou",
+                    [request.state.ou_snapshot_id],
+                    {
+                        "settings": len(page_settings),
+                        "settings_total": len(all_settings),
+                        "effective_gpos": len(effective_gpos),
+                        "conflicts": len(conflicts),
+                        "scope_caveats": len(caveats),
+                    },
+                ),
                 "som": target_som,
                 "effective_gpos": effective_gpos,
                 "gate_summaries": gate_pairs,

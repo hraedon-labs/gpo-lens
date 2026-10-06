@@ -1,0 +1,456 @@
+{
+  "source_commit": "14718fe7e88d77ee5f3836666a2591ef8ebc5e17",
+  "routes": [
+    {
+      "path": "/static",
+      "name": "static",
+      "methods": [
+        "MOUNT"
+      ],
+      "destination": "/static",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "tools",
+      "representative_query": ""
+    },
+    {
+      "path": "/healthz",
+      "name": "healthz",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/healthz",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "tools",
+      "representative_query": ""
+    },
+    {
+      "path": "/api/version",
+      "name": "api_version",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/api/version",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "tools",
+      "representative_query": ""
+    },
+    {
+      "path": "/",
+      "name": "home",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "home",
+      "representative_query": "severity=high&category=unlinked&q=Lab&sort=gpo"
+    },
+    {
+      "path": "/briefing",
+      "name": "briefing",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/briefing",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "briefing",
+      "representative_query": "snapshot=1"
+    },
+    {
+      "path": "/inventory",
+      "name": "gpo_list",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/inventory",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "gpo_list",
+      "representative_query": "q=Lab&status=unlinked&sort=name&page=2"
+    },
+    {
+      "path": "/gpo/{gpo_id}",
+      "name": "gpo_detail",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/gpo/{gpo_id}",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "gpo_list",
+      "representative_query": "compare=22222222-2222-2222-2222-222222222222"
+    },
+    {
+      "path": "/danger",
+      "name": "danger_list",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/danger",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "danger_list",
+      "representative_query": "severity=high&q=Lab"
+    },
+    {
+      "path": "/conflicts",
+      "name": "conflicts",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/conflicts",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "conflicts",
+      "representative_query": "q=Lab&lens=defined"
+    },
+    {
+      "path": "/search",
+      "name": "search",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/search",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "search",
+      "representative_query": "q=Audit&cse=Security&side=Computer"
+    },
+    {
+      "path": "/ou",
+      "name": "ou_list",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/ou",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "ou_list",
+      "representative_query": "q=Lab&type=ou&sort=links"
+    },
+    {
+      "path": "/ou/{path:path}",
+      "name": "ou_detail",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/ou/{path:path}",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "ou_list",
+      "representative_query": "q=Audit&cse=Security&page=2"
+    },
+    {
+      "path": "/ingest",
+      "name": "ingest_get",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/ingest",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "ingest_get",
+      "representative_query": ""
+    },
+    {
+      "path": "/ingest",
+      "name": "ingest_post",
+      "methods": [
+        "POST"
+      ],
+      "destination": "/ingest",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "ingest_get",
+      "representative_query": ""
+    },
+    {
+      "path": "/ingest/delete",
+      "name": "ingest_delete",
+      "methods": [
+        "POST"
+      ],
+      "destination": "/ingest/delete",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "ingest_get",
+      "representative_query": ""
+    },
+    {
+      "path": "/ask",
+      "name": "ask_get",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/ask",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "ask_get",
+      "representative_query": ""
+    },
+    {
+      "path": "/ask",
+      "name": "ask_post",
+      "methods": [
+        "POST"
+      ],
+      "destination": "/ask",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "ask_get",
+      "representative_query": ""
+    },
+    {
+      "path": "/changelog",
+      "name": "changelog",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/changelog",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "changelog",
+      "representative_query": "snap_a=1&snap_b=2"
+    },
+    {
+      "path": "/baseline",
+      "name": "baseline_get",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/baseline",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "baseline_get",
+      "representative_query": ""
+    },
+    {
+      "path": "/baseline",
+      "name": "baseline_post",
+      "methods": [
+        "POST"
+      ],
+      "destination": "/baseline",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "baseline_get",
+      "representative_query": ""
+    },
+    {
+      "path": "/export/findings",
+      "name": "export_findings",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/export/findings",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "export_findings",
+      "representative_query": ""
+    },
+    {
+      "path": "/export/gpo/{gpo_id}",
+      "name": "export_gpo",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/export/gpo/{gpo_id}",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "gpo_list",
+      "representative_query": ""
+    },
+    {
+      "path": "/export/ou/{path:path}",
+      "name": "export_ou",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/export/ou/{path:path}",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "ou_list",
+      "representative_query": ""
+    },
+    {
+      "path": "/resultant",
+      "name": "resultant_form",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/resultant",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "resultant_form",
+      "representative_query": ""
+    },
+    {
+      "path": "/resultant",
+      "name": "resultant_compute",
+      "methods": [
+        "POST"
+      ],
+      "destination": "/resultant",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "resultant_form",
+      "representative_query": ""
+    },
+    {
+      "path": "/trends",
+      "name": "trends",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/trends",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "trends",
+      "representative_query": ""
+    },
+    {
+      "path": "/delegation",
+      "name": "delegation",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/delegation",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "delegation",
+      "representative_query": ""
+    },
+    {
+      "path": "/admx-coverage",
+      "name": "admx_coverage",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/admx-coverage",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "admx_coverage",
+      "representative_query": ""
+    },
+    {
+      "path": "/golden-diff",
+      "name": "golden_diff_get",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/golden-diff",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "golden_diff_get",
+      "representative_query": ""
+    },
+    {
+      "path": "/golden-diff",
+      "name": "golden_diff_post",
+      "methods": [
+        "POST"
+      ],
+      "destination": "/golden-diff",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "golden_diff_get",
+      "representative_query": ""
+    },
+    {
+      "path": "/findings",
+      "name": "findings_inbox",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/findings",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "findings_inbox",
+      "representative_query": "category=unlinked&severity=high&lifecycle=all&triage=all&q=Lab&page=2"
+    },
+    {
+      "path": "/findings/{occurrence_id}",
+      "name": "finding_occurrence",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/findings/{occurrence_id}",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "findings_inbox",
+      "representative_query": ""
+    },
+    {
+      "path": "/findings/{finding_id}/triage",
+      "name": "findings_triage",
+      "methods": [
+        "POST"
+      ],
+      "destination": "/findings/{finding_id}/triage",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "findings_inbox",
+      "representative_query": ""
+    },
+    {
+      "path": "/explore",
+      "name": "explore",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/explore",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "explore",
+      "representative_query": ""
+    },
+    {
+      "path": "/tools",
+      "name": "tools",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/tools",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "tools",
+      "representative_query": ""
+    },
+    {
+      "path": "/api/v1/",
+      "name": "api_root",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/api/v1/",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "tools",
+      "representative_query": ""
+    },
+    {
+      "path": "/api/v1/queries",
+      "name": "api_queries",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/api/v1/queries",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "tools",
+      "representative_query": ""
+    },
+    {
+      "path": "/api/v1/query/{query_name}",
+      "name": "api_query",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/api/v1/query/{query_name}",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "tools",
+      "representative_query": ""
+    },
+    {
+      "path": "/api/v1/health",
+      "name": "api_health",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/api/v1/health",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "tools",
+      "representative_query": ""
+    },
+    {
+      "path": "/api/v1/snapshots",
+      "name": "api_snapshots",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/api/v1/snapshots",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "tools",
+      "representative_query": ""
+    },
+    {
+      "path": "/api/v1/trends",
+      "name": "api_trends",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/api/v1/trends",
+      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "discover_via": "tools",
+      "representative_query": ""
+    }
+  ]
+}

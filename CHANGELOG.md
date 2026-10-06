@@ -24,6 +24,22 @@
 - CI builds the image and checks loopback routes, read-only operation, proxy
   access control, and a synthetic collector upload.
 
+### Navigation and page explanations (Plan 025 WI-4/5)
+
+- Primary navigation is now Briefing / Findings / Explore / History / Tools,
+  with a compact settings search. `GPO_LENS_LEGACY_NAV=1` restores the earlier
+  primary links for staged rollout; Ask stays under Tools.
+- Every existing URL retains its handler and parameters. Explore/Tools and a
+  route reference keep specialist pages, forms, exports and APIs discoverable;
+  the mechanically collected migration inventory is test enforced.
+- Optional **Explain these facts** on dossiers, OUs, finding histories and
+  comparisons opens separately from deterministic content. Signed, bounded
+  counts and provenance exclude names, values, evidence and HTML. Model output
+  is restricted to supplied fact IDs; extra claims are rejected. Actions are
+  absent without an API key. Ask retains query routing and deterministic results;
+  it now uses the same separate explanation instead of sending serialized
+  evidence to unchecked narration.
+
 ### Handover page for a new operator
 
 - `docs/handover.md`: a start-here page for someone inheriting a running

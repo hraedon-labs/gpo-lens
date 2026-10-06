@@ -27,6 +27,7 @@ from gpo_lens import store as _store
 from gpo_lens.web._helpers import get_ro_conn, stream_upload_to_file
 from gpo_lens.web.app import _audit
 from gpo_lens.web.auth import Permission, Principal, requires
+from gpo_lens.web.page_narration import make_action
 
 _logger = logging.getLogger(__name__)
 
@@ -73,14 +74,17 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                 baseline_settings = queries.load_baseline_from_estate(baseline_estate)
                 conn = get_ro_conn(app.state.db_path)
                 try:
-                    estate = _store.load_estate(conn)
+                    snapshot_ids = [s[0] for s in _store.list_snapshots(conn)[:1]]
+                    estate = _store.load_estate(conn, snapshot_ids[0] if snapshot_ids else None)
                 finally:
                     conn.close()
                 diff = queries.baseline_diff(estate, baseline_settings, admx=app.state.admx)
                 unresolved = sum(1 for e in diff if not e.admx_name)
-                return diff, len(diff), unresolved
+                return diff, len(diff), unresolved, snapshot_ids
 
-            diff_entries, total_count, unresolved_count = await asyncio.to_thread(_compute_diff)
+            diff_entries, total_count, unresolved_count, snapshot_ids = await asyncio.to_thread(
+                _compute_diff
+            )
             _audit("baseline_diff", _principal, "success", f"{total_count} entries", request)
         except (
             ValueError,
@@ -105,6 +109,13 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             {
                 "request": request,
                 "diff_entries": diff_entries,
+                "narration_payload": make_action(
+                    request,
+                    _principal,
+                    "baseline_comparison",
+                    snapshot_ids,
+                    {"comparisons": total_count, "unresolved": unresolved_count},
+                ),
                 "total_count": total_count,
                 "unresolved_count": unresolved_count,
                 "error": None,

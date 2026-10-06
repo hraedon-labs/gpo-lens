@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat/wi086-container-systemd]
+    branches: [main]
   pull_request:
     branches: [main]
 

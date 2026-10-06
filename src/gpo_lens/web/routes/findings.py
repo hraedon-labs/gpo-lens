@@ -33,6 +33,7 @@ from gpo_lens.web._helpers import (
     parse_pagination,
 )
 from gpo_lens.web.auth import Permission, Principal, requires
+from gpo_lens.web.page_narration import make_action
 
 _VALID_TRIAGE = {"open", "acknowledged", "accepted_risk"}
 _VALID_SEVERITIES = {"critical", "high", "medium", "low", "info"}
@@ -265,6 +266,14 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             "finding_occurrence.html",
             {
                 "request": request,
+                "narration_payload": make_action(
+                    request,
+                    principal,
+                    "finding_history",
+                    list(dict.fromkeys(obs["snapshot_id"] for obs in observations)),
+                    {"observations": len(observations), "changes": len(changes)},
+                    evaluation_runs=observations,
+                ),
                 "occ": history.occurrence,
                 "observations": observations,
                 "triage_events": history.triage_events,

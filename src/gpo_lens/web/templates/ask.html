@@ -7,7 +7,7 @@
   <div>
     <div class="gp-eyebrow">Question the estate</div>
     <h1>Ask</h1>
-    <div class="sub">AI-powered plain-language answers about the estate. When narration is configured, answers cite the deterministic facts they used.</div>
+    <div class="sub">Route a question to a deterministic query. Results are authoritative; optional narration explains bounded counts and caveats separately.</div>
   </div>
 </div>
 
@@ -36,13 +36,6 @@
   <span class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg></span>
   <p>{{ error }}</p>
 </div>
-{% endif %}
-
-{% if answer %}
-<section class="gp-section">
-  <h2>Answer</h2>
-  <div class="gp-panel pad" style="white-space:pre-wrap;line-height:1.6">{{ answer }}</div>
-</section>
 {% endif %}
 
 {% if facts %}

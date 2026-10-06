@@ -15,6 +15,7 @@ from gpo_lens import queries
 from gpo_lens import store as _store
 from gpo_lens.web._helpers import get_ro_conn
 from gpo_lens.web.auth import Permission, Principal, requires
+from gpo_lens.web.page_narration import make_action
 
 
 def register(app: FastAPI, templates: Jinja2Templates) -> None:
@@ -44,6 +45,15 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             "changelog.html",
             {
                 "request": request,
+                "narration_payload": make_action(
+                    request,
+                    _principal,
+                    "snapshot_comparison",
+                    [snap_a_id, snap_b_id],
+                    {"changes": len(entries), "settings": len(settings_changes)},
+                )
+                if snap_a_id in {s[0] for s in snapshots} and snap_b_id in {s[0] for s in snapshots}
+                else None,
                 "snapshots": snapshots,
                 "snap_a": snap_a_id,
                 "snap_b": snap_b_id,
