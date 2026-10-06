@@ -102,6 +102,29 @@ consume them — are documented in
   mechanisms (loopback, security filtering, WMI filters, item-level targeting)
   are flagged with caveats, not simulated.
 
+## Web navigation and optional explanations
+
+The web UI starts with Briefing / Findings / Explore / History / Tools.
+Explore and Tools retain the specialist workbenches; existing URLs and their
+filters keep their meaning. The compact search box searches configured settings
+through `/search`. Tools includes a complete route reference.
+
+For a staged rollout, set `GPO_LENS_LEGACY_NAV=1` before starting the server to
+restore the old primary links (Ask remains under Tools). Unset it and restart to
+return to the new default. This controls presentation only; see the
+[IIS deployment guide](deploy/iis/README.md) for the unchanged access model.
+
+With `GPO_LENS_API_KEY` configured, dossiers, OU details, finding histories and
+comparison results offer **Explain these facts** in a separate tab. Only bounded
+page counts, fixed scope caveats, and snapshot/analysis provenance are sent.
+Names, values, raw evidence and HTML are excluded. The model selects computed
+fact IDs; the server rejects additional claims and renders the corresponding
+facts. Without a key, these actions are absent. Explanations never run during
+page loading. Signed forms expire after an hour or a server restart; reload the
+original page if needed. Ask remains a separate Tools workbench: it routes the user question to a
+deterministic query and offers the same checked explain action over result
+counts. Query results and raw evidence are never sent to narration.
+
 ## Requirements
 
 - Python 3.12+

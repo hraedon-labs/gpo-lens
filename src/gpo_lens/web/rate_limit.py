@@ -70,7 +70,7 @@ def make_rate_limit_middleware(
         if path in _EXEMPT_PATHS or path.startswith(_EXEMPT_PREFIXES):
             return await call_next(request)
         client_ip = request.client.host if request.client else "unknown"
-        if path == "/ask":
+        if path in {"/ask", "/explain"}:
             limiter = ask_limiter
         elif path == "/ingest" and request.method == "POST":
             limiter = ingest_limiter

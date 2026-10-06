@@ -11,9 +11,10 @@
 <body>
 <a class="gp-skip-link" href="#main-content">Skip to main content</a>
 {% set path = request.scope.get('path', '/') %}
+{% set section_route, section_title = section_for_path(path) %}
 <div class="gp-app">
     <header class="gp-topbar">
-        <a href="{{ url_for('home') }}" class="gp-wordmark" aria-label="gpo-lens home">
+        <a href="{{ url_for('home' if legacy_nav else 'briefing') }}" class="gp-wordmark" aria-label="gpo-lens home">
             <span class="gp-mark" aria-hidden="true">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                      stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
@@ -27,6 +28,11 @@
             <span class="gp-ver">v{{ app_version }}</span>
         </a>
         <nav class="gp-nav" aria-label="Primary">
+            {% if not legacy_nav %}
+            {% for route, title in [('briefing', 'Briefing'), ('findings_inbox', 'Findings'), ('explore', 'Explore'), ('changelog', 'History'), ('tools', 'Tools')] %}
+            <a href="{{ url_for(route) }}" {% if section_route == route %}class="active" aria-current="page"{% endif %}>{{ title }}</a>
+            {% endfor %}
+            {% else %}
             <span class="gp-nav-group" aria-label="Estate">
                 <a href="{{ url_for('briefing') }}" {% if path.startswith('/briefing') %}class="active" aria-current="page"{% endif %}>Briefing</a>
                 <a href="{{ url_for('home') }}" {% if path == '/' %}class="active"{% endif %}>Dashboard</a>
@@ -51,10 +57,16 @@
             <span class="gp-nav-sep" aria-hidden="true"></span>
             <span class="gp-nav-group" aria-label="Tools">
                 <a href="{{ url_for('resultant_form') }}" {% if path.startswith('/resultant') %}class="active"{% endif %}>Resultant</a>
-                <a href="{{ url_for('ask_get') }}" {% if path.startswith('/ask') %}class="active"{% endif %}>Ask</a>
+                <a href="{{ url_for('tools') }}" {% if path.startswith('/tools') %}class="active"{% endif %}>Tools</a>
                 <a href="{{ url_for('ingest_get') }}" {% if path.startswith('/ingest') %}class="active"{% endif %}>Ingest</a>
             </span>
+            {% endif %}
         </nav>
+        <form class="gp-nav-search" role="search" action="{{ url_for('search') }}" method="get">
+            <label class="gp-sr-only" for="nav-search">Search configured settings</label>
+            <input class="gp-input" id="nav-search" name="q" type="search" maxlength="200" placeholder="Search settings" value="{{ request.query_params.get('q', '') if path == '/search' else '' }}">
+            <button class="gp-btn" type="submit">Search</button>
+        </form>
         <span class="gp-spacer"></span>
         <button class="gp-iconbtn" id="theme-toggle" type="button" title="Toggle light / dark" aria-label="Toggle light or dark theme">
             <svg id="theme-icon-dark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -71,7 +83,14 @@
     {% block breadcrumb %}{% endblock %}
     <main class="gp-page" id="main-content" tabindex="-1">
         <div class="gp-wrap">
+            {% if path not in ['/briefing', '/findings', '/explore', '/changelog', '/tools'] %}
+            <nav class="gp-breadcrumb" aria-label="Specialist navigation">
+                <a href="{{ url_for(section_route) }}">{{ section_title }}</a>
+                <span class="sep">/</span><span>Specialist view · existing bookmarks and filters retained</span>
+            </nav>
+            {% endif %}
             {% block content %}{% endblock %}
+            {% include "explain_facts.html" %}
         </div>
     </main>
 </div>

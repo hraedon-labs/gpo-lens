@@ -26,6 +26,7 @@ from gpo_lens.web._helpers import (
     parse_pagination,
 )
 from gpo_lens.web.auth import Permission, Principal, requires
+from gpo_lens.web.page_narration import make_action
 
 
 def register(app: FastAPI, templates: Jinja2Templates) -> None:
@@ -93,8 +94,8 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
 
         conn = get_ro_conn(app.state.db_path)
         try:
-            estate = load_estate(conn)
             snapshots = list_snapshots(conn)
+            estate = load_estate(conn, snapshots[0][0] if snapshots else None)
         finally:
             conn.close()
 
@@ -198,6 +199,19 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             "gpo_detail.html",
             {
                 "request": request,
+                "narration_payload": make_action(
+                    request,
+                    _principal,
+                    "gpo_comparison" if compare_gpo else "dossier",
+                    [snapshots[0][0]] if snapshots else [],
+                    {
+                        "settings": len(ledger),
+                        "links": len(gpo.links),
+                        "findings": open_finding_count,
+                        "scope_caveats": len(caveats),
+                        **({"comparisons": len(diff_rows)} if compare_gpo else {}),
+                    },
+                ),
                 "gpo": gpo,
                 "settings_by_side": dict(settings_by_side),
                 "disabled_sides": disabled_sides,

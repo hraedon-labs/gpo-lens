@@ -346,6 +346,15 @@ def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None
     from gpo_lens import __version__
 
     templates = Jinja2Templates(directory=str(_WEB_DIR / "templates"))
+    from gpo_lens.web import page_narration
+    from gpo_lens.web.navigation import section_for_path
+
+    templates.env.globals["legacy_nav"] = os.environ.get("GPO_LENS_LEGACY_NAV", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    templates.env.globals["section_for_path"] = section_for_path
     templates.env.globals["app_version"] = __version__
     templates.env.globals["setting_label"] = _setting_label
 
@@ -591,5 +600,6 @@ def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None
     findings.register(app, templates)
     explore.register(app, templates)
     api.register(app, templates)
+    page_narration.register(app, templates)
 
     return app

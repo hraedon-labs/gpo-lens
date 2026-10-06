@@ -1,0 +1,9 @@
+{% if narration_payload %}
+<aside class="gp-callout info" aria-label="Optional narration">
+  <form action="{{ url_for('explain_facts') }}" method="post" target="_blank" rel="noopener">
+    <input type="hidden" name="payload" value="{{ narration_payload }}">
+    <button class="gp-btn" type="submit">Explain these facts</button>
+    <span class="muted">Optional narrative projection of page counts and scope caveats. Opens separately; this deterministic page remains authoritative.</span>
+  </form>
+</aside>
+{% endif %}
