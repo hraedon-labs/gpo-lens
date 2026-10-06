@@ -46,6 +46,12 @@ _WINDOWS_CREDENTIAL_NAMES = frozenset(
     }
 )
 _USERINFO = re.compile(r"(?i)(?:[a-z][a-z0-9+.-]*://|\\\\|//)[^\s/@\\:]*:([^\s/@\\]+)@")
+_COMMAND_OPTIONS = {
+    "schtasks": r"/(?:rp|p)",
+    "cmdkey": r"/pass",
+    "powershell": r"-(?:password|proxypassword)",
+    "pwsh": r"-(?:password|proxypassword)",
+}
 _RAW_FRAGMENT = re.compile(r"</?[A-Za-z][^>]*>|^[OGDS]:.*\([A-Z]+;", re.S)
 _OMIT = {
     "raw",
@@ -119,6 +125,56 @@ def _registry_payload(mapping: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(values)
 
 
+def _command_secrets(mapping: Mapping[str, Any]) -> tuple[str, ...]:
+    """Known Windows credential switches in task commands, including XML shapes.
+
+    Match complete options only for known executables. Quoted values may contain
+    spaces; ':' and '=' forms as well as a separate argument are accepted.
+    This is credential discovery, never command execution or policy evaluation.
+    """
+    attrs = mapping.get("@attr")
+    properties = attrs if isinstance(attrs, Mapping) else mapping
+    command = properties.get(
+        "command", properties.get("appName", properties.get("Path", properties.get("exePath", "")))
+    )
+    arguments = properties.get("arguments", "")
+    if str(mapping.get("tag", "")).lower() == "exec":
+        children = mapping.get("children", [])
+        if isinstance(children, list):
+            for child in children:
+                if isinstance(child, Mapping):
+                    if str(child.get("tag", "")).lower() == "command":
+                        command = child.get("text", "")
+                    elif str(child.get("tag", "")).lower() == "arguments":
+                        arguments = child.get("text", "")
+    if not isinstance(command, str) or not isinstance(arguments, str):
+        return ()
+    executable = re.split(r"[\\/]", command.strip().strip("\"'"))[-1].lower()
+    executable = executable.removesuffix(".exe")
+    option = _COMMAND_OPTIONS.get(executable)
+    if option is None:
+        return ()
+    pattern = (
+        rf"(?i)(?:^|\s){option}(?:\s*[:=]\s*|\s+)"
+        r"""(?:"((?:\\.|`.|""|[^"\\`])*)"|'((?:''|[^'])*)'|([^\s]+))"""
+    )
+    values: set[str] = set()
+    for match in re.finditer(pattern, arguments):
+        double, single, bare = match.groups()
+        value = next((g for g in match.groups() if g is not None), "")
+        if not value:
+            continue
+        # Keep the source spelling as well as the decoded value: arguments and
+        # copied evidence can contain different representations of a password.
+        values.add(value)
+        if double is not None:
+            decoded = re.sub(r'\\(["\\])|`(.)|""', lambda m: m[1] or m[2] or '"', double)
+            values.add(decoded)
+        elif single is not None:
+            values.add(single.replace("''", "'"))
+    return tuple(sorted(values))
+
+
 def secret_values(value: object) -> tuple[str, ...]:
     """Discover credential values while retaining no raw source fragments."""
     secrets: set[str] = set()
@@ -128,6 +184,7 @@ def secret_values(value: object) -> tuple[str, ...]:
         if mapping is not None:
             sensitive = _sensitive(mapping)
             secrets.update(_registry_payload(mapping))
+            secrets.update(_command_secrets(mapping))
             for key, child in mapping.items():
                 if (
                     (_SECRET_KEY.fullmatch(str(key)) or (sensitive and key in _VALUE))

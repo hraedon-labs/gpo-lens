@@ -2,8 +2,17 @@
 
 Verified **2026-10-06** on `release/v1.3.0-candidate`, integrated product base
 `d271cf7`. This pass changes documentation and plan bookkeeping only; no
-product, dependency, CI or test file was changed. Package metadata remains
-1.2.0 for the coordinator's release bump. No tracker write, PR or tag was made.
+product, dependency, CI or test file was changed in that documentation pass.
+Package metadata reports **1.3.0** after the integrated first fix round.
+No tracker write, PR or tag was made.
+
+## Live IIS validation (2026-10-06)
+
+Two in-place upgrades on a Windows Server 2025 IIS lab VM with the release-candidate installer (`-ConfigureIIS`, no other flags):
+(1) an anonymous site, 1.0.0 → 1.3.0: binding, certificate and existing web.config variables preserved; `GPO_LENS_ALLOWED_HOSTS` auto-added; site served 200; foreign Host rejected.
+(2) a mirror of the production configuration: real v1.0.0 installed with `-WindowsAuth`, a lab estate ingested (12 GPOs, 29 SOMs, 138 settings, 1 coverage gap, 42 doctor findings), then upgraded. Windows Authentication stayed on and anonymous stayed off (anonymous → 401 Negotiate), `GPO_LENS_ALLOWED_HOSTS` was auto-added, and Kerberos-authenticated requests returned 200 on /, /briefing, /findings, /explore, /api/version (1.3.0) and a CSV export. The first authenticated request migrated schema 3 → 9 with every row preserved and `integrity_check` ok.
+
+The round-2 installer changes (build-closure pinning, endpoint/SNI transitions) are re-validated live by the coordinator before release.
 
 See [Plan 027](../plans/027-road-to-generous-1x.md) for the complete old/new
 plan-status table, all 12 nonterminal WI dispositions and the coordinator's

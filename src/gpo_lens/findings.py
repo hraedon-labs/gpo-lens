@@ -789,9 +789,27 @@ def append_triage_event(
     return cursor.lastrowid
 
 
-def _triage_order(event: TriageEvent) -> tuple[datetime, int]:
-    """Chronological order with immutable event ID as the stable tie-breaker."""
-    return event.occurred_at, event.id
+def _triage_utc(value: datetime) -> datetime:
+    """Legacy timestamps without an offset use UTC, as the event writer does."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _parse_triage_dt(value: str | None) -> datetime | None:
+    parsed = _parse_dt(value)
+    return _triage_utc(parsed) if parsed is not None else None
+
+
+def _triage_order(event: TriageEvent) -> tuple[datetime, bool, int]:
+    """At an equal instant, reopen/revoke/expiry conservatively win.
+
+    Migration assigns legacy rows IDs after existing v2 rows, so ID alone
+    cannot establish cross-table causal order. Keep IDs and audit payloads
+    immutable; use ID only after timestamp and conservative action precedence.
+    """
+    opens = event.action in {"reopened", "risk_acceptance_revoked", "risk_acceptance_expired"}
+    return _triage_utc(event.occurred_at), opens, event.id
 
 
 def fold_triage(events: list[TriageEvent]) -> TriageStatus:
@@ -815,7 +833,7 @@ def fold_triage(events: list[TriageEvent]) -> TriageStatus:
     rationale = ""
 
     for ev in sorted(events, key=_triage_order):
-        updated_at = ev.occurred_at
+        updated_at = _triage_utc(ev.occurred_at)
         actor = ev.actor
         if ev.action == "commented":
             note = ev.note
@@ -829,7 +847,7 @@ def fold_triage(events: list[TriageEvent]) -> TriageStatus:
             status = "accepted_risk"
             note = ev.note
             rationale = ev.rationale
-            expires_at = ev.expires_at
+            expires_at = _triage_utc(ev.expires_at) if ev.expires_at else None
         elif ev.action == "reopened":
             status = "open"
             note = ev.note
@@ -871,10 +889,10 @@ def load_triage_events(
                 occurrence_id=r[1],
                 action=r[2],
                 actor=r[3],
-                occurred_at=_parse_dt(r[4]) or datetime.min.replace(tzinfo=UTC),
+                occurred_at=_parse_triage_dt(r[4]) or datetime.min.replace(tzinfo=UTC),
                 note=r[5],
                 rationale=r[6],
-                expires_at=_parse_dt(r[7]),
+                expires_at=_parse_triage_dt(r[7]),
                 supersedes_event_id=r[8],
             )
             for r in rows
@@ -915,10 +933,10 @@ def load_triage_status_map(
                 occurrence_id=r[1],
                 action=r[2],
                 actor=r[3],
-                occurred_at=_parse_dt(r[4]) or datetime.min.replace(tzinfo=UTC),
+                occurred_at=_parse_triage_dt(r[4]) or datetime.min.replace(tzinfo=UTC),
                 note=r[5],
                 rationale=r[6],
-                expires_at=_parse_dt(r[7]),
+                expires_at=_parse_triage_dt(r[7]),
                 supersedes_event_id=r[8],
             )
         )
@@ -1561,10 +1579,10 @@ def accepted_risk_register(
             occurrence_id=row[1],
             action=row[2],
             actor=row[3],
-            occurred_at=_parse_dt(row[4]) or datetime.min.replace(tzinfo=UTC),
+            occurred_at=_parse_triage_dt(row[4]) or datetime.min.replace(tzinfo=UTC),
             note=row[5],
             rationale=row[6],
-            expires_at=_parse_dt(row[7]),
+            expires_at=_parse_triage_dt(row[7]),
             supersedes_event_id=row[8],
         )
         if event.occurred_at <= as_of:

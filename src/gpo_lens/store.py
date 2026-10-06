@@ -556,8 +556,9 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         # been modified while foreign-key enforcement was disabled.
         # Released v1.1/v1.2 exposed both APIs. Existing event IDs (including
         # supersedes references) remain immutable; converted rows get stable IDs
-        # in legacy chronological order. All readers merge by (occurred_at, id),
-        # never append order, so an older approval cannot override a newer reopen.
+        # in legacy chronological order. Readers normalize timestamps to UTC
+        # and prefer reopen/revoke/expiry at equal instants before the ID
+        # tie-breaker, so migrated approvals cannot reinstate a reopened risk.
         conn.execute(
             """
             INSERT INTO finding_triage_event

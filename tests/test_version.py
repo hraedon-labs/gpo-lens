@@ -40,6 +40,16 @@ def test_lock_version_matches_package() -> None:
     assert next(p["version"] for p in packages if p["name"] == "gpo-lens") == __version__
 
 
+def test_release_handover_reports_current_metadata() -> None:
+    root = Path(__file__).resolve().parents[1]
+    for name in ("docs/release-v1.3.0-verification.md", "plans/027-road-to-generous-1x.md"):
+        text = (root / name).read_text()
+        assert f"Package metadata reports **{__version__}**" in text
+        assert "bump package metadata" not in text
+        assert "metadata remains\n1.2.0" not in text
+        assert "metadata currently reports **1.2.0**" not in text
+
+
 def test_cli_version_flag() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "gpo_lens", "--version"],

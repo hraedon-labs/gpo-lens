@@ -10,7 +10,11 @@ import ast
 import configparser
 import json
 import re
+import shutil
 import subprocess
+import sys
+import sysconfig
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -145,7 +149,87 @@ def test_iis_requirements_match_lock(tmp_path: Path) -> None:
     assert exported.read_bytes() == (ROOT / "deploy/iis/requirements-web.lock.txt").read_bytes()
     installer = (ROOT / "scripts/install-windows.ps1").read_text()
     assert "pip install --require-hashes -r $requirements" in installer
-    assert "pip install --upgrade --no-deps $pkg" in installer
+    assert "pip install --upgrade --no-build-isolation --no-deps $pkg" in installer
+
+
+def test_iis_build_lock_matches_uv_and_backend_contract(tmp_path: Path) -> None:
+    exported = tmp_path / "build.txt"
+    subprocess.run(
+        [
+            "uv",
+            "export",
+            "--locked",
+            "--only-group",
+            "build",
+            "--no-emit-project",
+            "--no-header",
+            "--format",
+            "requirements-txt",
+            "-o",
+            str(exported),
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    assert exported.read_bytes() == (ROOT / "deploy/iis/requirements-build.lock.txt").read_bytes()
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert project["dependency-groups"]["build"] == project["build-system"]["requires"]
+    installer = (ROOT / "scripts/install-windows.ps1").read_text()
+    assert "pip install --require-hashes -r $buildRequirements" in installer
+    assert installer.index("pip install --require-hashes -r $buildRequirements") < installer.index(
+        "pip install --upgrade --no-build-isolation --no-deps $pkg"
+    )
+
+
+def test_glv2_offline_project_install(tmp_path: Path) -> None:
+    """Repeat buildprobe's no-index install using the installer's actual options.
+
+    The dev environment supplies the locked build backend, just as the IIS
+    hash-checked build requirements do. The disposable venv supplies pip.
+    """
+    import os
+
+    subprocess.run([sys.executable, "-m", "venv", str(tmp_path / "venv")], check=True)
+    python = tmp_path / "venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    source = (ROOT / "scripts/install-windows.ps1").read_text()
+    flags = re.search(r"pip install (--upgrade[^\n]+) \$pkg", source)
+    assert flags
+    env = dict(os.environ, PIP_NO_INDEX="1", PYTHONPATH=sysconfig.get_paths()["purelib"])
+    env.update(PIP_NO_CACHE_DIR="1", PIP_DISABLE_PIP_VERSION_CHECK="1")
+    checkout = tmp_path / "source"
+    checkout.mkdir()
+    for name in ("pyproject.toml", "README.md"):
+        shutil.copyfile(ROOT / name, checkout / name)
+    shutil.copytree(ROOT / "src", checkout / "src", ignore=shutil.ignore_patterns("__pycache__"))
+    result = subprocess.run(
+        [str(python), "-m", "pip", "install", *flags[1].split(), str(checkout) + "[web]"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Installing build dependencies" not in result.stdout
+    version = subprocess.check_output(
+        [
+            str(python),
+            "-c",
+            "import importlib.metadata; print(importlib.metadata.version('gpo-lens'))",
+        ],
+        text=True,
+    ).strip()
+    assert version == tomllib.loads((checkout / "pyproject.toml").read_text())["project"]["version"]
+
+
+def test_installer_uses_the_tested_endpoint_transition() -> None:
+    body = (
+        (ROOT / "scripts/install-windows.ps1")
+        .read_text()
+        .split("# 5. Create / update the IIS site.", 1)[1]
+    )
+    assert "Set-IisEndpoint -SiteName $siteName" in body
+    assert "-CertThumbprint $effCert -Existing $existing" in body
+    assert "-Name bindings" not in body
 
 
 def test_transfer_uses_collector_zip_and_changelog_covers_shipped_fixes() -> None:
@@ -154,6 +238,11 @@ def test_transfer_uses_collector_zip_and_changelog_covers_shipped_fixes() -> Non
     assert "Compress-Archive" not in transfer
     assert "collector-produced ZIP" in transfer
     assert "forward slashes" in transfer
+    assert "260" in transfer
+    assert "partial ZIP" in transfer
+    assert "folder" in transfer and "shorter" in transfer
+    assert "Windows PowerShell 5.1" in transfer
+    assert "-NoZip" in transfer
     changelog = (ROOT / "CHANGELOG.md").read_text().split("## v", 1)[0]
     for term in ("double-conversion", "snapshot-scoped", "batched persistence"):
         assert term in changelog
