@@ -1,8 +1,6 @@
 # Changelog
 
-## Unreleased
-
-Draft **v1.4.0** — release date to be assigned by the coordinator.
+## v1.4.0 — 2026-10-06
 
 ### Added
 

@@ -1,6 +1,6 @@
 # JSON output contract (machine-readable seam)
 
-**Status:** `schema_version: 2` (Unreleased); version 1 was frozen in v0.3.0.
+**Status:** `schema_version: 2` (since v1.4.0); version 1 was frozen in v0.3.0.
 **Enforced by:** `tests/test_json_contract.py` (golden shapes) + `src/gpo_lens/cli/_helpers.py` (envelope).
 
 This is the stable interface downstream consumers build against. gpo-lens's
