@@ -82,7 +82,7 @@ def test_triage_timestamp_and_id_order_in_every_fold():
         assert risk.revoked_at is not None
         conn.execute("UPDATE finding_triage_event SET occurred_at='2026-01-01T00:00:00+00:00'")
         conn.commit()
-        assert get_triage_status(conn, oid).status == "accepted_risk"  # equal time: stable id
+        assert get_triage_status(conn, oid).status == "open"  # equal time: conservative reopen
 
 
 def test_enforced_links_have_complete_identity_and_do_not_inherit_collapsed_triage():

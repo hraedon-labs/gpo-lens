@@ -33,8 +33,14 @@ That single command:
    location the app pool can read.
 2. Creates `C:\ProgramData\gpo-lens` (data dir + logs) and a venv, and
    `pip install --require-hashes` installs the committed `requirements-web.lock.txt`
-   exported from `uv.lock`, then installs the checkout with `--no-deps`. uv is
-   not needed on the IIS server; the shared-Python design is unchanged.
+   exported from `uv.lock`, plus `requirements-build.lock.txt` for Hatchling
+   and its build dependencies. It then installs the checkout with
+   `--no-build-isolation --no-deps`, so pip cannot resolve another build backend.
+   Regenerate the build artifact with
+   `uv export --locked --only-group build --no-emit-project --no-header --format requirements-txt -o deploy/iis/requirements-build.lock.txt`.
+   For offline installation, download the wheels for both requirement files
+   in advance and configure `PIP_NO_INDEX=1` and `PIP_FIND_LINKS` to that folder.
+   uv is not needed on the IIS server; the shared-Python design is unchanged.
 3. Lays down `web.config` in `C:\inetpub\gpo-lens` (paths rewritten to your
    `-InstallDir`).
 4. Creates the `gpo-lens` app pool (No Managed Code, AlwaysRunning) and IIS site

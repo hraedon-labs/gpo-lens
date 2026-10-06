@@ -65,6 +65,13 @@ described in the [IIS guide](iis/README.md#optional-per-user-audit-attribution).
    so Linux recognizes the directory tree. Repacking with Windows PowerShell's
    generic archive command can store backslashes as literal Linux filenames,
    causing SYSVOL content to be missed. Keep the collector's ZIP unchanged.
+   On Windows PowerShell 5.1, paths over 260 characters can be skipped. If the
+   collector warns about a **partial ZIP**, transfer the complete output folder
+   instead, or collect again under a shorter root (for example `C:\GpoExport`)
+   and confirm that the warning is gone before transferring the new ZIP.
+   Ingest a transferred folder on the server with
+   `gpo-lens --db <server-db> ingest <transferred-folder>`, using the same
+   database path as the running service.
 3. Open the local URL or authenticated HTTPS proxy, choose **Ingest**, and
    upload the ZIP. No SMB share, domain account, or collector credentials are
    required on the analysis server. Transfers and stored exports contain

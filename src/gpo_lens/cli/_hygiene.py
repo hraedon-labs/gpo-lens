@@ -130,6 +130,11 @@ def cmd_gpp_tasks(args: argparse.Namespace) -> None:
     """Structured inventory of scheduled tasks deployed by GPO."""
     estate = _get_estate(args)
     result = scheduled_tasks(estate)
+    # SYSVOL task arguments may be absent from the report's Setting subtrees.
+    # Carry the structured command context into text and copied output fields.
+    from gpo_lens.cli._helpers import _add_secret_source
+
+    _add_secret_source(result)
     if args.json:
         _render_json(
             [

@@ -138,10 +138,10 @@ jobs:
         with:
           enable-cache: true
 
-      # Audit the deployable surface (runtime + web extra) against the pinned
-      # lockfile. Dev-only tooling is excluded to keep the signal on what ships.
+      # Audit runtime, web and the IIS installer's executed build backend
+      # against the pinned lockfile. Other dev-only tooling stays excluded.
       - name: Export locked dependencies
-        run: uv export --locked --extra web --no-emit-project --format requirements-txt -o requirements-audit.txt
+        run: uv export --locked --extra web --group build --no-emit-project --format requirements-txt -o requirements-audit.txt
 
       - name: pip-audit
         run: uvx pip-audit --strict --requirement requirements-audit.txt

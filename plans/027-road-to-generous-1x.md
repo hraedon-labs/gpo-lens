@@ -6,10 +6,10 @@
 
 Reconciled against `release/v1.3.0-candidate` on **2026-10-06**. “Shipped in
 v1.3.0” below means implemented for this release; the coordinator still owns
-version metadata, the release date/tag, tracker acceptance and deployment.
+the release date/tag, tracker acceptance and deployment.
 This docs pass does not create those artifacts or claim the release is already
-running at work. Package metadata currently reports **1.2.0**; it must become
-1.3.0 in the coordinator's release step.
+running at work. Package metadata reports **1.3.0**, synchronized in the
+integrated first fix round; the version bump is complete.
 
 | Phase / stream | Final state and evidence |
 |----------------|--------------------------|
@@ -32,7 +32,8 @@ running at work. Package metadata currently reports **1.2.0**; it must become
 - [x] Local lint, format, type, coverage, supply-chain and identifier checks recorded in [exact gate evidence](../docs/release-v1.3.0-verification.md).
 - [x] All nonterminal tracker items have an evidence-backed proposed disposition below; no tracker writes were made.
 - [ ] Coordinator: independent review and tracker transitions through `in_review → in_human_review → done`; deferred items remain deferred. The tracker is not yet “zero open non-deferred WIs”.
-- [ ] Coordinator: bump package metadata, set the v1.3.0 date, run authoritative release CI, tag/release and deploy lab → work with backup/restore and legacy-navigation rollback exercised. This branch's docs status is not deployment evidence.
+- [x] Package metadata synchronized to v1.3.0 across runtime, package and lockfile.
+- [ ] Coordinator: set the v1.3.0 date, run authoritative release CI, tag/release and deploy lab → work with backup/restore and legacy-navigation rollback exercised. This branch's docs status is not deployment evidence.
 
 ## Explicit dispositions and implementation limits
 
