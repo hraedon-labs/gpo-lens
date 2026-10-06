@@ -37,8 +37,8 @@ ClaimLevel = Literal["confirmed", "probable", "possible"]
 - ``confirmed``: directly observed in estate data (e.g. cpassword in XML).
 - ``probable``: inferred from a strong structural signal (e.g. GPO writable
   by non-admin via SDDL parse).
-- ``possible``: heuristic or pattern-based (e.g. UNC path in a setting value
-  that *might* be a broken reference).
+- ``possible``: heuristic or pattern-based (e.g. a pattern without enough evidence to confirm
+  its effect).
 """
 
 OccurrenceState = Literal[
@@ -293,6 +293,7 @@ class FindingObservation:
     claim_level: ClaimLevel
     remediation: str
     compliance_json: str
+    detector_version: str | None = None  # NULL: pre-1.4, unknown
 
 
 @dataclass(frozen=True)

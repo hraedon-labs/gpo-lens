@@ -5,6 +5,7 @@ import json
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 
 import pytest
 
@@ -23,10 +24,9 @@ GPO_LENS = [sys.executable, "-m", "gpo_lens.cli"]
 @pytest.fixture
 def conn(tmp_path):
     db = tmp_path / "test.db"
-    c = sqlite3.connect(str(db))
-    store.init_db(c)
-    yield c
-    c.close()
+    with closing(sqlite3.connect(str(db))) as c:
+        store.init_db(c)
+        yield c
 
 
 class TestEventsTable:
@@ -139,10 +139,7 @@ class TestQueryEvents:
 
 
 class TestDoubleIngestEvents:
-    def test_first_ingest_produces_created_events(self, tmp_path):
-        db = tmp_path / "test.db"
-        conn = sqlite3.connect(str(db))
-        store.init_db(conn)
+    def test_first_ingest_produces_created_events(self, conn):
         empty_estate = model.Estate(domain="test.local", gpos=[])
         prev_sid = store.save_estate(conn, empty_estate)
 
@@ -191,10 +188,7 @@ class TestDoubleIngestEvents:
         assert "gpo.created" in types
         assert "ingest.summary" in types
 
-    def test_second_ingest_produces_modified_events(self, tmp_path):
-        db = tmp_path / "test.db"
-        conn = sqlite3.connect(str(db))
-        store.init_db(conn)
+    def test_second_ingest_produces_modified_events(self, conn):
 
         estate_v1 = model.Estate(
             domain="test.local",
@@ -283,10 +277,7 @@ class TestDoubleIngestEvents:
         assert delta["old"] == "5"
         assert delta["new"] == "10"
 
-    def test_deleted_gpo_event(self, tmp_path):
-        db = tmp_path / "test.db"
-        conn = sqlite3.connect(str(db))
-        store.init_db(conn)
+    def test_deleted_gpo_event(self, conn):
 
         estate_v1 = model.Estate(
             domain="test.local",
@@ -367,11 +358,8 @@ class TestDoubleIngestEvents:
         assert len(deleted) == 1
         assert deleted[0]["payload"]["gpo_id"] == "gpo-2"
 
-    def test_delta_capping_over_100_changes(self, tmp_path):
+    def test_delta_capping_over_100_changes(self, conn):
         """When a GPO has >100 setting changes, deltas should be truncated."""
-        db = tmp_path / "test.db"
-        conn = sqlite3.connect(str(db))
-        store.init_db(conn)
 
         # v1: GPO with 150 settings
         settings_v1 = [

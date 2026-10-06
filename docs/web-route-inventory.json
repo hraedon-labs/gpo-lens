@@ -483,6 +483,18 @@
       "translation": "identity: route, method and all query parameters retained; Markdown/CSV mirror the filtered typed view",
       "discover_via": "search",
       "representative_query": "identity=Synthetic%3AValue&cse=Registry&side=Computer&snapshot=1&format=md"
+    },
+    {
+      "path": "/dependencies",
+      "name": "dependencies",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/dependencies",
+      "translation": "identity: offline external dependency inventory with server filter and deterministic md/csv exports",
+      "discover_via": "explore",
+      "representative_query": "server=old-fs01",
+      "representative_export_query": "server=old-fs01&format=md"
     }
   ]
 }

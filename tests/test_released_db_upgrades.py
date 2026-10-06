@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+import subprocess
 from collections import Counter
+from contextlib import closing
 from dataclasses import asdict
 from pathlib import Path
 
@@ -20,7 +22,33 @@ from gpo_lens.findings import accepted_risk_register, finding_history, load_tria
 from gpo_lens.store import CURRENT_SCHEMA_VERSION, init_db, list_snapshots, load_estate, save_estate
 
 FIXTURES = Path(__file__).parent / "fixtures/released_databases"
-TAGS = ("v0.5.0", "v0.7.0", "v0.7.1", "v1.0.0", "v1.1.0", "v1.2.0")
+TAGS = ("v0.5.0", "v0.7.0", "v0.7.1", "v1.0.0", "v1.1.0", "v1.2.0", "v1.3.1")
+
+
+def test_previous_release_refuses_schema_10_without_writes(tmp_path: Path) -> None:
+    # Exercise the actual released version guard, not a simulated old constant.
+    # Frozen copy of v1.3.1's store.py: CI checkouts are shallow and carry no tags.
+    old_source = (FIXTURES.parent / "released_code" / "v1.3.1-store.py.txt").read_text()
+    root = Path(__file__).resolve().parent.parent
+    tagged = subprocess.run(
+        ["git", "show", "v1.3.1:src/gpo_lens/store.py"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if tagged.returncode == 0:
+        assert old_source == tagged.stdout, "frozen v1.3.1 store.py drifted from the tag"
+    namespace = {"__name__": "gpo_lens._released_store"}
+    exec(compile(old_source, "<v1.3.1-store>", "exec"), namespace)  # noqa: S102
+    db = tmp_path / "upgraded.sqlite3"
+    shutil.copyfile(FIXTURES / "v1.3.1.sqlite3", db)
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        before = list(conn.iterdump())
+        with pytest.raises(RuntimeError, match=r"schema version 10.*supports \(version 9\)"):
+            namespace["init_db"](conn)
+        assert list(conn.iterdump()) == before
 
 
 def _contents(conn: sqlite3.Connection) -> dict[str, tuple[list[str], list[tuple]]]:
@@ -50,7 +78,7 @@ def _preserved(conn: sqlite3.Connection, original: dict) -> None:
 def test_released_database_upgrade_preserves_every_entity(tag: str, tmp_path: Path) -> None:
     manifest = json.loads((FIXTURES / f"{tag}.json").read_text())
     source = FIXTURES / f"{tag}.sqlite3"
-    with sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True) as conn:
+    with closing(sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True)) as conn, conn:
         original = _contents(conn)
         assert conn.execute("PRAGMA user_version").fetchone()[0] == manifest["schema_version"]
         assert {table: len(rows) for table, (_, rows) in original.items()} == manifest["counts"]
@@ -85,8 +113,15 @@ def test_released_database_upgrade_preserves_every_entity(tag: str, tmp_path: Pa
         assert any(entry["action"] == "ingest" for entry in audit_entries)
     first_open = None
     for _ in range(2):
-        with sqlite3.connect(db) as conn:
+        with closing(sqlite3.connect(db)) as conn, conn:
             init_db(conn)
+            assert CURRENT_SCHEMA_VERSION == 10
+            assert "detector_version" in {
+                row[1] for row in conn.execute("PRAGMA table_info(finding_observation)")
+            }
+            assert conn.execute(
+                "SELECT count(*) FROM finding_observation WHERE detector_version IS NOT NULL"
+            ).fetchone() == (0,)
             assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
             assert conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
             assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
@@ -155,11 +190,16 @@ def test_iis_online_backup_restores_released_database(tag: str, tmp_path: Path) 
         assert Path(f"{db}-wal").stat().st_size > 0
         before = _contents(app)
         # A distinct backup connection, while the app connection remains open.
-        with sqlite3.connect(db) as src, sqlite3.connect(restored / db.name) as dst:
+        with (
+            closing(sqlite3.connect(db)) as src,
+            src,
+            closing(sqlite3.connect(restored / db.name)) as dst,
+            dst,
+        ):
             src.backup(dst)
         if manifest["audit_file"]:
             shutil.copyfile(live / "audit.log", restored / "audit.log")
-        with sqlite3.connect(restored / db.name) as conn:
+        with closing(sqlite3.connect(restored / db.name)) as conn, conn:
             init_db(conn)
             assert _contents(conn) == before
             assert asdict(load_estate(conn, sid)) == asdict(estate)

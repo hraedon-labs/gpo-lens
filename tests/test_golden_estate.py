@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from gpo_lens.dependencies import external_dependencies
 from gpo_lens.detection import (
     broken_refs,
     cpassword_scan,
@@ -387,41 +388,24 @@ class TestDriveMappings:
         assert all(s.side == "User" for s in drive_settings)
 
     def test_drive_unc_refs_in_doctor(self, golden_estate: Estate) -> None:
-        """The doctor should find broken UNC paths as drive_mapping_unc findings.
-
-        3 from Drive Maps + 1 from Printers = 4 drive_mapping_unc entries.
-        """
         findings = estate_doctor(golden_estate)
-        drive_refs = [
-            f
-            for f in findings
-            if f.category == "broken_ref:drive_mapping_unc" and f.gpo_id == G["drives"]
-        ]
-        assert len(drive_refs) >= 3, (
-            f"Expected >= 3 drive_mapping_unc findings, got {len(drive_refs)}"
-        )
-        # Verify the specific drive UNC paths are reported
-        ref_values = {f.detail for f in drive_refs}
-        assert r"\\GOLDEN.local\shares\public" in ref_values
-        assert r"\\oldserver.golden.local\deprecated\share" in ref_values
-        assert r"\\missing-server\share" in ref_values
+        assert not [f for f in findings if f.category == "broken_ref:drive_mapping_unc"]
 
-    def test_drive_mappings_broken_refs_scan(self, golden_estate: Estate) -> None:
-        """broken_refs() directly returns drive_mapping_unc entries.
-
-        3 from Drive Maps settings + 1 from the Printers setting = 4 total.
-        """
-        refs = broken_refs(golden_estate)
-        drive_refs = [
-            r for r in refs if r.ref_type == "drive_mapping_unc" and r.gpo_id == G["drives"]
+    def test_drive_mappings_dependency_scan(self, golden_estate: Estate) -> None:
+        refs = [
+            r
+            for group in external_dependencies(golden_estate)
+            for r in group.dependencies
+            if r.gpo_id == G["drives"]
         ]
-        assert len(drive_refs) == 4
-        ref_values = {r.ref_value for r in drive_refs}
-        assert r"\\GOLDEN.local\shares\public" in ref_values
-        assert r"\\oldserver.golden.local\deprecated\share" in ref_values
-        assert r"\\missing-server\share" in ref_values
-        # Printer UNC path also classified as drive_mapping_unc
-        assert r"\\printserver\lab-printer" in ref_values
+        assert len(refs) == 4
+        assert {r.dependency_type for r in refs} == {"drive_mapping", "printer_connection"}
+        assert {r.target for r in refs} == {
+            r"\\GOLDEN.local\shares\public",
+            r"\\oldserver.golden.local\deprecated\share",
+            r"\\missing-server\share",
+            r"\\printserver\lab-printer",
+        }
 
     def test_drives_gpo_has_sysvol_path(self, golden_estate: Estate) -> None:
         """The drives GPO should have a sysvol_path attached."""
@@ -487,11 +471,12 @@ class TestPrintersPreference:
         surface it as drive_mapping_unc (since the CSE is 'Printers').
         Either way, the UNC path must appear in broken_refs output.
         """
-        refs = broken_refs(golden_estate)
-        printer_refs = [
-            r for r in refs if r.gpo_id == G["drives"] and "printserver" in r.ref_value.lower()
+        refs = [
+            r
+            for group in external_dependencies(golden_estate)
+            for r in group.dependencies
+            if r.gpo_id == G["drives"] and r.dependency_type == "printer_connection"
         ]
-        assert len(printer_refs) >= 1, (
-            f"Expected >= 1 broken ref for printer UNC, got {len(printer_refs)}. "
-            f"All refs: {[(r.ref_type, r.ref_value) for r in refs if r.gpo_id == G['drives']]}"
-        )
+        assert len(refs) == 1
+        assert refs[0].server == "printserver"
+        assert not [r for r in broken_refs(golden_estate) if "printserver" in r.ref_value]

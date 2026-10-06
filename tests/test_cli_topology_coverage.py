@@ -31,7 +31,7 @@ class TestSitesCommand:
         )
         assert r.returncode == 0
         env = json.loads(r.stdout)
-        assert env["schema_version"] == 1
+        assert env["schema_version"] == 2
         assert env["kind"] == "sites"
         assert isinstance(env["data"], list)
         assert len(env["data"]) >= 2
@@ -69,7 +69,7 @@ class TestTopologyCheckCommand:
         )
         assert r.returncode == 0
         env = json.loads(r.stdout)
-        assert env["schema_version"] == 1
+        assert env["schema_version"] == 2
         assert env["kind"] == "topology-check"
         assert isinstance(env["data"], list)
 
@@ -125,7 +125,7 @@ class TestWmiFiltersCommand:
         )
         assert r.returncode == 0
         env = json.loads(r.stdout)
-        assert env["schema_version"] == 1
+        assert env["schema_version"] == 2
         assert env["kind"] == "wmi-filters"
         assert isinstance(env["data"], list)
         assert len(env["data"]) >= 1
@@ -148,7 +148,7 @@ class TestDanglingCommand:
         )
         assert r.returncode == 0
         env = json.loads(r.stdout)
-        assert env["schema_version"] == 1
+        assert env["schema_version"] == 2
         assert env["kind"] == "dangling"
         assert isinstance(env["data"], list)
 
@@ -172,6 +172,6 @@ class TestEnforcedCommand:
         )
         assert r.returncode == 0
         env = json.loads(r.stdout)
-        assert env["schema_version"] == 1
+        assert env["schema_version"] == 2
         assert env["kind"] == "enforced"
         assert isinstance(env["data"], list)

@@ -66,7 +66,10 @@ a leading apostrophe for spreadsheet safety.
 Rendering streams one record/line at a time; it never builds the complete
 artifact or copies the full result into another output list. Query memory is
 the existing typed view result plus provenance and the distinct credential
-masking context. Findings pagination uses SQL and is bounded by the view's
+masking context. HTTP transport joins these lines into chunks of at most 64 KiB
+of UTF-8 bytes, including splitting oversized lines, to bound threadpool
+handoffs without changing artifact bytes. CLI retains the line iterator.
+Findings pagination uses SQL and is bounded by the view's
 existing limits (50 by default, up to 200 per page; `per_page=all` displays at
 most 10,000 occurrences). Exports mirror that window rather than silently
 claiming to contain every occurrence. Other views use their existing typed

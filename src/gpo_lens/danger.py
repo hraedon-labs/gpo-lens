@@ -45,12 +45,13 @@ from gpo_lens.model import SEVERITY_ORDER
 from gpo_lens.normalize import is_registry_cse
 
 if TYPE_CHECKING:
-    from gpo_lens.model import AdmxResolver, Estate
+    from gpo_lens.model import AdmxResolver, Estate, Side
 
 __all__ = [
     "ComplianceMapping",
     "DangerFinding",
     "DangerRule",
+    "audit_subcategory_override",
     "danger_findings",
     "evaluate_danger_rules",
     "gpo_writable_by_nonadmin",
@@ -386,13 +387,13 @@ def overbroad_apply_group_policy(estate: Estate) -> list[DangerFinding]:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_display_name(admx: AdmxResolver, identity: str) -> str | None:
+def _resolve_display_name(admx: AdmxResolver, identity: str, side: Side) -> str | None:
     """Resolve a setting identity to an ADMX policy display name.
 
     Returns ``None`` when the resolver has no match, so name-keyed
     rules degrade to identity-keyed only (AC-9 — no crash, no silent all-match).
     """
-    result = admx.resolve_display_name(identity)
+    result = admx.resolve_display_name(identity, side=side)
     return result if isinstance(result, str) else None
 
 
@@ -428,13 +429,14 @@ def _side_matches(rule_applies: str, setting_side: str) -> bool:
 def _identity_matches(
     rule: DangerRule,
     setting_identity: str,
+    setting_side: Side,
     admx: AdmxResolver | None,
 ) -> bool:
     if setting_identity.lower() == rule.identity.lower():
         return True
     if admx is None:
         return False
-    resolved = _resolve_display_name(admx, setting_identity)
+    resolved = _resolve_display_name(admx, setting_identity, setting_side)
     return resolved is not None and resolved.lower() == rule.identity.lower()
 
 
@@ -459,13 +461,13 @@ def evaluate_danger_rules(
     for rule in active_rules:
         for g in estate.gpos:
             for s in g.settings:
-                if s.source_state == "blocked":
+                if s.source_state == "blocked" or s.from_disabled_side:
                     continue
                 if not is_registry_cse(s.cse):
                     continue
                 if not _side_matches(rule.applies, s.side):
                     continue
-                if not _identity_matches(rule, s.identity, admx):
+                if not _identity_matches(rule, s.identity, s.side, admx):
                     continue
                 if _predicate_matches(rule, s.display_value):
                     present_findings.append(
@@ -487,13 +489,13 @@ def evaluate_danger_rules(
         found_any = False
         for g in estate.gpos:
             for s in g.settings:
-                if s.source_state == "blocked":
+                if s.source_state == "blocked" or s.from_disabled_side:
                     continue
                 if not is_registry_cse(s.cse):
                     continue
                 if not _side_matches(rule.applies, s.side):
                     continue
-                if _identity_matches(rule, s.identity, admx):
+                if _identity_matches(rule, s.identity, s.side, admx):
                     found_any = True
                     break
             if found_any:
@@ -671,6 +673,77 @@ def load_danger_rules(rules_path: Path | None = None) -> list[DangerRule]:
 # ---------------------------------------------------------------------------
 
 
+def audit_subcategory_override(estate: Estate) -> list[DangerFinding]:
+    """Flag a GPO authoring system subcategories without its force option.
+
+    Absence in one GPO cannot establish the device's resultant security option:
+    defaults and other GPOs may supply it. This is an authoring caveat only.
+    """
+    findings: list[DangerFinding] = []
+    registry_key = r"system\currentcontrolset\control\lsa\scenoapplylegacyauditpolicy"
+    for gpo in estate.gpos:
+        active = [
+            s
+            for s in gpo.settings
+            if s.side == "Computer" and not s.from_disabled_side and s.source_state != "blocked"
+        ]
+        audit = [
+            s
+            for s in active
+            if s.cse == "Advanced Audit Configuration"
+            and s.raw.get("cse_parser") in {"advanced_audit", "advanced_audit_csv"}
+            and ":" not in s.identity
+        ]
+        if not audit:
+            continue
+        force_values: list[bool] = []
+        for setting in active:
+            if setting.cse != "Security" and not is_registry_cse(setting.cse):
+                continue
+            key = setting.identity.lower()
+            if key.startswith("securityoptions:"):
+                key = key.removeprefix("securityoptions:")
+            key = key.replace(":scenoapplylegacyauditpolicy", r"\scenoapplylegacyauditpolicy")
+            for hive in ("machine\\", "hklm\\", "hkey_local_machine\\"):
+                if key.startswith(hive):
+                    key = key.removeprefix(hive)
+                    break
+            if key != registry_key:
+                continue
+            attrs = setting.raw.get("@attr")
+            if isinstance(attrs, dict) and str(attrs.get("action", "")).upper() == "D":
+                continue
+            value = setting.display_value.strip().lower().removeprefix("[reg_dword] ")
+            force_values.append(value in {"1", "true", "enabled", "0x00000001"})
+        if force_values and all(force_values):
+            continue
+        findings.append(
+            DangerFinding(
+                check_id="audit_subcategory_override",
+                severity="low",
+                title="Advanced audit configured without the force-subcategory option in this GPO",
+                gpo_id=gpo.id,
+                gpo_name=gpo.name,
+                detail=(
+                    "System advanced audit subcategories are configured, but this GPO does not "
+                    "enable "
+                    "SCENoApplyLegacyAuditPolicy. Legacy audit categories may override "
+                    "subcategories. "
+                    "Microsoft documents this security option as preventing category-level policy "
+                    "application. This is a GPO authoring caveat; other GPOs or device defaults "
+                    "may "
+                    "enable it. No effective device state is inferred."
+                ),
+                reference=(
+                    "https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/"
+                    "windows-10/security/threat-protection/security-policy-settings/"
+                    "audit-force-audit-policy-subcategory-settings-to-override"
+                ),
+            )
+        )
+    return findings
+
+
 def danger_findings(
     estate: Estate, *, admx: AdmxResolver | None = None, rules: list[DangerRule] | None = None
 ) -> list[DangerFinding]:
@@ -682,5 +755,6 @@ def danger_findings(
     findings.extend(local_admin_push(estate))
     findings.extend(overbroad_apply_group_policy(estate))
     findings.extend(evaluate_danger_rules(estate, rules, admx))
+    findings.extend(audit_subcategory_override(estate))
     findings.sort(key=lambda f: (_SEVERITY_ORDER.get(f.severity, 99), f.check_id, f.gpo_id))
     return findings

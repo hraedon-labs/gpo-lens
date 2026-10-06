@@ -88,6 +88,185 @@ omitted, the existing site's physical path is used.
 A fresh estate starts **empty**. Open the site and use **Ingest** to upload a
 collector export, or drop an existing `gpo-lens.sqlite3` into the data dir.
 
+## Scheduled collection
+
+Run the optional task registration on the domain-joined DC/RSAT collector host,
+from an elevated Windows PowerShell 5.1 session. Keep the trusted checkout
+(including `Export-GpoEstate.ps1`, `Run-GpoLensCollection.ps1` and
+`Register-GpoLensCollection.ps1`) at a stable path. The task calls the runner
+using that absolute path; do not move it without re-registering. Scripts must
+be permitted by the host execution policy (sign them if your policy requires
+it). Registration does not alter execution policy or create AD accounts.
+
+The account needs **Log on as a batch job**, RSAT GroupPolicy/ActiveDirectory
+modules, domain GPO/SYSVOL read, write access to a dedicated output root, and
+share/NTFS write access to an optional drop folder. It needs read access to the
+scripts and authoritative inventory. Grant script/inventory write access only
+to administrators/maintainers. Use UNC paths for network delivery; mapped
+letters are not available in noninteractive tasks. Use a separate root for
+each task/account; never point retention at a shared archive root. Linked output
+roots and reparse points anywhere within a folder to be pruned are rejected.
+Protect the output tree from other writers; pre-deletion checks require that ACL boundary.
+The task-ownership marker (`.gpo-lens-collection-owner`) prevents two tasks
+from accidentally sharing a root; it is not a security boundary against
+someone who can already write to that root or its parent. Registration never
+writes through an existing marker (it unlinks it and creates a new file) and
+refuses linked markers. Make the output root **and its parent folders**
+writable only by administrators and the collector account, because a writer
+there could race path checks during elevated registration.
+
+For a gMSA, provision it through your normal AD administration process, install
+it on the collector host and verify `Test-ADServiceAccount collector` returns
+`True`. Register with no credential prompt:
+
+```powershell
+.\scripts\Register-GpoLensCollection.ps1 -GmsaAccount 'LABDOMAIN\collector$' -OutputRoot C:\GpoExport -CopyTo '\\lab.example.com\gpo-drop'
+```
+
+For a standard least-privilege account, the single command prompts securely:
+
+```powershell
+.\scripts\Register-GpoLensCollection.ps1 -ServiceAccount 'LABDOMAIN\svc-collector' -OutputRoot C:\GpoExport -CopyTo '\\lab.example.com\gpo-drop'
+```
+
+`-Credential (Get-Credential 'LABDOMAIN\svc-collector')` also works. Passwords
+are passed only in memory to `Register-ScheduledTask -User/-Password`; Windows
+Task Scheduler stores its protected credential, and our scripts/files/action
+arguments/logs never contain it. Re-register after a normal-account password
+rotation. Both principals use `Password` logon to permit network reads/copies;
+`ServiceAccount` logon is intended for built-in accounts, not a domain gMSA.
+See [Microsoft's principal documentation](https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/new-scheduledtaskprincipal).
+
+The default task `GpoLensCollection` runs daily at 02:00 host local time. It
+starts a missed run when available and ignores overlapping launches. A runner
+lock also prevents concurrent manual runs using the same output root. The hard
+`ExecutionTimeLimit` is **02:00:00**, explicitly set in the task definition;
+use `-ExecutionTimeLimit '04:00:00'` for longer estates. Zero/unlimited is
+rejected. Change the schedule with `-At '03:30' -EveryDays 7`, retention with
+`-Retention 30`, or use `-TaskName` for another task. Re-registration replaces
+the named task; review it with `-WhatIf` first.
+
+Registration writes the TaskName to `.gpo-lens-collection-owner` in the output
+root, and passes it to the runner. Every task needs its own root, even when two
+tasks collect the same domain. A different owner blocks registration unless
+`-Force` explicitly transfers ownership with a warning. Stop the previous task
+first: it will refuse subsequent runs, and its existing exports become subject
+to the new owner's retention. Ownership changes share the runner's lock.
+`-WhatIf` writes no marker. Re-register tasks installed before 1.4 to initialize
+their marker. A missing, linked or mismatched marker prevents collection and
+pruning. Manual runner calls must supply the registered `-TaskName`.
+Credentials are checked before ownership changes. Registration holds the
+collection lock through the Scheduler call and restores the prior marker if
+that call fails, keeping the previous task runnable.
+
+The runner keeps the last N successful timestamp-named export folder/ZIP pairs
+(default 14), without pruning unrelated files. It prunes only after successful
+collection by the root's owner, retaining the exact domain-prefix check as well.
+Inventory overlay and delivery must also succeed. Unreadable or incomplete ZIPs are
+excluded from retention counts. Failed/unfinished export folders and partial
+archives remain for diagnosis and require manual cleanup; a hard timeout may leave such
+folders and a log ending with `Collection started`. `collection.log` rotates
+at 5 MiB with five backups (`-LogMaxBytes`, `-LogFiles`). Failure returns a
+nonzero task result; existing exports are preserved. ZIP delivery copies to a
+unique `.partial` file, then renames it after the copy completes. If a hard
+timeout interrupts delivery, remove the orphan `.partial` after checking the
+task is stopped. Failed normal copies remove their partial file.
+
+`-CopyTo` can be a UNC drop or a local server data inbox (for example
+`C:\inetpub\gpo-lens\data\inbox` when collection runs on that server). It
+copies the new ZIP, without importing it. Upload through **Tools > Ingest**, or
+run the locked CLI against the server database using an authorized maintenance
+account:
+
+```powershell
+uv run gpo-lens --db C:\inetpub\gpo-lens\data\gpo-lens.sqlite3 ingest C:\inetpub\gpo-lens\data\inbox\lab.example.com-20261006-020000.zip --diff-latest
+```
+
+Use your site's actual database path. No inbox watcher, automatic ingest,
+alert transport or privileged recurring task is installed by this script.
+
+**Partial collections still succeed.** If the account cannot read some GPOs
+(for example SYSVOL folders of security-filtered policies that deny it), the
+collector records them in `collection-errors.json`, the log's export summary
+lists them under `Failed`, and the task still finishes `0x0` with
+`Collection succeeded`. After ingest they appear as `coverage_gap` findings
+(`gpo-lens doctor`, **Findings**). Check for those, not only the task result.
+Use the privileged inventory overlay below or grant read access to close them.
+
+**The drop folder is not pruned.** Retention applies only to the output root;
+ZIPs delivered with `-CopyTo` accumulate until the ingest side removes them.
+
+### Authoritative inventory (manual, less frequent)
+
+A routine least-privilege inventory sees only what that account can enumerate.
+A privileged snapshot imported once does not supply coverage for later
+snapshots. Initially, periodically (for example monthly), and whenever GPO
+permissions or membership change, run this in a session with approved
+privileged directory read access, using a **separate root**:
+
+```powershell
+.\scripts\Export-GpoEstate.ps1 -OutputRoot C:\GpoPrivileged
+$latest = Get-ChildItem C:\GpoPrivileged -Directory | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+New-Item -ItemType Directory -Path C:\GpoInventory -Force | Out-Null
+Copy-Item (Join-Path $latest.FullName 'gpo-inventory.json') C:\GpoInventory\gpo-inventory.json -Force
+```
+
+Verify that the privileged collector reported a successful GPC enumeration and
+that the inventory is complete for this domain before promoting the file.
+Refresh it when policies are added/deleted too: an old inventory can miss new
+hidden GPOs or retain deleted ones. Keep its refresh date in the site sheet.
+Give the routine account read permission, then re-register with the overlay:
+
+```powershell
+.\scripts\Register-GpoLensCollection.ps1 -GmsaAccount 'LABDOMAIN\collector$' -OutputRoot C:\GpoExport -InventoryPath C:\GpoInventory\gpo-inventory.json -CopyTo '\\lab.example.com\gpo-drop'
+```
+
+`-InventoryPath` captures and validates the inventory bytes before collecting,
+then uses those same bytes in both the new export folder and ZIP before delivery.
+Missing/empty/malformed inventories, invalid GUIDs or duplicate IDs fail the run; it never
+silently falls back to the less-privileged inventory. The routine
+`collection-errors.json` stays with the export so ingest can report named
+`coverage_gap` findings. Do not run routine collection as Domain Admin.
+
+### Verify and lab-validate
+
+After registration, start one run and inspect its definition and result:
+
+```powershell
+Start-ScheduledTask -TaskName GpoLensCollection
+Get-ScheduledTaskInfo -TaskName GpoLensCollection | Select-Object LastRunTime, LastTaskResult, NextRunTime
+(Get-ScheduledTask -TaskName GpoLensCollection).Principal | Format-List UserId, LogonType, RunLevel
+(Get-ScheduledTask -TaskName GpoLensCollection).Settings | Format-List ExecutionTimeLimit, MultipleInstances
+$newest = Get-ChildItem C:\GpoExport -File -Filter '*.zip' | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+if ($newest) { [pscustomobject]@{ Zip = $newest.Name; AgeHours = ((Get-Date).ToUniversalTime() - $newest.LastWriteTimeUtc).TotalHours } } else { 'No ZIP collected yet' }
+Get-Content C:\GpoExport\collection.log -Tail 20
+```
+
+Wait for the running task to finish; its last result should be `0` (`0x0`) and
+the log should end with `Collection succeeded`. Confirm a new ZIP exists in
+the optional drop folder. Ingest it, then check **Briefing** and coverage gaps.
+A running/never-run task is not a successful collection. For a retention probe,
+set `-Retention 2` and complete three runs at least a second apart; expect two
+ZIP/folder pairs. Repeat registration and a run for each account mode. Verify
+`-WhatIf` prompts for no password and changes no task, then remove a lab task:
+
+```powershell
+.\scripts\Register-GpoLensCollection.ps1 -Unregister -WhatIf
+.\scripts\Register-GpoLensCollection.ps1 -Unregister -Confirm:$false
+```
+
+Unregister leaves exports/logs intact. **Briefing** reports the newest imported
+snapshot's age, including when viewing a historical snapshot, and warns when
+it is strictly older than `GPO_LENS_STALE_SNAPSHOT_DAYS` (default 8). Set a
+positive integer in the site's environment before app startup and restart the
+app to apply it; invalid values log a warning and use 8. Unknown or future
+snapshot timestamps warn that freshness cannot be verified. Markdown/CSV
+briefing exports include the same signal. Their links pin an offset-aware `as_of`
+query parameter to the page's calculation time; direct export requests without
+it redirect to an explicit timestamp URL. Replay that URL for reproducible age
+calculations. This is import freshness: copying
+or repeatedly importing an old ZIP does not prove current AD collection.
+
 ## Access control — read this
 
 **gpo-lens has no per-user login.** Behind IIS every request arrives from

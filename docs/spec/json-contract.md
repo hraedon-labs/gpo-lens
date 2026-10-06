@@ -1,6 +1,6 @@
 # JSON output contract (machine-readable seam)
 
-**Status:** frozen, `schema_version: 1` (since v0.3.0).
+**Status:** `schema_version: 2` (since v1.4.0); version 1 was frozen in v0.3.0.
 **Enforced by:** `tests/test_json_contract.py` (golden shapes) + `src/gpo_lens/cli/_helpers.py` (envelope).
 
 This is the stable interface downstream consumers build against. gpo-lens's
@@ -17,7 +17,7 @@ success: a self-describing envelope with the command payload under `data`.
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "kind": "settings-dump",
   "tool_version": "0.3.0",
   "generated_at": "2026-06-14T15:58:05.032933+00:00",
@@ -41,7 +41,7 @@ success: a self-describing envelope with the command payload under `data`.
   envelope): bump `schema_version`, and update both this document and
   `tests/test_json_contract.py` in the same change.
 - A consumer should read `data`, tolerate unknown fields, and may assert
-  `schema_version == 1` if it wants to fail loudly on a future break.
+  `schema_version == 2` if it wants to fail loudly on a future break.
 
 ## Stream and exit-code semantics
 
@@ -93,6 +93,25 @@ from_disabled_side, source_state}`.
 
 ### `broken-refs --json` → array
 `{gpo_id, gpo_name, ref_type, ref_value, detail}`.
+
+**Version 2 semantic break:** only malformed paths or script/file/task paths
+missing from the GPO's own collected SYSVOL appear here. External UNC paths and
+machine-local task executables are no longer treated as broken. Related
+`summary.broken_ref_count`, doctor categories and trend counts follow this rule.
+The shape is unchanged; migrate UNC inventory consumers to `dependencies`.
+
+`doctor` now reports one `admx_gap` per GPO, with the setting count in `summary`
+and a newline-separated `side/identity` list in `detail`. `admx-gaps` and
+`summary.admx_gap_count` still count individual unresolved settings.
+
+### `dependencies [--server old-fs01] --json` → array
+Server groups: `{server, dependency_count, gpo_count, gpo_ids, shares, dependencies}`.
+Each dependency: `{gpo_id, gpo_name, side, dependency_type, server, share, target, detail}`.
+Servers and shares are case-folded; targets preserve source spelling. Counts are
+unique `(gpo_id, side, dependency_type, target)` references (case-insensitive
+paths), not network availability or actual use. Rows include disabled sides and
+conditional preferences. Credentials are redacted through the ordinary safe
+output projection. Own-GPO SYSVOL paths are excluded from external inventory.
 
 ### `baseline-diff <baseline> --json` → array
 `{status, side, cse, identity, display_name, expected_value, actual_value,

@@ -9,6 +9,7 @@ from typing import Any
 from gpo_lens import __version__
 from gpo_lens.cli._danger import cmd_danger
 from gpo_lens.cli._delegation import cmd_delegation, cmd_perms, cmd_sddl
+from gpo_lens.cli._dependencies import cmd_dependencies
 from gpo_lens.cli._diff import (
     cmd_baseline_diff,
     cmd_changelog,
@@ -100,8 +101,9 @@ _COMMANDS: list[CliCommand] = [
         name="ingest",
         func=cmd_ingest,
         help="",
-        positional_args=[CliArg(name="sample_dir")],
+        positional_args=[CliArg(name="sample_dir", help="Collector export directory or ZIP")],
         args=[
+            CliArg(name="--admx-dir", help="Additional PolicyDefinitions directory; repeatable"),
             CliArg(
                 name="--json",
                 dest="_sub_json",
@@ -395,6 +397,16 @@ _COMMANDS: list[CliCommand] = [
         src_arg=True,
     ),
     CliCommand(
+        name="dependencies",
+        func=cmd_dependencies,
+        help="Inventory external server/share dependencies without probing reachability",
+        src_arg=True,
+        args=[
+            CliArg(name="--server", default="", help="Filter by server name"),
+            CliArg(name="--json", dest="_sub_json", action="store_true"),
+        ],
+    ),
+    CliCommand(
         name="broken-refs",
         func=cmd_broken_refs,
         help="Detect broken references in settings (UNC paths, etc.)",
@@ -475,6 +487,7 @@ _COMMANDS: list[CliCommand] = [
         help="Run all hygiene checks and produce a prioritized findings report",
         src_arg=True,
         args=[
+            CliArg(name="--admx-dir", help="Additional PolicyDefinitions directory; repeatable"),
             CliArg(
                 name="--explain",
                 action="store_true",
@@ -539,6 +552,11 @@ _COMMANDS: list[CliCommand] = [
         ],
         args=[
             CliArg(name="--admx-dir", help="PolicyDefinitions directory for ADMX crosswalk"),
+            CliArg(
+                name="--side",
+                choices=["Computer", "User"],
+                help="Setting side for template class matching",
+            ),
         ],
     ),
     CliCommand(
@@ -699,6 +717,8 @@ def main(argv: list[str] | None = None) -> int:
                 kwargs["action"] = arg.action
                 kwargs.pop("type", None)
                 kwargs.pop("default", None)
+            if arg.name == "--admx-dir":
+                kwargs["action"] = "append"
             p.add_argument(arg.name, **kwargs)
         p.set_defaults(func=cmd.func)
 

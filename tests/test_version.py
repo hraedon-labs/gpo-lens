@@ -6,6 +6,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+import pytest
+
 from gpo_lens import __version__
 
 
@@ -20,18 +22,59 @@ def test_version_sync() -> None:
 def test_changelog_top_version_matches() -> None:
     changelog = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
     text = changelog.read_text(encoding="utf-8")
+    _assert_changelog_version(text, __version__)
+
+
+def _assert_changelog_version(text: str, package_version: str) -> None:
     # An Unreleased section must declare its target, never fall through to an
     # older released heading (which masked the v1.3 candidate's stale version).
-    top = re.split(r"^## ", text, flags=re.MULTILINE)[1]
+    sections = re.split(r"^## ", text, flags=re.MULTILINE)[1:]
+    top = sections[0]
     if top.startswith("Unreleased"):
         match = re.search(r"Draft \*\*v(\d+\.\d+\.\d+)\*\*", top)
+        assert match, "Top changelog section must declare a release target"
+        target = match.group(1)
+        assert tuple(map(int, target.split("."))) >= tuple(map(int, package_version.split("."))), (
+            "Unreleased target must not precede package metadata"
+        )
+        assert len(sections) > 1, "Unreleased work must retain the latest released version"
+        released = re.match(r"v(\d+\.\d+\.\d+)", sections[1])
+        assert released, "Unreleased work must retain the latest released version"
+        assert tuple(map(int, target.split("."))) >= tuple(
+            map(int, released.group(1).split("."))
+        ), "Unreleased target cannot precede the latest release"
+        if target != package_version:
+            # Feature streams can target the next release before its version
+            # bump. Their package metadata must still match the latest release.
+            assert len(sections) > 1, "Future target requires a released version section"
+            match = re.match(r"v(\d+\.\d+\.\d+)", sections[1])
     else:
         match = re.match(r"v(\d+\.\d+\.\d+)", top)
     assert match, "Top changelog section must declare a release target"
     changelog_version = match.group(1)
-    assert __version__ == changelog_version, (
-        f"__init__.__version__={__version__!r} != CHANGELOG top version={changelog_version!r}"
+    assert package_version == changelog_version, (
+        f"__init__.__version__={package_version!r} != CHANGELOG version={changelog_version!r}"
     )
+
+
+@pytest.mark.parametrize(
+    "text,valid",
+    [
+        ("## v1.3.1\n", True),
+        ("## Unreleased\nDraft **v1.3.1**\n## v1.3.0\n", True),
+        ("## Unreleased\nDraft **v1.4.0**\n## v1.3.1\n", True),
+        ("## Unreleased\n## v1.3.1\n", False),
+        ("## Unreleased\nDraft **v1.4.0**\n## v1.3.0\n", False),
+        ("## Unreleased\nDraft **v1.3.0**\n## v1.3.1\n", False),
+        ("## Unreleased\nDraft **v1.4.0**\n", False),
+    ],
+)
+def test_changelog_future_target_retains_metadata_guard(text, valid):
+    if valid:
+        _assert_changelog_version(text, "1.3.1")
+    else:
+        with pytest.raises(AssertionError):
+            _assert_changelog_version(text, "1.3.1")
 
 
 def test_lock_version_matches_package() -> None:

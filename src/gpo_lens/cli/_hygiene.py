@@ -6,7 +6,13 @@ import argparse
 import sys
 
 from gpo_lens import queries
-from gpo_lens.cli._helpers import _get_estate, _print_table, _render_json
+from gpo_lens.cli._helpers import (
+    _add_secret_source,
+    _get_admx,
+    _get_estate,
+    _print_table,
+    _render_json,
+)
 from gpo_lens.cli._helpers import _safe_print as print
 from gpo_lens.detection import local_group_mods, mask_cpassword, scheduled_tasks
 
@@ -79,6 +85,9 @@ def cmd_ms16_072(args: argparse.Namespace) -> None:
 def cmd_cpassword(args: argparse.Namespace) -> None:
     estate = _get_estate(args)
     result = queries.cpassword_scan(estate)
+    # SYSVOL-only carriers may be absent from the report's Setting records.
+    # Register the typed scan result before rendering without header semantics.
+    _add_secret_source(result)
     show = getattr(args, "show_secrets", False)
     if args.json:
         _render_json(
@@ -245,7 +254,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     from gpo_lens.narration import NarrationUnavailable, explain_findings
 
     estate = _get_estate(args)
-    findings = queries.estate_doctor(estate)
+    findings = queries.estate_doctor(estate, admx=_get_admx(args))
     findings_dicts = _doctor_findings_as_dicts(findings)
     explain = getattr(args, "explain", False)
 

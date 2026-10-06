@@ -227,6 +227,7 @@ class LedgerRow:
     reg_data: str = ""
     admx_name: str = ""
     admx_explain: str = ""
+    source_note: str = ""
 
 
 def _extract_registry_truth(
@@ -286,7 +287,7 @@ def settings_ledger(
         admx_name = ""
         admx_explain = ""
         if admx is not None:
-            resolved = admx.resolve_display_name(s.identity)
+            resolved = admx.resolve_display_name(s.identity, side=s.side)
             if resolved:
                 admx_name = resolved
         rows.append(
@@ -306,6 +307,7 @@ def settings_ledger(
                 reg_data=reg_data,
                 admx_name=admx_name,
                 admx_explain=admx_explain,
+                source_note=str(s.raw.get("source_note") or ""),
             )
         )
 

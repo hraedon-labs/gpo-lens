@@ -68,6 +68,11 @@ EXPLORE_SECTIONS: tuple[DirectorySection, ...] = (
                 "The OU tree with linked GPOs, inheritance blocking, and enforcement.",
             ),
             Destination(
+                "dependencies",
+                "External dependencies",
+                "Which GPOs reference a file or print server before migration or decommissioning?",
+            ),
+            Destination(
                 "search",
                 "Search",
                 "Estate-wide search across configured settings.",

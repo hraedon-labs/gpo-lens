@@ -7,6 +7,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -61,7 +62,7 @@ def wal_fixture(data: Path, stored_gpo: str = KNOWN_GPO) -> Path:
     """Reuse glr2/sqlite_wal_probe.py's crash-with-committed-sidecars setup."""
     data.mkdir()
     live = data / "gpo-lens.sqlite3"
-    with sqlite3.connect(live) as conn:
+    with closing(sqlite3.connect(live)) as conn, conn:
         conn.executescript(
             "CREATE TABLE evidence(value TEXT); INSERT INTO evidence VALUES ('before');"
             "CREATE TABLE snapshot(id INTEGER); INSERT INTO snapshot VALUES (1);"
@@ -87,7 +88,7 @@ os._exit(0)
 
 
 def rows(db: Path) -> list[str]:
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         return [r[0] for r in conn.execute("SELECT value FROM evidence ORDER BY rowid")]
 

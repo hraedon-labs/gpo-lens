@@ -13,6 +13,7 @@ def section_for_path(path: str) -> tuple[str, str]:
     if path.startswith(
         (
             "/explore",
+            "/dependencies",
             "/inventory",
             "/gpo/",
             "/ou",

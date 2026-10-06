@@ -11,6 +11,7 @@ from typing import Any
 
 from gpo_lens.events import init_events_table
 from gpo_lens.model import (
+    AdmxResolver,
     CoverageGap,
     DelegationEntry,
     Estate,
@@ -51,7 +52,9 @@ from gpo_lens.normalize import parse_dt
 #      log; the legacy table remains (unused) for audit. Writes to
 #      ``finding_triage`` stop entirely — v1 triage APIs become shims over
 #      the event log.
-CURRENT_SCHEMA_VERSION: int = 9
+# v9 = stable-subject flag on occurrences.
+# v10 = nullable per-observation detector version; NULL means pre-1.4, unknown.
+CURRENT_SCHEMA_VERSION: int = 10
 
 
 def _safe_json_loads(raw: str | None, default: Any) -> Any:
@@ -605,6 +608,11 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         if not _column_exists(conn, "finding", "subject_stable"):
             conn.execute("ALTER TABLE finding ADD COLUMN subject_stable INTEGER NOT NULL DEFAULT 1")
 
+        # Preserve historical uncertainty: occurrence versions are mutable and
+        # cannot establish which detector evaluated an older observation.
+        if not _column_exists(conn, "finding_observation", "detector_version"):
+            conn.execute("ALTER TABLE finding_observation ADD COLUMN detector_version TEXT")
+
     conn.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
 
 
@@ -643,7 +651,13 @@ def _dt_to_iso(dt: datetime | None) -> str | None:
     return dt.isoformat()
 
 
-def save_estate(conn: sqlite3.Connection, estate: Estate, taken_at: datetime | None = None) -> int:
+def save_estate(
+    conn: sqlite3.Connection,
+    estate: Estate,
+    taken_at: datetime | None = None,
+    *,
+    commit: bool = True,
+) -> int:
     """Save an estate as a new snapshot; returns the new ``snapshot_id``."""
     if taken_at is None:
         taken_at = datetime.now(UTC)
@@ -839,7 +853,8 @@ def save_estate(conn: sqlite3.Connection, estate: Estate, taken_at: datetime | N
         ],
     )
 
-    conn.commit()
+    if commit:
+        conn.commit()
     restrict_db_permissions(conn)
     return snapshot_id
 
@@ -1082,7 +1097,7 @@ def list_snapshots(conn: sqlite3.Connection) -> list[tuple[int, str, datetime | 
     return [(row[0], row[1], parse_dt(row[2])) for row in rows]
 
 
-def delete_snapshot(conn: sqlite3.Connection, snapshot_id: int) -> bool:
+def delete_snapshot(conn: sqlite3.Connection, snapshot_id: int, *, commit: bool = True) -> bool:
     """Delete one imported snapshot and all its rows; True if it existed.
 
     Every child table declares ``ON DELETE CASCADE`` against ``snapshot(id)``,
@@ -1093,5 +1108,38 @@ def delete_snapshot(conn: sqlite3.Connection, snapshot_id: int) -> bool:
     """
     conn.execute("PRAGMA foreign_keys = ON")
     cur = conn.execute("DELETE FROM snapshot WHERE id = ?", (snapshot_id,))
-    conn.commit()
+    if commit:
+        conn.commit()
     return cur.rowcount > 0
+
+
+def save_evaluated_estate(
+    conn: sqlite3.Connection,
+    estate: Estate,
+    *,
+    admx: AdmxResolver | None = None,
+    commit: bool = True,
+) -> int:
+    """Atomically import a snapshot and its required finding evaluation.
+
+    Failed evaluation also rolls back observations and transitions on earlier
+    occurrences. Deleting just the new snapshot cannot undo those transitions.
+    Call after init_db. With commit=False the caller owns the transaction and
+    can include required audit/events before committing. Failures roll back.
+    """
+    from gpo_lens import __version__
+    from gpo_lens.findings import evaluate_finding_lifecycle_v2
+
+    try:
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        sid = save_estate(conn, estate, commit=False)
+        evaluate_finding_lifecycle_v2(
+            conn, sid, estate, admx=admx, application_version=__version__, commit=False
+        )
+        if commit:
+            conn.commit()
+        return sid
+    except Exception as exc:
+        conn.rollback()
+        raise RuntimeError("Import failed; nothing was imported.") from exc

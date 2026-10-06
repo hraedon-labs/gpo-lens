@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import io
 import json
@@ -585,6 +586,229 @@ def _parse_generic_setting(cse: str, block: Element) -> tuple[str, str, str]:
     return _readable_identity(cse, block)
 
 
+_AUDIT_CSE = "Advanced Audit Configuration"
+_AUDIT_VALUES = {"0": "No Auditing", "1": "Success", "2": "Failure", "3": "Success and Failure"}
+_LEGACY_IE_NOTE = (
+    "Internet Explorer Maintenance is a legacy, deprecated extension; "
+    "these settings do not work with Internet Explorer 10 or newer."
+)
+
+
+def _audit_fields(guid: str, name: str, target: str, value: str) -> tuple[str, str, str, str]:
+    """Canonical system subcategory identity; per-user flags stay a separate axis."""
+    identity = canonical_guid(guid)
+    target = target.strip()
+    if target.lower() != "system":
+        if not re.fullmatch(r"S-\d+(?:-\d+)+", target, re.IGNORECASE):
+            return (
+                f"{identity}:{target or '(missing target)'}",
+                name or identity,
+                f"Unknown audit target: {target or '(missing)'}",
+                "Unknown or missing PolicyTarget; target scope is not interpreted.",
+            )
+        if not re.fullmatch(r"[0-9]{1,2}", value) or int(value) > 15:
+            return (
+                f"{identity}:{target}",
+                name or identity,
+                f"Unknown per-user audit flags: {value or '(missing)'}",
+                "Invalid or missing per-user audit flags; expected an unsigned mask 0-15; "
+                "not comparable.",
+            )
+        # Per-user masks also encode exclusion flags: never apply the system
+        # 0–3 vocabulary to them, or collapse them into system subcategories.
+        return (
+            f"{identity}:{target or '(missing target)'}",
+            name or identity,
+            f"Per-user audit flags: {value}",
+            "Per-user audit target; inclusion/exclusion flags are preserved, not simulated.",
+        )
+    return (
+        identity,
+        name or identity,
+        _AUDIT_VALUES.get(value.strip(), f"Unknown audit value: {value or '(missing)'}"),
+        ""
+        if value.strip() in _AUDIT_VALUES
+        else "Unknown system audit SettingValue; not interpreted.",
+    )
+
+
+def _parse_audit_setting(block: Element) -> tuple[str, str, str, dict[str, object], str]:
+    raw = cast(dict[str, object], element_to_dict(block))
+    raw["cse_parser"] = "advanced_audit"
+    fields = {
+        tag: (_text(_child_by_localname(block, tag)) or "").strip()
+        for tag in ("SubcategoryGuid", "SubcategoryName", "PolicyTarget", "SettingValue")
+    }
+    try:
+        identity, name, value, note = _audit_fields(
+            fields["SubcategoryGuid"],
+            fields["SubcategoryName"],
+            fields["PolicyTarget"],
+            fields["SettingValue"],
+        )
+        state = "blocked" if value.startswith("Unknown") else "normal"
+    except ValueError:
+        identity = (
+            f"AuditSetting:invalid-guid:{fields['SubcategoryGuid'] or fields['SubcategoryName']}"
+        )
+        name = fields["SubcategoryName"] or "Invalid audit subcategory"
+        value = f"Unknown audit subcategory: {fields['SettingValue']}"
+        note = "Invalid or missing audit subcategory GUID; not comparable."
+        state = "blocked"
+    if note:
+        raw["source_note"] = note
+    return identity, name, value, raw, state
+
+
+_PKI_LABELS = {
+    "EFSSettings:AllowEFS": "Allow Encrypting File System (EFS)",
+    "EFSSettings:Options": "EFS options",
+    "EFSSettings:CacheTimeout": "EFS cache timeout",
+    "EFSSettings:KeyLen": "EFS key length",
+    "RootCertificateSettings:AllowNewCAs": "Allow new root certificate authorities",
+    "RootCertificateSettings:TrustThirdPartyCAs": "Trust third-party root certificate authorities",
+    "RootCertificateSettings:RequireUPNNamingConstraints": "Require UPN naming constraints",
+}
+_PKI_GROUPS = {
+    "EFSSettings": "EFS",
+    "RootCertificateSettings": "Root certificate",
+    "AutoEnrollmentSettings": "Certificate autoenrollment",
+    "AutoEnrollment": "Certificate autoenrollment",
+    "CertificateTrustSettings": "Certificate trust",
+    "CertificatePathValidationSettings": "Certificate path validation",
+}
+_PKI_STORES = {
+    "TrustedRootCertificates",
+    "IntermediateCertificationAuthorities",
+    "TrustedPublishers",
+    "UntrustedCertificates",
+    "Certificates",
+    "EFSRecoveryAgents",
+}
+
+
+# Only public certificate metadata enters display values. Unknown leaves stay
+# in raw evidence, which safe projections omit.
+_PKI_CERTIFICATE_PUBLIC_FIELDS = frozenset(
+    {
+        "Thumbprint",
+        "CertificateHash",
+        "Issuer",
+        "IssuedTo",
+        "IssuedBy",
+        "SerialNumber",
+        "Subject",
+        "ValidFrom",
+        "ValidTo",
+        "NotBefore",
+        "NotAfter",
+        "ExpirationDate",
+        "IntendedPurposes",
+        "EnhancedKeyUsage",
+        "SignatureAlgorithm",
+        "PublicKeyAlgorithm",
+        "PublicKeyLength",
+    }
+)
+
+
+_PKI_UNSIGNED_SCALARS = frozenset(
+    {
+        "EFSSettings:Options",
+        "EFSSettings:CacheTimeout",
+        "EFSSettings:KeyLen",
+        "CertificateTrustSettings:TrustModel",
+    }
+)
+_PKI_BOOLEAN_SCALARS = frozenset(
+    {
+        "EFSSettings:AllowEFS",
+        "RootCertificateSettings:AllowNewCAs",
+        "RootCertificateSettings:TrustThirdPartyCAs",
+        "RootCertificateSettings:RequireUPNNamingConstraints",
+        "CertificateTrustSettings:AllowUserTrust",
+    }
+    | {
+        f"{group}:{name}"
+        for group in ("AutoEnrollmentSettings", "AutoEnrollment")
+        for name in ("Enabled", "RenewExpiredCertificates", "UpdatePendingCertificates")
+    }
+)
+
+
+def _parse_public_key(block: Element) -> list[tuple[str, str, str, dict[str, object]]]:
+    """Expand PKI scalar fields and certificate entries without interpreting masks.
+
+    Identities use schema paths, never configured values or translated labels.
+    Certificate identities include their store and thumbprint (or issuer/serial).
+    Unrecognized structures remain explicit generic evidence.
+    """
+    tag = _localname(block.tag)
+    out: list[tuple[str, str, str, dict[str, object]]] = []
+    if tag in _PKI_GROUPS:
+
+        def walk(elem: Element, path: str) -> None:
+            for child in elem:
+                child_tag = _localname(child.tag)
+                key = f"{path}:{child_tag}"
+                if len(child):
+                    walk(child, key)
+                    continue
+                value = (child.text or "").strip()
+                label = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", child_tag)
+                name = _PKI_LABELS.get(key, f"{_PKI_GROUPS[tag]}: {label[0:1]}{label[1:].lower()}")
+                raw = cast(dict[str, object], element_to_dict(block))
+                raw.update(cse_parser="public_key", property_path=key)
+                invalid = (
+                    key in _PKI_UNSIGNED_SCALARS
+                    and (not re.fullmatch(r"[0-9]{1,10}", value) or int(value) > 0xFFFFFFFF)
+                ) or (key in _PKI_BOOLEAN_SCALARS and value.casefold() not in {"true", "false"})
+                if invalid:
+                    raw.update(
+                        cse_parser="public_key_unclassified",
+                        source_note=f"Invalid or missing PKI scalar {key}; not comparable.",
+                    )
+                out.append((key, name, value, raw))
+
+        walk(block, tag)
+    elif tag in _PKI_STORES or tag == "Certificate":
+        certificates = [e for e in block.iter() if _localname(e.tag) == "Certificate"]
+        for cert in certificates:
+            fields = {
+                _localname(c.tag): (c.text or "").strip()
+                for c in cert
+                if not len(c) and _localname(c.tag) in _PKI_CERTIFICATE_PUBLIC_FIELDS
+            }
+            thumbprint = fields.get("Thumbprint") or fields.get("CertificateHash") or ""
+            key = re.sub(r"\s", "", thumbprint).lower()
+            if not key and fields.get("SerialNumber") and fields.get("IssuedBy"):
+                key = f"{fields['IssuedBy']}:{fields['SerialNumber']}"
+            if not key:
+                # Names alone cannot distinguish two certificates issued to
+                # the same subject. Keep that entry as unclassified evidence.
+                raw = cast(dict[str, object], element_to_dict(cert))
+                raw.update(
+                    cse_parser="public_key_unclassified",
+                    source_note="Certificate has no thumbprint or issuer/serial key; "
+                    "not comparable.",
+                )
+                out.append(
+                    (
+                        f"{tag}:Certificate:unclassified",
+                        fields.get("IssuedTo") or tag,
+                        "Unclassified certificate",
+                        raw,
+                    )
+                )
+                continue
+            raw = cast(dict[str, object], element_to_dict(cert))
+            raw.update(cse_parser="public_key", certificate_store=tag)
+            name = f"{tag}: {fields.get('IssuedTo') or key}"
+            value = "; ".join(f"{k}: {v}" for k, v in sorted(fields.items()))
+            out.append((f"{tag}:Certificate:{key}", name, value, raw))
+    return out
+
+
 def _parse_settings(gpo_elem: Element, gpo_id: str) -> list[Setting]:
     """Parse all settings from a GPO element."""
     settings: list[Setting] = []
@@ -633,6 +857,19 @@ def _parse_settings(gpo_elem: Element, gpo_id: str) -> list[Setting]:
             for ext in _children_by_localname(ext_data, "Extension"):
                 # Check for blocked extension
                 children = list(ext)
+                legacy_ie = cse.strip().lower() == "internet explorer maintenance"
+                if legacy_ie and not children:
+                    _emit(
+                        side_name,
+                        cse,
+                        f"{cse}:legacy",
+                        "Legacy Internet Explorer Maintenance",
+                        "",
+                        {"cse_parser": "legacy_deprecated", "source_note": _LEGACY_IE_NOTE},
+                        enabled,
+                        source_state="legacy_deprecated",
+                    )
+                    continue
                 if len(children) == 1 and _localname(children[0].tag) == "Blocked":
                     _emit(
                         side_name,
@@ -640,7 +877,13 @@ def _parse_settings(gpo_elem: Element, gpo_id: str) -> list[Setting]:
                         f"{cse}:blocked",
                         "(blocked extension)",
                         "",
-                        {"blocked": True},
+                        {
+                            "blocked": True,
+                            "cse_parser": "legacy_deprecated",
+                            "source_note": _LEGACY_IE_NOTE,
+                        }
+                        if legacy_ie
+                        else {"blocked": True},
                         enabled,
                         source_state="blocked",
                     )
@@ -648,6 +891,50 @@ def _parse_settings(gpo_elem: Element, gpo_id: str) -> list[Setting]:
                 # Walk direct child elements as setting blocks
                 for block in children:
                     bl = _localname(block.tag)
+                    if bl == "AuditSetting":
+                        identity, name, value, audit_raw, state = _parse_audit_setting(block)
+                        prior = next(
+                            (
+                                s
+                                for s in settings
+                                if s.side == side_name
+                                and s.cse == _AUDIT_CSE
+                                and s.identity == identity
+                            ),
+                            None,
+                        )
+                        if prior is not None:
+                            duplicates = prior.raw.setdefault("duplicate_xml", [])
+                            if isinstance(duplicates, list):
+                                duplicates.append(audit_raw)
+                            if prior.display_value != value:
+                                prior.raw["audit_disagreement"] = True
+                                prior.raw["source_note"] = (
+                                    "Audit sources disagree: duplicate XML subcategory values; "
+                                    "first XML value retained."
+                                )
+                            continue
+                        _emit(
+                            side_name, _AUDIT_CSE, identity, name, value, audit_raw, enabled, state
+                        )
+                        continue
+                    if cse.strip().lower() == "public key":
+                        public_key = _parse_public_key(block)
+                        if public_key:
+                            for identity, name, value, pki_raw in public_key:
+                                _emit(
+                                    side_name,
+                                    "Public Key",
+                                    identity,
+                                    name,
+                                    value,
+                                    pki_raw,
+                                    enabled,
+                                    source_state="blocked"
+                                    if pki_raw.get("cse_parser") == "public_key_unclassified"
+                                    else "normal",
+                                )
+                            continue
                     # GPP preferences wrap N concrete items several levels down;
                     # expand each into its own readable row rather than hashing
                     # the whole container into one opaque blob. Registry GPP has a
@@ -668,6 +955,29 @@ def _parse_settings(gpo_elem: Element, gpo_id: str) -> list[Setting]:
                             )
                         continue
                     raw = element_to_dict(block)
+                    if cse.strip().lower() == "public key":
+                        pki_unknown = cast(dict[str, object], raw)
+                        pki_unknown.update(
+                            cse_parser="public_key_unclassified",
+                            source_note="Unrecognized Public Key structure; raw evidence retained.",
+                        )
+                    if cse.strip().lower() == "internet explorer maintenance":
+                        legacy_raw = cast(dict[str, object], raw)
+                        legacy_raw.update(
+                            cse_parser="legacy_deprecated", source_note=_LEGACY_IE_NOTE
+                        )
+                        identity, name, value = _readable_identity(cse, block)
+                        _emit(
+                            side_name,
+                            cse,
+                            identity,
+                            name,
+                            value,
+                            legacy_raw,
+                            enabled,
+                            source_state="legacy_deprecated",
+                        )
+                        continue
                     # Try CSE-specific identity
                     parsed: tuple[str, str, str] | None = None
                     if cse == "Security":
@@ -695,6 +1005,9 @@ def _parse_settings(gpo_elem: Element, gpo_id: str) -> list[Setting]:
                         display_value,
                         cast(dict[str, object], raw),
                         enabled,
+                        source_state="blocked"
+                        if raw.get("cse_parser") == "public_key_unclassified"
+                        else "normal",
                     )
     return settings
 
@@ -1287,6 +1600,128 @@ def augment_blocked_registry_from_pol(gpos: list[Gpo]) -> None:
             gpo.settings.extend(additions)
 
 
+def augment_audit_from_csv(gpos: list[Gpo]) -> None:
+    """Read copied audit.csv, joining report evidence by target and GUID.
+
+    Report XML remains the displayed value on disagreement. CSV-only policies
+    are first-class settings; malformed rows remain blocked evidence. No input
+    file is changed. Paths resolving outside the copied policy folder are refused.
+    """
+    for gpo in gpos:
+        if not gpo.sysvol_path:
+            continue
+        base = Path(gpo.sysvol_path)
+        path = ci_path(base, "Machine", "Microsoft", "Windows NT", "Audit", "audit.csv")
+        if path is None:
+            continue
+        source_note = ""
+        try:
+            if not path.resolve().is_relative_to(base.resolve()):
+                raise ValueError("audit.csv resolves outside the copied GPO folder")
+            data = path.read_bytes()
+            text = data.decode(
+                "utf-16" if data.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
+            )
+            reader = csv.DictReader(io.StringIO(text), strict=True)
+            required = {"Policy Target", "Subcategory", "Subcategory GUID", "Setting Value"}
+            if not required.issubset(reader.fieldnames or []):
+                raise ValueError("audit.csv is missing required column headers")
+            rows = list(reader)
+        except (OSError, UnicodeError, ValueError, csv.Error) as exc:
+            source_note = f"Audit CSV unreadable: {exc}"
+            rows = []
+        if source_note:
+            gpo.settings.append(
+                Setting(
+                    gpo_id=gpo.id,
+                    side="Computer",
+                    cse=_AUDIT_CSE,
+                    identity="audit.csv:unreadable",
+                    display_name="Advanced Audit CSV evidence",
+                    display_value="Unknown",
+                    raw={"source_note": source_note},
+                    from_disabled_side=not gpo.computer_enabled,
+                    source_state="blocked",
+                )
+            )
+            continue
+        xml = {
+            s.identity: s
+            for s in gpo.settings
+            if s.cse == _AUDIT_CSE
+            and s.side == "Computer"
+            and s.raw.get("cse_parser") == "advanced_audit"
+        }
+        csv_seen: dict[str, Setting] = {}
+        for index, row in enumerate(rows, 1):
+            # Audit options and global SACLs share this file but have no
+            # subcategory GUID. Retain them as unsupported evidence, never
+            # mistake their numeric masks for a subcategory SettingValue.
+            note = ""
+            state = "audit_csv"
+            try:
+                if None in row or any(v is None for v in row.values()):
+                    raise ValueError("incomplete or extra CSV columns")
+                identity, name, value, note = _audit_fields(
+                    row["Subcategory GUID"],
+                    row["Subcategory"],
+                    row["Policy Target"],
+                    row["Setting Value"],
+                )
+                if value.startswith("Unknown"):
+                    state = "blocked"
+            except ValueError:
+                identity, name, value = (
+                    f"audit.csv:row:{index}",
+                    row.get("Subcategory") or "Audit CSV row",
+                    "Unknown",
+                )
+                note = "Invalid or unsupported audit CSV row; not interpreted."
+                state = "blocked"
+            raw: dict[str, object] = {"cse_parser": "advanced_audit_csv", "audit_csv": row}
+            if note:
+                raw["source_note"] = note
+            existing = xml.get(identity) or csv_seen.get(identity)
+            if existing is not None:
+                existing.raw["audit_csv"] = row
+                evidence_rows = existing.raw.setdefault("audit_csv_rows", [])
+                if isinstance(evidence_rows, list):
+                    evidence_rows.append(row)
+                if existing.display_value != value:
+                    existing.raw["audit_disagreement"] = True
+                    existing.raw["source_note"] = (
+                        "Audit sources disagree: retained XML/first CSV value "
+                        f"{existing.display_value}; "
+                        f"CSV value {value}. No effective machine state is inferred."
+                    )
+                continue
+            setting = Setting(
+                gpo_id=gpo.id,
+                side="Computer",
+                cse=_AUDIT_CSE,
+                identity=identity,
+                display_name=name,
+                display_value=value,
+                raw=raw,
+                from_disabled_side=not gpo.computer_enabled,
+                source_state=state,
+            )
+            csv_seen[identity] = setting
+            setting.raw["audit_csv_rows"] = [row]
+            if xml and state != "blocked":
+                setting.raw["audit_disagreement"] = True
+                setting.raw["source_note"] = (
+                    "Audit sources disagree: CSV subcategory is absent from XML."
+                )
+            gpo.settings.append(setting)
+        for identity, setting in xml.items():
+            if "audit_csv" not in setting.raw:
+                setting.raw["audit_disagreement"] = True
+                setting.raw["source_note"] = (
+                    "Audit sources disagree: XML subcategory is absent from CSV."
+                )
+
+
 def parse_wmi_filters(json_path: str | Path) -> list[WmiFilter]:
     """Parse ``wmi-filters.json`` into a list of :class:`WmiFilter`."""
     records = _load_json_records(json_path)
@@ -1748,6 +2183,7 @@ def load_estate(sample_dir: str | Path) -> Estate:
     # Resolve <Blocked/> Registry extensions from the binary Registry.pol where
     # SYSVOL is present. No-op when SYSVOL wasn't copied or nothing is blocked.
     augment_blocked_registry_from_pol(gpos)
+    augment_audit_from_csv(gpos)
 
     wmi_filters = (
         _try_load(

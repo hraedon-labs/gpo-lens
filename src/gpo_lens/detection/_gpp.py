@@ -14,7 +14,7 @@ import defusedxml.ElementTree as ET
 from gpo_lens.model import SettingRaw, Side
 from gpo_lens.normalize import child_by_localname as _child_by_localname
 from gpo_lens.normalize import localname
-from gpo_lens.paths import ci_child, ci_path
+from gpo_lens.paths import ci_child
 
 if TYPE_CHECKING:
     from gpo_lens.model import Estate, Gpo
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class BrokenRef:
-    """One detected broken or suspicious reference."""
+    """One malformed path or verifiably missing reference in collected SYSVOL."""
 
     gpo_id: str
     gpo_name: str
@@ -90,19 +90,6 @@ _GPP_XML_FILES = (
 )
 
 _SIDE_MAP: dict[str, Side] = {"Machine": "Computer", "User": "User"}
-
-_GPP_PATH_ATTRS: dict[str, tuple[str, ...]] = {
-    "ScheduledTask": ("appPath", "exePath", "Path", "Arguments"),
-    "Task": ("appPath", "exePath", "Path", "Arguments"),
-    "ImmediateTask": ("appPath", "exePath", "Path", "Arguments"),
-    "Drive": ("Path", "path"),
-    "File": ("fromPath", "toPath", "targetPath", "SourcePath", "DestinationPath"),
-    "Service": ("serviceName",),
-    "DataSource": ("dsn", "dsnTarget"),
-    "SharedPrinter": ("path", "port"),
-    "Printer": ("path", "port"),
-    "LocalPrinter": ("path", "port"),
-}
 
 _TASK_ELEMENT_NAMES = frozenset(
     {
@@ -223,60 +210,10 @@ def _props(elem: Element) -> Element | None:
 
 
 def _scan_gpp_xml_for_refs(gpo: Gpo) -> list[BrokenRef]:
-    results: list[BrokenRef] = []
-    for walk in _walk_gpp_xml(gpo, only_known=False):
-        root = walk.tree.getroot()
-        if root is None:
-            continue
-        rel_file = walk.rel_file
-        for elem in root.iter():
-            tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
-            path_attrs = _GPP_PATH_ATTRS.get(tag)
-            if path_attrs is None:
-                continue
-            # Check the element's own attributes AND its <Properties> child.
-            # Real GPP XML puts path-like attributes on <Properties>, not on
-            # the parent element (e.g. <Drive><Properties path="\\srv\share"/>
-            # </Drive>), so scanning only the outer element misses them.
-            check_elems: list[tuple[Element, str]] = [(elem, tag)]
-            props = _props(elem)
-            if props is not None:
-                check_elems.append((props, f"{tag}/Properties"))
-            for src_elem, src_tag in check_elems:
-                for attr in path_attrs:
-                    val = src_elem.get(attr)
-                    if not val or not val.strip():
-                        continue
-                    val = val.strip()
-                    for unc in _scan_text_for_unc(val):
-                        cse_lower = walk.cse.lower()
-                        ref_type = (
-                            "drive_mapping_unc"
-                            if cse_lower in ("drives", "printers")
-                            else "gpp_file_ref"
-                        )
-                        results.append(
-                            BrokenRef(
-                                gpo_id=gpo.id,
-                                gpo_name=gpo.name,
-                                ref_type=ref_type,
-                                ref_value=unc,
-                                detail=f"GPP {rel_file} <{src_tag} @{attr}>: UNC path",
-                            )
-                        )
-            exe_val = _extract_xml_attr(elem, "appPath", "exePath", "Path")
-            if exe_val and tag in ("ScheduledTask", "Task", "ImmediateTask"):
-                if exe_val and not exe_val.startswith("\\\\") and not exe_val.startswith("%"):
-                    results.append(
-                        BrokenRef(
-                            gpo_id=gpo.id,
-                            gpo_name=gpo.name,
-                            ref_type="scheduled_task_path",
-                            ref_value=exe_val,
-                            detail=f"GPP {rel_file} <{tag}>: executable path '{exe_val}'",
-                        )
-                    )
-    return results
+    """Compatibility entrypoint; applies the same offline certainty boundary."""
+    from gpo_lens.model import Estate
+
+    return broken_refs(Estate(gpos=[gpo]))
 
 
 def scan_scheduled_tasks(gpo: Gpo) -> list[ScheduledTaskInfo]:
@@ -431,103 +368,36 @@ def local_group_mods(estate: Estate) -> list[LocalGroupMod]:
 
 
 def broken_refs(estate: Estate) -> list[BrokenRef]:
-    """Scan settings and SYSVOL for broken-reference patterns."""
-    results: list[BrokenRef] = []
-    seen: dict[tuple[str, str], int] = {}
+    """Only malformed paths or missing files in a GPO's collected SYSVOL.
 
-    _REF_TYPE_RANK: dict[str, int] = {
-        "gpp_file_ref": 3,
-        "missing_script": 3,
-        "scheduled_task_path": 2,
-        "drive_mapping_unc": 1,
-        "unc_path": 0,
-    }
+    External UNC and machine-local paths cannot be verified offline. They do
+    not imply a finding; UNC dependencies have a separate inventory.
+    """
+    from gpo_lens.dependencies import malformed_path, missing_own_reference, path_references
 
-    def _add(ref: BrokenRef) -> None:
-        key = (ref.gpo_id, ref.ref_value)
-        idx = seen.get(key)
-        if idx is None:
-            seen[key] = len(results)
-            results.append(ref)
-        else:
-            existing = results[idx]
-            if _REF_TYPE_RANK.get(ref.ref_type, -1) > _REF_TYPE_RANK.get(existing.ref_type, -1):
-                results[idx] = ref
-
-    for g in estate.gpos:
-        for ref in _scan_gpp_xml_for_refs(g):
-            _add(ref)
-
-        for s in g.settings:
-            for unc in _scan_text_for_unc(s.display_value):
-                ref_type = "unc_path"
-                if s.cse in ("Printers", "Drives", "Drive Maps"):
-                    ref_type = "drive_mapping_unc"
-                _add(
-                    BrokenRef(
-                        gpo_id=g.id,
-                        gpo_name=g.name,
-                        ref_type=ref_type,
-                        ref_value=unc,
-                        detail=f"[{s.cse}] {s.identity}: UNC in display value",
-                    )
-                )
-
-            for text in _raw_strings(s.raw):
-                for unc in _scan_text_for_unc(text):
-                    ref_type = "unc_path"
-                    if s.cse in ("Printers", "Drives", "Drive Maps"):
-                        ref_type = "drive_mapping_unc"
-                    _add(
-                        BrokenRef(
-                            gpo_id=g.id,
-                            gpo_name=g.name,
-                            ref_type=ref_type,
-                            ref_value=unc,
-                            detail=f"[{s.cse}] {s.identity}: UNC in raw data",
-                        )
-                    )
-
-            if g.sysvol_path and s.cse in ("Scripts", "Group Policy Scripts"):
-                script_name = s.display_value.strip()
-                if script_name and not script_name.startswith("\\\\"):
-                    base = Path(g.sysvol_path)
-                    # Resolve case-insensitively (real SYSVOL casing varies) and
-                    # tolerate unreadable subtrees — a false "missing" here would
-                    # be a spurious finding.
-                    found_script = any(
-                        ci_path(base, side_dir, "Scripts", *sub, script_name) is not None
-                        for side_dir in ("Machine", "User")
-                        for sub in ((), ("Logon",), ("Shutdown",), ("Startup",))
-                    )
-                    if not found_script:
-                        _add(
-                            BrokenRef(
-                                gpo_id=g.id,
-                                gpo_name=g.name,
-                                ref_type="missing_script",
-                                ref_value=script_name,
-                                detail=(
-                                    f"[{s.cse}] {s.side}: "
-                                    f"script '{script_name}' not found in SYSVOL"
-                                ),
-                            )
-                        )
-
-            if s.cse in ("Scheduled Tasks",):
-                exe = s.display_value.strip()
-                if exe and not exe.startswith("\\\\") and not exe.startswith("%"):
-                    _add(
-                        BrokenRef(
-                            gpo_id=g.id,
-                            gpo_name=g.name,
-                            ref_type="scheduled_task_path",
-                            ref_value=exe,
-                            detail=f"[{s.cse}] {s.identity}: task path '{exe}'",
-                        )
-                    )
-
-    return results
+    results: dict[tuple[str, str], BrokenRef] = {}
+    kinds = {"script": "missing_script", "scheduled_task_action": "scheduled_task_path"}
+    for gpo in sorted(estate.gpos, key=lambda g: g.id):
+        for ref in path_references(gpo):
+            if malformed_path(ref.target, gpo):
+                kind = "malformed_path"
+                detail = ref.detail + "; malformed path"
+            elif missing_own_reference(gpo, ref):
+                kind = kinds.get(ref.dependency_type, "gpp_file_ref")
+                detail = ref.detail + "; not found in collected SYSVOL"
+            else:
+                continue
+            results.setdefault(
+                (gpo.id, ref.target.casefold()),
+                BrokenRef(
+                    gpo.id,
+                    gpo.name,
+                    kind,
+                    ref.target,
+                    detail,
+                ),
+            )
+    return sorted(results.values(), key=lambda r: (r.gpo_id, r.ref_type, r.ref_value))
 
 
 @dataclass(frozen=True)

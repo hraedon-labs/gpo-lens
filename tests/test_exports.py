@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+from contextlib import closing
 
 import pytest
 
@@ -51,6 +52,20 @@ def export_client(tmp_path, monkeypatch, secret_corpus):
             raw = {"@attr": {"cpassword": secret}}
             cse = "Synthetic"
         gpo.settings.append(Setting(gpo.id, "Computer", cse, identity, name, value, raw, False))
+        # All corpus values also occur in F2 targets, including escaped copies.
+        target = rf"\\lab-user:{secret}@files.lab.example.com\share\LabEntry{i}"
+        gpo.settings.append(
+            Setting(
+                gpo.id,
+                "User",
+                "Drives",
+                f"Dependency{i}",
+                f"Lab dependency {i}",
+                target,
+                {"@attr": {"path": target, "cpassword": secret}},
+                False,
+            )
+        )
     gpo.settings.append(
         Setting(
             gpo.id,
@@ -128,6 +143,8 @@ def export_client(tmp_path, monkeypatch, secret_corpus):
         "/setting?identity=Carrier0&cse=Synthetic",
         "/search?q=Carrier",
         "/changelog?snap_a=1&snap_b=1",
+        "/dependencies",
+        "/dependencies?server=files.lab.example.com",
     ],
 )
 @pytest.mark.parametrize("format", ["md", "csv"])
@@ -175,6 +192,7 @@ def test_cli_export_available(export_client, capsys):
         "/api/v1/query/settings_at_som?ou_path=dc=fakefixture,dc=local",
         "/api/v1/query/cpassword_scan",
         "/export/gpo/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?format=json",
+        "/dependencies",
     ],
 )
 def test_shared_secret_corpus_html_api(export_client, secret_corpus, url):
@@ -864,7 +882,9 @@ def test_filtered_historical_dossier_explain_and_export_use_same_rows(export_cli
 
 
 @pytest.mark.parametrize("as_json", [False, True])
-@pytest.mark.parametrize("command", ["who-sets", "search", "show", "diff-settings"])
+@pytest.mark.parametrize(
+    "command", ["who-sets", "search", "show", "diff-settings", "dependencies", "trends"]
+)
 def test_ordinary_cli_commands_share_credential_projection(
     export_client, capsys, secret_corpus, command, as_json
 ):
@@ -873,7 +893,7 @@ def test_ordinary_cli_commands_share_credential_projection(
     from gpo_lens.cli import main
     from gpo_lens.store import load_estate, save_estate
 
-    with sqlite3.connect(export_client.db_path) as conn:
+    with closing(sqlite3.connect(export_client.db_path)) as conn, conn:
         estate = load_estate(conn)
         gid = estate.gpos[0].id
         estate.gpos[0].settings = []
@@ -886,10 +906,12 @@ def test_ordinary_cli_commands_share_credential_projection(
         "search": ["search", "DefaultPassword"],
         "show": ["show", gid],
         "diff-settings": ["diff-settings", "1", "2"],
+        "dependencies": ["dependencies"],
+        "trends": ["trends"],
     }[command]
     # Show reads the newest snapshot, so use a source populated with secrets.
-    if command == "show":
-        with sqlite3.connect(export_client.db_path) as conn:
+    if command in {"show", "dependencies", "trends"}:
+        with closing(sqlite3.connect(export_client.db_path)) as conn, conn:
             save_estate(conn, load_estate(conn, 1))
     assert main(argv) == 0
     output = capsys.readouterr().out
@@ -898,7 +920,7 @@ def test_ordinary_cli_commands_share_credential_projection(
     if as_json:
         import json
 
-        assert json.loads(output)["schema_version"] == 1
+        assert json.loads(output)["schema_version"] == 2
 
 
 def test_cli_event_export_masks_copied_credentials_without_changing_store(
@@ -909,12 +931,12 @@ def test_cli_event_export_masks_copied_credentials_without_changing_store(
     from gpo_lens.cli import main
     from gpo_lens.events import append_event, query_events
 
-    with sqlite3.connect(export_client.db_path) as conn:
+    with closing(sqlite3.connect(export_client.db_path)) as conn, conn:
         append_event(conn, "lab.test", {"summary": "Copied " + secret_corpus[-1]})
     output = tmp_path / "events.ndjson"
     assert main(["--db", str(export_client.db_path), "events-export", "--ndjson", str(output)]) == 0
     assert secret_corpus[-1] not in output.read_text()
-    with sqlite3.connect(export_client.db_path) as conn:
+    with closing(sqlite3.connect(export_client.db_path)) as conn, conn:
         assert secret_corpus[-1] in str(query_events(conn))
 
 
@@ -955,7 +977,7 @@ def test_occurrence_notes_mask_copied_snapshot_secrets(export_client, secret_cor
 
     from gpo_lens.findings import append_triage_event
 
-    with sqlite3.connect(export_client.db_path) as conn:
+    with closing(sqlite3.connect(export_client.db_path)) as conn, conn:
         append_triage_event(conn, 1, "commented", "lab-reviewer", note="Copy " + secret_corpus[-1])
     response = export_client.get("/findings/1", params={"format": format})
     assert response.status_code == 200

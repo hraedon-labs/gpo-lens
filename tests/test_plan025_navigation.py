@@ -1,6 +1,7 @@
 """Plan 025 WI-4: frozen migration inventory, discovery and bookmark contracts."""
 
 import json
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,7 @@ def test_inventory_documents_all_deterministic_export_interfaces(client):
         "export_gpo",
         "accepted_risks",
         "setting_detail",
+        "dependencies",
     ):
         row = rows[name]
         query = row.get("representative_export_query", row["representative_query"])
@@ -181,7 +183,7 @@ def test_collection_coverage_tile_opens_filtered_findings(client):
     from gpo_lens.ingest import load_estate
     from gpo_lens.store import save_estate
 
-    with sqlite3.connect(client.app.state.db_path) as conn:
+    with closing(sqlite3.connect(client.app.state.db_path)) as conn, conn:
         estate = load_estate(ROOT / "tests/fixtures")
         sid = save_estate(conn, estate)
         evaluate_finding_lifecycle_v2(conn, sid, estate)
@@ -208,7 +210,7 @@ def test_duplicate_analysis_warning_is_visible_and_exported(client):
     from gpo_lens.ingest import load_estate
     from gpo_lens.store import save_estate
 
-    with sqlite3.connect(client.app.state.db_path) as conn:
+    with closing(sqlite3.connect(client.app.state.db_path)) as conn, conn:
         estate = load_estate(ROOT / "tests/fixtures")
         sid = save_estate(conn, estate)
         candidate = candidates_from_estate(estate, snapshot_id=sid)[0]

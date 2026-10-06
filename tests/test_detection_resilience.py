@@ -467,6 +467,7 @@ _DRIVE_XML = (
 def test_drive_unc_in_properties_child_is_detected(tmp_path):
     """Real GPP XML puts UNC paths on <Properties>, not on the outer element.
     The ref scanner must descend into Properties children."""
+    from gpo_lens.dependencies import external_dependencies
     from gpo_lens.detection import _scan_gpp_xml_for_refs
 
     base = tmp_path / "{GUID}"
@@ -474,7 +475,8 @@ def test_drive_unc_in_properties_child_is_detected(tmp_path):
     drives.mkdir(parents=True)
     (drives / "Drives.xml").write_text(_DRIVE_XML, encoding="utf-8")
     gpo = _make_gpo(str(base))
-    refs = _scan_gpp_xml_for_refs(gpo)
-    unc_refs = [r for r in refs if r.ref_value and "oldserver" in r.ref_value]
-    assert len(unc_refs) >= 1
-    assert all(r.ref_type == "drive_mapping_unc" for r in unc_refs)
+    assert _scan_gpp_xml_for_refs(gpo) == []
+    refs = [r for group in external_dependencies(Estate(gpos=[gpo])) for r in group.dependencies]
+    unc_refs = [r for r in refs if "oldserver" in r.target]
+    assert len(unc_refs) == 1
+    assert all(r.dependency_type == "drive_mapping" for r in unc_refs)

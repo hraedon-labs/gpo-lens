@@ -350,9 +350,9 @@ class Estate:
 class AdmxResolver(Protocol):
     """Contract for ADMX display-name resolution (duck-typed previously).
 
-    Any object with a ``resolve_display_name(identity: str) -> str | None``
+    Any object with a ``resolve_display_name(identity, *, side=None) -> str | None``
     method satisfies this protocol — structural subtyping, no inheritance
     required. ``admx_parser.PolicyDefinitions`` is the canonical implementor.
     """
 
-    def resolve_display_name(self, identity: str) -> str | None: ...
+    def resolve_display_name(self, identity: str, *, side: Side | None = None) -> str | None: ...

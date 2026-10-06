@@ -120,6 +120,7 @@
                   <tr><th>Snapshot</th><td>#{{ obs.snapshot_id }}</td></tr>
                   <tr><th>Evaluation</th><td>{{ obs.evaluation_kind }}</td></tr>
                   <tr><th>Detector set</th><td class="mono">{{ obs.detector_set_digest or '—' }}</td></tr>
+                  <tr><th>Detector version</th><td class="mono">{{ obs.detector_version if obs.detector_version is not none else 'pre-1.4, unknown' }}</td></tr>
                   {% if obs.comparator_input_id %}<tr><th>Comparator input</th><td class="mono">#{{ obs.comparator_input_id }}</td></tr>{% endif %}
                   <tr><th>Application</th><td class="mono">{{ obs.application_version or '—' }}</td></tr>
                   <tr><th>Run started</th><td>{{ obs.started_at or '—' }}</td></tr>

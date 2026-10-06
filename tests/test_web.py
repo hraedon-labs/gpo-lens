@@ -1269,7 +1269,7 @@ class TestUiEnhancements:
 class TestDashboardFiltering:
     """WI-025: filter / search / sort on the dashboard findings table.
 
-    Fixture estate has 24 findings (1 critical, 3 high, 2 medium, 12 low, 6 info).
+    Fixture estate has 23 findings (1 critical, 3 high, 2 medium, 11 low, 6 info).
     """
 
     # Findings-table rows render as <td><span class="gp-pill {sev}">; the header
@@ -1281,16 +1281,16 @@ class TestDashboardFiltering:
     def test_filter_by_severity_shows_subset(self, client) -> None:
         resp = client.get("/?severity=critical")
         assert resp.status_code == 200
-        # critical filter → 1 of 24; the badge shows "N of total" only when filtered
-        assert "1 of 24" in resp.text
+        # critical filter → 1 of 23; the badge shows "N of total" only when filtered
+        assert "1 of 23" in resp.text
         assert "gpo-cpassword" in resp.text
 
     def test_unfiltered_shows_total_without_of(self, client) -> None:
         # "All (incl. info)" is the only truly-unfiltered view; the bare default
-        # hides info, so it legitimately shows "N of 24".
+        # hides info, so it legitimately shows "N of 23".
         resp = client.get("/?severity=all")
-        assert "24" in resp.text
-        assert " of 24" not in resp.text
+        assert "23" in resp.text
+        assert " of 23" not in resp.text
 
     def test_default_view_hides_info_findings(self, client) -> None:
         # The actionable default suppresses info-level rows and offers a "Show
@@ -1306,8 +1306,8 @@ class TestDashboardFiltering:
         resp = client.get("/?q=cpassword")
         assert resp.status_code == 200
         # "cpassword" matches the cpassword finding (summary) AND the
-        # local_admin_push finding (GPO name "gpo-cpassword") → 2 of 24.
-        assert "2 of 24" in resp.text
+        # local_admin_push finding (GPO name "gpo-cpassword") → 2 of 23.
+        assert "2 of 23" in resp.text
         assert "gpo-cpassword" in resp.text
 
     def test_search_no_matches_shows_empty_state(self, client) -> None:
@@ -1542,7 +1542,7 @@ class TestExport:
         resp = client.get("/export/findings?format=json&severity=critical&q=x")
         assert resp.status_code == 200
         data = json.loads(resp.text)
-        assert len(data) == 24  # all findings, not the filtered subset
+        assert len(data) == 23  # all findings, not the filtered subset
 
     def test_export_findings_invalid_format_400(self, client) -> None:
         resp = client.get("/export/findings?format=xlsx")
@@ -1563,7 +1563,7 @@ class TestExport:
         assert "attachment" in resp.headers["content-disposition"]
         data = json.loads(resp.text)
         assert isinstance(data, list)
-        assert len(data) == 24
+        assert len(data) == 23
         assert "critical" in {row["severity"] for row in data}
 
     def test_export_gpo_json(self, client) -> None:

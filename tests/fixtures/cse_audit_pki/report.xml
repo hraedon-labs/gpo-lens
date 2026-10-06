@@ -1,0 +1,17 @@
+<GPO xmlns="urn:synthetic:gpo" xmlns:a="urn:synthetic:audit" xmlns:p="urn:synthetic:pki">
+  <Identifier><Identifier>{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}</Identifier><Domain>lab.example.com</Domain></Identifier>
+  <Name>Lab Audit and PKI</Name>
+  <Computer><Enabled>true</Enabled>
+    <ExtensionData><Name>Advanced Audit Configuration</Name><Extension>
+      <a:AuditSetting><a:PolicyTarget>System</a:PolicyTarget><a:SubcategoryName>Audit Credential Validation</a:SubcategoryName><a:SubcategoryGuid>{0CCE923F-69AE-11D9-BED3-505054503030}</a:SubcategoryGuid><a:SettingValue>3</a:SettingValue></a:AuditSetting>
+    </Extension></ExtensionData>
+    <ExtensionData><Name>Public Key</Name><Extension>
+      <p:EFSSettings><p:AllowEFS>true</p:AllowEFS><p:Options>2</p:Options><p:CacheTimeout>3600</p:CacheTimeout><p:KeyLen>2048</p:KeyLen></p:EFSSettings>
+      <p:RootCertificateSettings><p:AllowNewCAs>false</p:AllowNewCAs><p:TrustThirdPartyCAs>true</p:TrustThirdPartyCAs><p:RequireUPNNamingConstraints>true</p:RequireUPNNamingConstraints></p:RootCertificateSettings>
+      <p:AutoEnrollmentSettings><p:Enabled>true</p:Enabled><p:RenewExpiredCertificates>true</p:RenewExpiredCertificates><p:UpdatePendingCertificates>false</p:UpdatePendingCertificates></p:AutoEnrollmentSettings>
+      <p:CertificateTrustSettings><p:TrustModel>2</p:TrustModel><p:AllowUserTrust>false</p:AllowUserTrust></p:CertificateTrustSettings>
+      <p:TrustedRootCertificates><p:Certificate><p:Thumbprint>AA BB CC DD</p:Thumbprint><p:IssuedTo>Lab Root CA</p:IssuedTo><p:IssuedBy>Lab Root CA</p:IssuedBy></p:Certificate></p:TrustedRootCertificates>
+    </Extension></ExtensionData>
+  </Computer>
+  <User><Enabled>true</Enabled><ExtensionData><Name>Internet Explorer Maintenance</Name><Extension><FavoriteURL><Name>Lab Portal</Name><URL>https://portal.lab.example.com/</URL></FavoriteURL></Extension></ExtensionData></User>
+</GPO>

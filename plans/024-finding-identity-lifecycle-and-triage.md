@@ -2,7 +2,13 @@
 
 **Status:** Shipped in v1.1.0, hardened through v1.3.0; verified 2026-10-06. Evidence: [src/gpo_lens/finding_model.py](../src/gpo_lens/finding_model.py), [tests/test_plan024.py](../tests/test_plan024.py).
 
-The durable identity/evaluation/occurrence/observation/triage protocol and core queries are implemented in `findings.py`, with typed identity fixes and SQL filtering. Schema v8 preserves legacy triage; v9 marks unstable subjects snapshot-scoped. Intrinsic evaluation is wired to ingest. Contextual series are supported by the core, but persisting baseline/golden workbench evaluations remains a gated follow-on, not a shipped UI workflow. Historical backfill is explicitly absent where exact provenance cannot be reproduced.
+The durable identity/evaluation/occurrence/observation/triage protocol and core queries are implemented in `findings.py`, with typed identity fixes and SQL filtering. Schema v8 preserves legacy triage; v9 marks unstable subjects snapshot-scoped; v10 records the evaluating detector version on each observation. Pre-1.4 observations keep NULL (unknown), because the mutable occurrence version cannot reconstruct their provenance. Normal CLI/web ingest records the application version on each evaluation run. Intrinsic evaluation is wired to ingest. Contextual series are supported by the core, but persisting baseline/golden workbench evaluations remains a gated follow-on, not a shipped UI workflow. Historical backfill is explicitly absent where exact provenance cannot be reproduced.
+
+The intrinsic pipeline digest includes the complete `INTRINSIC_DETECTOR_VERSIONS`
+registry and the exact danger-rule bundle passed to evaluation. It is independent
+of emitted findings, so zero-hit checks remain versioned. Update the registry
+when detector semantics change; the adapters use that same version for each
+observation. Rule-content changes also alter the digest, even with no matches.
 
 The design below is the historical specification; this status records the verified release scope.
 

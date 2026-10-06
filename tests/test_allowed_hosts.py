@@ -1,5 +1,7 @@
 """Authority validation precedes every trust, mutation and URL path."""
 
+from contextlib import closing
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -137,7 +139,7 @@ def test_rebinding_cannot_read_or_delete_populated_snapshot(tmp_path, monkeypatc
     monkeypatch.delenv("GPO_LENS_AUTH_TOKEN", raising=False)
     db = tmp_path / "lab.sqlite3"
     estate = load_estate(Path(__file__).parent / "fixtures")
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         init_db(conn)
         sid = save_estate(conn, estate)
     client = TestClient(
@@ -153,7 +155,7 @@ def test_rebinding_cannot_read_or_delete_populated_snapshot(tmp_path, monkeypatc
         follow_redirects=False,
     )
     assert response.status_code == 400
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         assert conn.execute("SELECT count(*) FROM snapshot").fetchone()[0] == 1
 
 

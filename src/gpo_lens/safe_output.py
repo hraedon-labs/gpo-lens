@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import dataclasses
 import html
+import json
 import re
 from collections.abc import Iterable, Mapping
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from gpo_lens.display import serialize_result
 
@@ -93,6 +94,24 @@ _VALUE = {
 }
 
 
+# Exact schema fields for public counts, never a primitive-type exemption for
+# password/token/credential keys. Table headers are projected as positional rows.
+_PUBLIC_AGGREGATE_FIELDS = frozenset(
+    {
+        "cpassword_hit_count",
+        "ms16_072_vulnerable_count",
+        "broken_ref_count",
+        "admx_gap_count",
+        "danger_finding_count",
+        "gpo_count",
+        "som_count",
+        "total_settings",
+        "total_delegation_entries",
+        "coverage_gap_count",
+    }
+)
+
+
 def _mapping(value: object) -> Mapping[str, Any] | None:
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return {f.name: getattr(value, f.name) for f in dataclasses.fields(value)}
@@ -103,6 +122,11 @@ def _mapping(value: object) -> Mapping[str, Any] | None:
 
 def _credential_name(name: object) -> bool:
     return bool(_SECRET_KEY.fullmatch(str(name))) or str(name).lower() in _WINDOWS_CREDENTIAL_NAMES
+
+
+def _credential_material(value: object) -> bool:
+    """A secret field is sensitive regardless of the stored primitive type."""
+    return value not in (None, "")
 
 
 def _registry_payload(mapping: Mapping[str, Any]) -> tuple[str, ...]:
@@ -183,22 +207,34 @@ def _command_secrets(mapping: Mapping[str, Any]) -> tuple[str, ...]:
 def secret_values(value: object) -> tuple[str, ...]:
     """Discover credential values while retaining no raw source fragments."""
     secrets: set[str] = set()
+    visited: set[int] = set()
 
     def discover(obj: object) -> None:
+        # Query results can repeat a SOM (and its entire link chain) for each
+        # matching link. Inspect a shared container once within this call; all
+        # its credential values still join the same masking context.
+        if id(obj) in visited:
+            return
         mapping = _mapping(obj)
         if mapping is not None:
+            visited.add(id(obj))
             sensitive = _sensitive(mapping)
+            if _credential_name(mapping.get("tag", "")):
+                leaf = mapping.get("text")
+                if _credential_material(leaf):
+                    secrets.add(str(leaf))
             secrets.update(_registry_payload(mapping))
             secrets.update(_command_secrets(mapping))
             for key, child in mapping.items():
                 if (
-                    (_SECRET_KEY.fullmatch(str(key)) or (sensitive and key in _VALUE))
-                    and isinstance(child, str)
-                    and child
+                    key not in _PUBLIC_AGGREGATE_FIELDS
+                    and (_credential_name(key) or (sensitive and key in _VALUE))
+                    and _credential_material(child)
                 ):
-                    secrets.add(child)
+                    secrets.add(str(child))
                 discover(child)
         elif isinstance(obj, (list, tuple, set, frozenset)):
+            visited.add(id(obj))
             for child in obj:
                 discover(child)
         elif isinstance(obj, str):
@@ -236,31 +272,88 @@ def _sensitive(mapping: Mapping[str, Any]) -> bool:
     return bool(_registry_payload(mapping))
 
 
+def _variant_pattern(variant: str) -> str:
+    # Hex digits in %XX and \\uXXXX escapes are case-insensitive; literal
+    # characters are not, so a differently-cased non-secret is never masked.
+    def hex_digits(digits: str) -> str:
+        return "".join(f"[{d.lower()}{d.upper()}]" if d.isalpha() else d for d in digits)
+
+    parts: list[str] = []
+    for m in re.finditer(r"%([0-9A-Fa-f]{2})|\\u([0-9A-Fa-f]{4})|(.)", variant, re.DOTALL):
+        if m[1] is not None:
+            parts.append("%" + hex_digits(m[1]))
+        elif m[2] is not None:
+            parts.append(r"\\u" + hex_digits(m[2]))
+        else:
+            parts.append(re.escape(m[3]))
+    return "".join(parts)
+
+
+def _secret_variants(secrets: Iterable[str]) -> tuple[tuple[re.Pattern[str], bool], ...]:
+    # Older report generators escape at their own render boundary. Include
+    # those known renderings so output files and stdout cannot reveal an
+    # entity-encoded copy of a credential. Structured views mask before render.
+    # Form-encoding ('+' for space) is deliberately absent: it would mask
+    # unrelated text such as 'a+b' for a secret 'a b'; '%20' is covered.
+    # Copies already escaped in the source data for a later renderer
+    # (Markdown backslashes, CSV-doubled quotes, double HTML entities) are
+    # out of scope: secret-keyed fields are always redacted by key.
+    variants: dict[str, bool] = {}
+    for secret in secrets:
+        substring_mask = len(secret) >= 6 and not secret.isnumeric()
+        utf8 = secret.encode("utf-8", errors="surrogatepass")
+        percent = quote(utf8, safe="")
+        utf16 = secret.encode("utf-16-be", errors="surrogatepass")
+        unicode_escaped = "".join(
+            rf"\u{int.from_bytes(utf16[i : i + 2], 'big'):04x}" for i in range(0, len(utf16), 2)
+        )
+        for variant in {
+            secret,
+            percent,
+            json.dumps(secret, ensure_ascii=True)[1:-1],
+            json.dumps(secret, ensure_ascii=False)[1:-1],
+            unicode_escaped,
+            html.escape(secret),
+            html.escape(secret, quote=False),
+            secret.replace("`", "&#96;"),
+            html.escape(secret.replace("|", "\\|").replace("\n", " "), quote=False),
+        }:
+            if variant and variant != REDACTED:
+                # Escaping must not turn a short secret into an unbounded one.
+                # A real long credential can equal a short one's escaped form.
+                # In that ambiguous case the long credential must stay masked.
+                variants[variant] = variants.get(variant, False) or substring_mask
+    ordered = sorted(variants.items(), key=lambda item: (-len(item[0]), item[0]))
+    return tuple(
+        (
+            re.compile(
+                _variant_pattern(variant)
+                if substring_mask
+                else r"(?<![\w.-])" + _variant_pattern(variant) + r"(?![\w.-])"
+            ),
+            substring_mask,
+        )
+        for variant, substring_mask in ordered
+    )
+
+
+def _mask_text(value: str, variants: tuple[tuple[re.Pattern[str], bool], ...]) -> str:
+    # Short/numeric credentials still mask standalone copies (WI-101), but
+    # never substrings of dates, GUIDs, counts or policy names: their patterns
+    # carry token boundaries that treat '-' and '.' as part of a token.
+    # Credential keys are redacted independently.
+    for pattern, _substring_mask in variants:
+        value = pattern.sub(REDACTED, value)
+    return _ASSIGNMENT.sub(lambda m: m[1] + "=" + REDACTED, value)
+
+
 def safe_text(value: str, *, secrets: Iterable[str] = ()) -> str:
     """Mask credentials in already-rendered text without destroying its markup.
 
     Structured projections omit raw fragments before rendering. CLI reports
     have already rendered their HTML/Markdown and must retain that structure.
     """
-    values = set(secrets) | set(secret_values(value))
-    # Older report generators escape at their own render boundary. Include
-    # those known renderings so output files and stdout cannot reveal an
-    # entity-encoded copy of a credential. Structured views mask before render.
-    variants: set[str] = set()
-    for secret in values:
-        variants.update(
-            {
-                secret,
-                html.escape(secret),
-                html.escape(secret, quote=False),
-                secret.replace("`", "&#96;"),
-                html.escape(secret.replace("|", "\\|").replace("\n", " "), quote=False),
-            }
-        )
-    values = variants
-    for secret in sorted((s for s in values if s and s != REDACTED), key=lambda s: (-len(s), s)):
-        value = value.replace(secret, REDACTED)
-    return _ASSIGNMENT.sub(lambda m: m[1] + "=" + REDACTED, value)
+    return _mask_text(value, _secret_variants(set(secrets) | set(secret_values(value))))
 
 
 def safe_data(value: object, *, include_audit: bool = True, secrets: Iterable[str] = ()) -> Any:
@@ -271,7 +364,9 @@ def safe_data(value: object, *, include_audit: bool = True, secrets: Iterable[st
     whose typed result intentionally omits source subtrees.
     """
     secrets = set(secrets) | set(secret_values(value))
-    ordered_secrets = sorted((s for s in secrets if s != REDACTED), key=lambda s: (-len(s), s))
+    # Discovery already visited every source string. Prepare escaped spellings
+    # once for this projection rather than rediscovering/sorting for each field.
+    variants = _secret_variants(s for s in secrets if s != REDACTED)
 
     def project(obj: object) -> Any:
         mapping = _mapping(obj)
@@ -284,7 +379,8 @@ def safe_data(value: object, *, include_audit: bool = True, secrets: Iterable[st
                     m = _mapping(child)
                     if m is not None:
                         return any(
-                            (_SECRET_KEY.fullmatch(str(k)) and bool(v)) or contains_secret(v)
+                            (_SECRET_KEY.fullmatch(str(k)) and _credential_material(v))
+                            or contains_secret(v)
                             for k, v in m.items()
                         )
                     if isinstance(child, (list, tuple)):
@@ -292,13 +388,17 @@ def safe_data(value: object, *, include_audit: bool = True, secrets: Iterable[st
                     return False
 
                 sensitive = sensitive or contains_secret(raw)
-            result = {}
+            result: dict[str, Any] = {}
             for key, child in mapping.items():
                 if key in _OMIT or (key in _AUDIT and not include_audit):
                     result[key] = REDACTED
+                elif key in _PUBLIC_AGGREGATE_FIELDS and isinstance(child, (int, float)):
+                    result[key] = child
                 elif (
-                    _SECRET_KEY.fullmatch(str(key)) or (sensitive and key in _VALUE)
-                ) and child not in (None, ""):
+                    _credential_name(key)
+                    or (key == "text" and _credential_name(mapping.get("tag", "")))
+                    or (sensitive and key in _VALUE)
+                ) and _credential_material(child):
                     result[key] = REDACTED
                 else:
                     result[key] = project(child)
@@ -312,7 +412,7 @@ def safe_data(value: object, *, include_audit: bool = True, secrets: Iterable[st
                 return obj
             if _RAW_FRAGMENT.search(obj):
                 return REDACTED
-            return safe_text(obj, secrets=ordered_secrets)
+            return _mask_text(obj, variants)
         return serialize_result(obj)
 
     return project(value)

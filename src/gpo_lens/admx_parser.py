@@ -24,13 +24,16 @@ policy names.
 from __future__ import annotations
 
 import codecs
+import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from xml.etree.ElementTree import Element
 
 import defusedxml.ElementTree as ET
 
+from gpo_lens.model import Side
 from gpo_lens.normalize import localname
 
 _ADMX_NS = "http://schemas.microsoft.com/GroupPolicy/2006/07/PolicyDefinitions"
@@ -118,7 +121,7 @@ class PolicyDefinitions:
     )
     skipped_files: list[TemplateFileSkip] = field(default_factory=list)
 
-    def lookup(self, key: str, value_name: str) -> list[AdmxPolicy]:
+    def lookup(self, key: str, value_name: str, *, side: Side | None = None) -> list[AdmxPolicy]:
         """Find policies matching a registry key and value name.
 
         ``key`` is the full hive-relative path (e.g.
@@ -129,18 +132,23 @@ class PolicyDefinitions:
         norm_val = value_name.lower()
         results: list[AdmxPolicy] = []
         for p in self.policies:
+            if side is not None and p.class_scope not in (
+                "Both",
+                "Machine" if side == "Computer" else "User",
+            ):
+                continue
             if p.key.lower().strip("\\") == norm_key:
                 if not p.value_name or p.value_name.lower() == norm_val:
                     results.append(p)
         return results
 
-    def resolve_display_name(self, identity: str) -> str | None:
+    def resolve_display_name(self, identity: str, *, side: Side | None = None) -> str | None:
         """Given a setting identity like ``key:valueName``, return the
         ADMX policy display name or None."""
         parts = identity.split(":", 1)
         key = parts[0] if parts else identity
         val = parts[1] if len(parts) > 1 else ""
-        matches = self.lookup(key, val)
+        matches = self.lookup(key, val, side=side)
         if matches:
             return matches[0].display_name
         return None
@@ -198,6 +206,44 @@ def find_admx_dir(export_dir: str | Path) -> Path | None:
         except OSError:
             continue
     return None
+
+
+def admx_directories(value: str | Path | Sequence[str | Path]) -> list[Path]:
+    """Path lists use the host's os.pathsep; CLI lists retain literal paths."""
+    values = (
+        value.split(os.pathsep)
+        if isinstance(value, str)
+        else [value]
+        if isinstance(value, Path)
+        else value
+    )
+    return list(dict.fromkeys(Path(v) for v in values if str(v).strip()))
+
+
+def parse_admx_dirs(value: str | Path | Sequence[str | Path]) -> PolicyDefinitions:
+    """Merge catalogues in supplied order; the first matching policy wins.
+
+    Each directory resolves its own language resources. Identical policies are
+    deduplicated and skipped-file diagnostics identify their source directory.
+    No Microsoft's templates are bundled.
+    """
+    result = PolicyDefinitions()
+    seen: set[AdmxPolicy] = set()
+    directories = admx_directories(value)
+    for index, directory in enumerate(directories, 1):
+        parsed = parse_admx_dir(directory)
+        for policy in parsed.policies:
+            if policy not in seen:
+                seen.add(policy)
+                result.policies.append(policy)
+        result.skipped_files.extend(
+            TemplateFileSkip(
+                f"directory-{index}/{s.filename}" if len(directories) > 1 else s.filename,
+                s.reason_class,
+            )
+            for s in parsed.skipped_files
+        )
+    return result
 
 
 def parse_admx_dir(policy_defs_dir: str | Path) -> PolicyDefinitions:

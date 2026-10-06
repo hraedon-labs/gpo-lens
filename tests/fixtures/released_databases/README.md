@@ -1,6 +1,6 @@
 # Released database upgrade fixtures
 
-These six small SQLite databases were created by **installed released code**,
+These seven small SQLite databases were created by **installed released code**,
 not hand-built schemas or today's `init_db`. Each adjacent JSON manifest records
 the release tag, exact commit, original schema version, and all table counts.
 All input data is synthetic. There are no workplace exports in this corpus.
@@ -12,6 +12,11 @@ or populated package cache):
 .venv/bin/python scripts/build_released_db_fixtures.py
 .venv/bin/pytest -q tests/test_released_db_upgrades.py
 ```
+
+Generate only the latest fixture with
+`python scripts/build_released_db_fixtures.py --tags v1.3.1`; older artifacts
+remain immutable. The v1.3.1 manifest records its exact tag commit and schema 9;
+its two snapshots and three triage events come from that installed release.
 
 The generator makes a detached scratch worktree per tag, installs that checkout
 with its web extra into a separate scratch venv, and runs a worker with that
@@ -36,6 +41,7 @@ credential material or dependency on a scratch SYSVOL path.
 | v1.0.0 | 3 | Not available | Separate `audit.log` |
 | v1.1.0 | 6 | Legacy triage and Plan 024 events | Separate `audit.log` |
 | v1.2.0 | 7 | Legacy triage and Plan 024 events | Separate `audit.log` |
+| v1.3.1 | 9 | Public triage APIs write Plan 024 events | Separate `audit.log` |
 
 Where available, released ingest evaluates real synthetic findings. Its public
 `triage_finding` API acknowledges one occurrence and accepts risk on another.
@@ -63,7 +69,8 @@ the matching pre-upgrade backup when rolling back the application.
 
 ## Validation evidence (S4)
 
-All twelve released-DB upgrade/backup cases pass. No migration defect was found
+The original twelve released-DB upgrade/backup cases passed at S4.
+The 1.4 integration extends the same tests to v1.3.1 (fourteen cases). No migration defect was found
 in this corpus. Failing-first creation produced twelve failures before the
 fixtures existed. Mutation checks ran the tests against independent scratch
 copies of `src/` and `tests/`, leaving the working source untouched:

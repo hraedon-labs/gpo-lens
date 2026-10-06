@@ -26,6 +26,8 @@ import gpo_lens.web.app as _app_module
 from gpo_lens import events as _events
 from gpo_lens import ingest as _ingest
 from gpo_lens import store as _store
+from gpo_lens.collection_zip import collector_root
+from gpo_lens.model import Estate
 from gpo_lens.web._helpers import get_ro_conn, get_rw_conn, stream_upload_to_file
 
 # _audit and _safe_extract reference module-level state on app.py that tests
@@ -68,82 +70,88 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                 status_code=409,
             )
 
+        temporary: TemporaryDirectory[str] | None = None
         try:
-            with TemporaryDirectory() as tmpdir:
-                zip_path = Path(tmpdir) / "upload.zip"
-                # Look up _MAX_UPLOAD_BYTES at request time so test patches on
-                # gpo_lens.web.app._MAX_UPLOAD_BYTES take effect.
-                if await stream_upload_to_file(file, zip_path, _app_module._MAX_UPLOAD_BYTES):
-                    _audit("ingest", principal, "failure", "upload exceeds size limit", request)
-                    return templates.TemplateResponse(
-                        request,
-                        "ingest.html",
-                        {"error": "Upload exceeds 500MB limit."},
-                        status_code=413,
-                    )
-                try:
-                    extract_dir = Path(tmpdir) / "extracted"
-                    extract_dir.mkdir()
-                    await asyncio.to_thread(_safe_extract, zip_path, extract_dir)
-                except (
-                    ValueError,
-                    zipfile.BadZipFile,
-                    OSError,
-                    NotImplementedError,
-                    RuntimeError,
-                    MemoryError,
-                ) as exc:
-                    _logger.warning("Malformed zip upload: %s", exc)
-                    _audit("ingest", principal, "failure", type(exc).__name__, request)
-                    return templates.TemplateResponse(
-                        request,
-                        "ingest.html",
-                        {"error": "Malformed zip file. Please check the upload and try again."},
-                        status_code=400,
-                    )
+            temporary = TemporaryDirectory()
+            tmpdir = temporary.name
+            zip_path = Path(tmpdir) / "upload.zip"
+            # Look up _MAX_UPLOAD_BYTES at request time so test patches on
+            # gpo_lens.web.app._MAX_UPLOAD_BYTES take effect.
+            if await stream_upload_to_file(file, zip_path, _app_module._MAX_UPLOAD_BYTES):
+                _audit("ingest", principal, "failure", "upload exceeds size limit", request)
+                return templates.TemplateResponse(
+                    request,
+                    "ingest.html",
+                    {"error": "Upload exceeds 500MB limit."},
+                    status_code=413,
+                )
+            try:
+                extract_dir = Path(tmpdir) / "extracted"
+                extract_dir.mkdir()
+                await asyncio.to_thread(_safe_extract, zip_path, extract_dir)
+            except (
+                ValueError,
+                zipfile.BadZipFile,
+                OSError,
+                NotImplementedError,
+                RuntimeError,
+                MemoryError,
+            ) as exc:
+                _logger.warning("Malformed zip upload: %s", exc)
+                _audit("ingest", principal, "failure", type(exc).__name__, request)
+                return templates.TemplateResponse(
+                    request,
+                    "ingest.html",
+                    {"error": f"Malformed zip file: {exc}"},
+                    status_code=400,
+                )
 
-                try:
-                    estate = await asyncio.to_thread(_ingest.load_estate, extract_dir)
-                except (FileNotFoundError, ValueError, KeyError) as exc:
-                    _logger.warning("Invalid estate data: %s", exc)
-                    _audit("ingest", principal, "failure", type(exc).__name__, request)
-                    return templates.TemplateResponse(
-                        request,
-                        "ingest.html",
-                        {"error": "Invalid estate data in upload."},
-                        status_code=400,
-                    )
+            try:
 
-                def _persist() -> None:
-                    rw_conn = get_rw_conn(app.state.db_path)
-                    try:
-                        _store.init_db(rw_conn)
-                        snapshot_id = _store.save_estate(rw_conn, estate)
+                def _load_upload() -> Estate:
+                    return _ingest.load_estate(collector_root(extract_dir))
+
+                estate = await asyncio.to_thread(_load_upload)
+            except (FileNotFoundError, ValueError, KeyError) as exc:
+                _logger.warning("Invalid estate data: %s", exc)
+                _audit("ingest", principal, "failure", type(exc).__name__, request)
+                return templates.TemplateResponse(
+                    request,
+                    "ingest.html",
+                    {"error": "Invalid estate data in upload."},
+                    status_code=400,
+                )
+
+            def _persist() -> None:
+                rw_conn = get_rw_conn(app.state.db_path)
+                try:
+                    _store.init_db(rw_conn)
+                    assert temporary is not None
+                    # Cleanup is a required part of import and must precede commit.
+                    with rw_conn, temporary:
+                        _store.save_evaluated_estate(
+                            rw_conn, estate, admx=app.state.admx, commit=False
+                        )
                         _events.append_event(
                             rw_conn,
                             "audit.ingest",
                             {"principal": principal.name},
+                            commit=False,
                         )
-                        # WI-4: update finding lifecycle after ingest
-                        try:
-                            from gpo_lens.findings import evaluate_finding_lifecycle_v2
+                finally:
+                    rw_conn.close()
 
-                            evaluate_finding_lifecycle_v2(
-                                rw_conn,
-                                snapshot_id,
-                                estate,
-                                admx=app.state.admx,
-                            )
-                        except Exception as exc:
-                            _logger.error(
-                                "Finding lifecycle update failed for snapshot %s: %s",
-                                snapshot_id,
-                                exc,
-                            )
-                    finally:
-                        rw_conn.close()
-
+            try:
                 await asyncio.to_thread(_persist)
+            except Exception as exc:
+                _logger.error("Estate import failed: %s", exc)
+                _audit("ingest", principal, "failure", type(exc).__name__, request)
+                return templates.TemplateResponse(
+                    request,
+                    "ingest.html",
+                    {"error": "Import failed; nothing was imported."},
+                    status_code=500,
+                )
 
             filename = (file.filename or "unknown")[:256]
             _audit(
@@ -155,6 +163,11 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             )
             return RedirectResponse(url=request.url_for("home"), status_code=303)
         finally:
+            if temporary is not None:
+                try:
+                    temporary.cleanup()
+                except Exception as exc:
+                    _logger.warning("Upload cleanup failed: %s", exc)
             lock.release()
 
     @app.post(
@@ -198,13 +211,15 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
         try:
             rw_conn = get_rw_conn(app.state.db_path)
             try:
-                deleted = _store.delete_snapshot(rw_conn, snapshot_id)
-                if deleted:
-                    _events.append_event(
-                        rw_conn,
-                        "audit.snapshot_delete",
-                        {"principal": principal.name, "snapshot_id": snapshot_id},
-                    )
+                with rw_conn:
+                    deleted = _store.delete_snapshot(rw_conn, snapshot_id, commit=False)
+                    if deleted:
+                        _events.append_event(
+                            rw_conn,
+                            "audit.snapshot_delete",
+                            {"principal": principal.name, "snapshot_id": snapshot_id},
+                            commit=False,
+                        )
             finally:
                 rw_conn.close()
 

@@ -4,6 +4,13 @@ Local-first, read-only Group Policy analysis. Ingests copies of a GPO estate
 (never touches live AD) and answers questions about it. The deterministic core
 has no AI in the truth path — the optional LLM layer explains computed facts.
 
+This checkout is the **v1.4.0 release candidate**; the coordinator will date
+and tag the release. The latest published release is **v1.3.1**, which fixes
+v1.3.0's over-redacted broken-reference details. Commands below describe 1.4;
+on 1.3.1, ingest an export directory with the CLI or upload its ZIP through the
+browser. The dependency inventory, scheduled collection helper and freshness
+warning require 1.4.
+
 ## Install and quick start
 
 From a trusted release checkout, install the locked CLI and optional web UI:
@@ -18,19 +25,57 @@ On a Windows DC or RSAT box, export the estate:
 .\scripts\Export-GpoEstate.ps1 -OutputRoot C:\GpoExport
 ```
 
-Copy the complete export directory to `./GpoExport` on the analysis machine.
-From the checkout, ingest it and start a local browser session:
+Copy the collector ZIP (or the complete export directory) to the analysis
+machine. From the checkout, ingest it and start a local browser session:
 
 ```bash
-uv run gpo-lens --db ./gpo-lens.sqlite3 ingest ./GpoExport
+uv run gpo-lens --db ./gpo-lens.sqlite3 ingest ./lab.example.com-20261006-020000.zip
 uv run gpo-lens --db ./gpo-lens.sqlite3 doctor
 uv run gpo-lens --db ./gpo-lens.sqlite3 serve --open
 ```
 
 The local server listens on `127.0.0.1:8000`. Browser upload through
-**Tools → Ingest** accepts the collector ZIP instead of a directory. Keep
+**Tools → Ingest** also accepts collector ZIPs. CLI ingest still accepts directories.
+Both ZIP paths share traversal/symlink rejection, a 500 MiB archive limit,
+2 GiB total expansion limit and 1000:1 per-entry compression ratio limit.
+Windows PowerShell 5.1 `Compress-Archive` backslash paths are safely normalized
+before validation; a single enclosing export folder is supported. Temporary
+extraction directories are removed after ingest, including on failure. Keep
 original exports in restricted storage for later re-ingestion. Use one estate
 and one app instance per database; multiple snapshots describe that same estate.
+
+## Keep collection running
+
+On a Windows DC/RSAT host, run either command in an elevated PowerShell session:
+
+```powershell
+# Already installed gMSA; Windows manages its password.
+.\scripts\Register-GpoLensCollection.ps1 -GmsaAccount 'LABDOMAIN\collector$' -OutputRoot C:\GpoExport
+# Standard service account; prompts securely with Get-Credential.
+.\scripts\Register-GpoLensCollection.ps1 -ServiceAccount 'LABDOMAIN\svc-collector' -OutputRoot C:\GpoExport
+```
+
+Defaults: daily at 02:00 host local time, a hard two-hour runtime limit, last
+14 successful exports, and a 5 MiB log with five rotated backups. Configure
+`-At`, `-EveryDays`, `-ExecutionTimeLimit`, `-Retention`, `-LogMaxBytes` and
+`-LogFiles`. Use `-CopyTo '\\lab.example.com\gpo-drop'` for ZIP delivery,
+`-WhatIf` to preview, or `-Unregister` to remove the task. Delivery requires a
+separate ingest step; dropping a ZIP in an inbox does not import it.
+
+Each task owns its output root through `.gpo-lens-collection-owner`. Use a
+separate root for each `-TaskName`, including tasks collecting the same domain.
+Registration refuses another task's marker; `-Force` transfers ownership with
+a warning. The previous task then refuses to run. Re-register existing tasks
+to create the marker before their next run; manual runner calls must pass the
+registered `-TaskName`.
+
+[The IIS collection guide](deploy/iis/README.md#scheduled-collection) covers
+permissions, privileged inventory overlay, verification and lab validation.
+[The handover checklist](docs/handover.md#3-keeping-collection-alive) explains
+how to keep coverage honest. Briefing shows the newest imported snapshot's age
+and warns after eight days. Set `GPO_LENS_STALE_SNAPSHOT_DAYS` to a positive
+integer and restart the app to change that threshold. An unchanged estate can
+still be stale; import age does not prove when the source data was collected.
 
 ## Feature tour
 
@@ -162,8 +207,67 @@ must set `GPO_LENS_ALLOWED_HOSTS` to the browser authority (IIS merges a missing
 value, Compose/systemd provide it). Unset accepts only loopback Host authorities;
 a disallowed Host returns 400 naming the variable. See the deployment guides
 for firewall scope, locked installs and WAL-safe backup/restore commands.
-Inherited a running installation? Start with the [v1.3.0 operator
+Inherited a running installation? Start with the [operator
 handover](docs/handover.md), including backup and upgrade rules.
+
+## Advanced audit and Public Key settings
+
+Advanced Audit Configuration uses subcategory GUID identities and readable
+No Auditing / Success / Failure / Success and Failure values. Copied SYSVOL
+`audit.csv` entries are reconciled with the report; disagreements and unsupported
+shapes are flagged rather than silently interpreted. The override caveat cites
+Microsoft and describes only what that GPO authors, not effective device policy.
+
+Public Key settings include EFS, root trust, autoenrollment, certificate path
+validation and certificate entries with stable identities. Search, GPO ledgers,
+exports, baseline and golden comparisons consume these settings. Legacy Internet
+Explorer Maintenance is marked deprecated. Re-ingest copied exports to obtain
+the new normalization; stored historical settings are retained.
+
+## External dependencies and ADMX templates
+
+In **v1.4**, external dependencies and ADMX coverage have separate views.
+
+Before decommissioning or migrating a file or print server, ask “which GPOs
+reference `\\old-fs01`?” Open **Explore → External dependencies**, filter by
+server, or use `gpo-lens dependencies --server old-fs01 --json`. The inventory
+shows servers, shares, counts, GPO links and targets, distinguishing drive maps,
+printer connections, file copies, shortcuts, task actions, scripts, installation
+packages and folder redirection wherever those paths are exposed in the inputs.
+Markdown and CSV downloads preserve the filter and use deterministic redaction.
+This is configured dependency evidence: no server is contacted, reachability is
+unknown, and conditional/disabled settings do not imply actual use. Broken
+references now mean malformed paths or missing files in the GPO's own collected
+SYSVOL, not ordinary external UNC paths. Machine-local paths are unverifiable.
+
+ADMX gaps now create one finding per GPO with the gap count and setting list.
+Load additional templates with repeatable flags, for example:
+
+```bash
+gpo-lens ingest ./lab-export --admx-dir ./central-store --admx-dir ./toolkit-templates
+gpo-lens admx-gaps --admx-dir ./central-store --admx-dir ./toolkit-templates
+gpo-lens serve --admx-dir ./central-store --admx-dir ./toolkit-templates
+```
+
+Alternatively set `GPO_LENS_ADMX_DIR` to a platform path list (`:` on Linux/macOS,
+`;` on Windows). Explicit CLI directories replace that environment list; absent
+both, the usual central-store auto-detection applies. Keep each directory's
+ADML resources beside its ADMX files (typically `en-US`). The first matching
+policy in directory order supplies its display name. Missing/corrupt templates
+are reported; they do not prevent other directories from loading.
+
+Get MSS-legacy and SecGuide templates from Microsoft's
+[Security Compliance Toolkit](https://www.microsoft.com/en-us/download/details.aspx?id=55319)
+security baseline packages; see the [SCT guide](https://learn.microsoft.com/windows/security/operating-system-security/device-management/windows-security-configuration-framework/security-compliance-toolkit-10).
+Microsoft's templates are not bundled. An unresolved registry setting is a
+coverage gap in the loaded template catalogue, not proof of a bad configuration.
+
+After upgrading to 1.4, on the next completed ingest, superseded UNC and value-level ADMX findings
+resolve as no longer observed, retaining observations and triage history. New
+GPO-level ADMX findings require fresh review; old per-value acknowledgements do
+not silently approve a broader finding. Partial coverage prevents resolution
+claims for uncollected GPOs. Machine consumers should migrate to JSON contract
+version 2; see [the contract](docs/spec/json-contract.md).
 
 ## Design principles
 
