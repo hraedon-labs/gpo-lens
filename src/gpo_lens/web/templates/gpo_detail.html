@@ -13,6 +13,7 @@
 {% endblock %}
 
 {% block content %}
+{% include "_exports.html" %}
 {# ── Layer 1: Verdict strip ───────────────────────────────────────── #}
 <div class="gp-page-head">
   <div>
@@ -194,6 +195,12 @@
 {# ── GPO-vs-GPO diff ──────────────────────────────────────────────── #}
 <section class="gp-section">
   <h2>Compare with another GPO</h2>
+  {% if f_compare %}
+  <div role="group" aria-label="Export GPO comparison">
+    <a class="gp-btn" href="{{ request.url.include_query_params(format='md', view='comparison') }}">Comparison Markdown</a>
+    <a class="gp-btn" href="{{ request.url.include_query_params(format='csv', view='comparison') }}">Comparison CSV</a>
+  </div>
+  {% endif %}
   <form method="get" action="{{ url_for('gpo_detail', gpo_id=gpo.id) }}" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <select name="compare" class="gp-ledger-filter" style="max-width:320px">
       <option value="">— select GPO —</option>

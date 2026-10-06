@@ -1,4 +1,4 @@
-"""Coverage tests for web/routes/ask.py — LLM error and fallback paths."""
+"""Ask routing errors and deterministic result isolation from page narration."""
 
 from __future__ import annotations
 
@@ -113,7 +113,9 @@ class TestAskPostLlmErrors:
                 with patch("gpo_lens.narration.call_llm", mock_call):
                     resp = client.post("/ask", data={"question": "How many GPOs?"})
         assert resp.status_code == 200
-        assert "Narration service error" in resp.text
+        assert "Underlying Facts" in resp.text
+        assert "Explain these facts" in resp.text
+        mock_call.assert_not_called()
 
 
 class TestAskPostRoutingErrors:

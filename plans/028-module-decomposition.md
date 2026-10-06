@@ -1,6 +1,10 @@
 # Plan 028 — Decompose `findings.py` and `ingest.py`
 
-**Status:** Proposed 2026-08-07
+**Status:** Not pursued for v1.3.0; deferred by coordinator 2026-10-06. Evidence: [src/gpo_lens/findings.py](../src/gpo_lens/findings.py), [src/gpo_lens/ingest.py](../src/gpo_lens/ingest.py).
+
+Both remain modules, not the proposed packages. Decomposition is deferred because a refactor carries risk before production handover. No behavioral or module-layout change is part of this docs pass.
+
+The design below is the historical specification; this status records the verified release scope.
 
 **Depends on:** nothing. Deliberately independent of Plan 027 — this is
 maintenance debt, and sequencing it behind the 027 finish line would mean

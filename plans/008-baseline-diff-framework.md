@@ -1,5 +1,11 @@
 # Plan 008 — Baseline Diff Framework (Tier 2)
 
+**Status:** Superseded by GPO-backup baseline comparison (shipped by v0.1.0); verified 2026-10-06. Evidence: [src/gpo_lens/queries/_baseline.py](../src/gpo_lens/queries/_baseline.py), [tests/test_cli_diff.py](../tests/test_cli_diff.py).
+
+The custom JSON/YAML rule-file design and `baseline` command were not implemented. The product loads Microsoft baseline backup ZIPs through `ingest.load_baseline_from_zip` and exposes `baseline-diff` instead.
+
+The design below is the historical specification; this status records the verified release scope.
+
 ## Context
 
 Tier 1 hygiene queries (unlinked, empty, conflicts, version skew, MS16-072,

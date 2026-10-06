@@ -11,10 +11,12 @@ from collections import defaultdict
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from gpo_lens import topology
+from gpo_lens.exports import ExportSection, compare_ledgers, export_context, filter_ledger
+from gpo_lens.safe_output import safe_data
 from gpo_lens.web._helpers import (
     _MAX_SEARCH_LEN,
     _VALID_GPO_SORTS,
@@ -26,6 +28,8 @@ from gpo_lens.web._helpers import (
     parse_pagination,
 )
 from gpo_lens.web.auth import Permission, Principal, requires
+from gpo_lens.web.page_narration import make_action
+from gpo_lens.web.routes.export import view_export
 
 
 def register(app: FastAPI, templates: Jinja2Templates) -> None:
@@ -80,8 +84,13 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
         request: Request,
         gpo_id: str,
         compare: str = "",
+        format: str = "",
+        ledger_q: str = "",
+        side: str = "",
+        cse: str = "",
+        snapshot: int | None = None,
         _principal: Principal = Depends(requires(Permission.VIEW)),
-    ) -> HTMLResponse:
+    ) -> Response:
         from gpo_lens.normalize import canonical_guid
         from gpo_lens.queries import settings_ledger
         from gpo_lens.store import list_snapshots, load_estate
@@ -93,8 +102,19 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
 
         conn = get_ro_conn(app.state.db_path)
         try:
-            estate = load_estate(conn)
+            conn.execute("BEGIN")
             snapshots = list_snapshots(conn)
+            selected_snapshot = (
+                snapshot if snapshot is not None else snapshots[0][0] if snapshots else None
+            )
+            estate = load_estate(conn, snapshot_id=selected_snapshot)
+            context = export_context(
+                conn,
+                snapshot_ids=[selected_snapshot] if selected_snapshot is not None else [],
+                admx=app.state.admx,
+            )
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Snapshot not found") from None
         finally:
             conn.close()
 
@@ -147,64 +167,96 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                 compare_gpo = estate.gpo_by_id(compare_id)
                 if compare_gpo is not None:
                     other_ledger = settings_ledger(estate, compare_id, admx=app.state.admx)
-                    idx_a = {(r.side, r.cse, r.identity): r for r in ledger}
-                    idx_b = {(r.side, r.cse, r.identity): r for r in other_ledger}
-                    all_keys = set(idx_a) | set(idx_b)
-                    for key in sorted(all_keys):
-                        a = idx_a.get(key)
-                        b = idx_b.get(key)
-                        if a and b:
-                            if a.display_value != b.display_value:
-                                diff_rows.append(
-                                    {
-                                        "side": a.side,
-                                        "cse": a.cse,
-                                        "identity": a.identity,
-                                        "display_name": a.admx_name or a.display_name,
-                                        "change": "modified",
-                                        "val_a": a.display_value,
-                                        "val_b": b.display_value,
-                                    }
-                                )
-                        elif a and not b:
-                            diff_rows.append(
-                                {
-                                    "side": a.side,
-                                    "cse": a.cse,
-                                    "identity": a.identity,
-                                    "display_name": a.admx_name or a.display_name,
-                                    "change": "only_in_a",
-                                    "val_a": a.display_value,
-                                    "val_b": "",
-                                }
-                            )
-                        elif b and not a:
-                            diff_rows.append(
-                                {
-                                    "side": b.side,
-                                    "cse": b.cse,
-                                    "identity": b.identity,
-                                    "display_name": b.admx_name or b.display_name,
-                                    "change": "only_in_b",
-                                    "val_a": "",
-                                    "val_b": b.display_value,
-                                }
-                            )
+                    diff_rows = compare_ledgers(ledger, other_ledger)
             except ValueError:
                 pass
 
+        # Redact once across the dossier and ledger, so flattened copies of raw
+        # credentials have the same mask in every presentation.
+        safe = safe_data(
+            {
+                "gpo": gpo,
+                "ledger": ledger,
+                "diff_rows": diff_rows,
+                "settings_by_side": dict(settings_by_side),
+                "sec_filter": sec_filter,
+                "caveats": caveats,
+                "comparison_source": compare_gpo,
+            },
+            include_audit=_principal.has(Permission.TRIAGE),
+        )
+        ledger_q = ledger_q.strip()[:_MAX_SEARCH_LEN]
+        safe["ledger"] = filter_ledger(safe["ledger"], q=ledger_q, side=side, cse=cse)
+        safe["gpo"]["computer_version_skew"] = gpo.computer_version_skew
+        safe["gpo"]["user_version_skew"] = gpo.user_version_skew
+        if format:
+            sections: tuple[ExportSection, ...] = (
+                ExportSection(
+                    "dossier",
+                    (
+                        {
+                            k: v
+                            for k, v in safe["gpo"].items()
+                            if k not in {"settings", "links", "delegation", "sysvol_path"}
+                        },
+                    ),
+                ),
+                ExportSection("links", safe["gpo"]["links"]),
+                ExportSection("delegation", safe["gpo"]["delegation"]),
+                ExportSection("settings_ledger", safe["ledger"]),
+                ExportSection(
+                    "scope",
+                    ({"caveats": safe["caveats"], "security_filtering": safe["sec_filter"]},),
+                ),
+                ExportSection("gpo_comparison", safe["diff_rows"]),
+            )
+            if request.query_params.get("view") == "ledger":
+                sections = (sections[3],)
+            elif request.query_params.get("view") == "comparison":
+                sections = (sections[-1],)
+            return view_export(
+                request,
+                _principal,
+                "GPO dossier",
+                sections,
+                format=format,
+                snapshot_ids=[selected_snapshot] if selected_snapshot is not None else [],
+                context=context,
+                filters={
+                    "gpo_id": gpo_id,
+                    "compare": compare,
+                    "ledger_q": ledger_q,
+                    "side": side,
+                    "cse": cse,
+                    "view": request.query_params.get("view", "dossier"),
+                },
+            )
         return templates.TemplateResponse(
             request,
             "gpo_detail.html",
             {
                 "request": request,
-                "gpo": gpo,
-                "settings_by_side": dict(settings_by_side),
+                "narration_payload": make_action(
+                    request,
+                    _principal,
+                    "gpo_comparison" if compare_gpo else "dossier",
+                    [selected_snapshot] if selected_snapshot is not None else [],
+                    {
+                        "settings": len(safe["ledger"]),
+                        "links": len(gpo.links),
+                        "findings": open_finding_count,
+                        "scope_caveats": len(caveats),
+                        **({"comparisons": len(diff_rows)} if compare_gpo else {}),
+                    },
+                ),
+                "gpo": safe["gpo"],
+                "settings_by_side": safe["settings_by_side"],
                 "disabled_sides": disabled_sides,
-                "caveats": caveats,
-                "ledger": ledger,
+                "caveats": safe["caveats"],
+                "ledger": safe["ledger"],
+                "f_ledger_q": ledger_q,
                 "admx": app.state.admx,
-                "sec_filter": sec_filter,
+                "sec_filter": safe["sec_filter"],
                 "open_finding_count": open_finding_count,
                 "snapshots": snapshots,
                 "other_gpos": [
@@ -213,7 +265,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                     if g.id != gpo_id
                 ],
                 "compare_gpo": compare_gpo,
-                "diff_rows": diff_rows,
+                "diff_rows": safe["diff_rows"],
                 "f_compare": compare,
             },
         )

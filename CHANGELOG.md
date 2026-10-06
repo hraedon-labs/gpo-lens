@@ -1,169 +1,160 @@
 # Changelog
 
-## Unreleased
+## v1.3.0 — 2026-10-06
 
-### Handover page for a new operator
+Draft **v1.3.0** — release date TBD by coordinator. This section remains
+Unreleased until the release is dated and tagged.
 
-- `docs/handover.md`: a start-here page for someone inheriting a running
-  installation, with a site sheet kept outside the repository, the rules that
-  are easy to break (IIS is the only access control, inventory-backed coverage,
-  safe backups, upgrade flags), keeping collection alive, routine, upgrade and
-  rollback, and the data-egress note for optional AI narration.
+### Fixed
 
-### Explore and Tools directories (Plan 025 WI-3)
+- **Resilient ADMX/ADML loading.** Decode BOMs and nonstandard XML encoding
+  declarations before protected parsing. Unreadable templates are isolated and
+  reported in CLI warnings and ADMX coverage; template loading failures leave
+  the web app available with a visible notice.
+- **Upgrade triage ordering (F-01).** Merge legacy approvals and Plan 024 events
+  chronologically, with immutable event IDs as the stable tie-breaker. A newer
+  withdrawal stays open after upgrade; inbox and accepted-risk folds agree.
+- **Finding identity and historical evidence (F-02–F-04).** Enforced links include
+  SOM path, order and target; old blanket triage remains in occurrence history
+  while new link findings require review. Duplicate fingerprints visibly degrade
+  analysis and prevent resolution of unseen findings. Historical briefing totals
+  and severity use the selected evaluation. Future-schema refusal precedes all
+  journal, permission and schema changes.
+- **Web authority boundary (WEB-01).** Validate Host before authentication, CSRF
+  and URL generation. `GPO_LENS_ALLOWED_HOSTS` accepts comma-separated hosts
+  (any valid port) or exact host:port entries, case-insensitively, including
+  bracketed IPv6. Unset accepts only localhost, 127.0.0.1 and [::1]. Proxied
+  deployments must configure this variable on installation and upgrade.
+- **Shared credential redaction (WEB-02).** Mask concrete Windows credential
+  registry values and URI/UNC userinfo, including copied values in finding
+  evidence, triage notes and diffs. Preserve benign password-policy settings.
+  HTML, API, comparison/export and ordinary CLI outputs share the projection;
+  legacy report renderings and event export copies also mask credentials.
+- **Evidence navigation (DB-005, DB-007).** The Briefing collection-coverage tile
+  opens coverage-gap-filtered Findings. Explore describes configured-setting
+  search accurately.
 
-Two question-oriented landing pages organize every specialist destination
-without removing or renaming a route:
+### Added
 
-- **`/explore` — "why is this setting what it is here?"** Groups the estate
-  surfaces (inventory, directory, search) and the analytical workbenches
-  (resultant, conflicts, dangerous settings, delegation).
-- **`/tools` — "what specialist operation do I need?"** Groups snapshots
-  (ingest), comparisons (baseline, golden diff, ADMX coverage), and output
-  (findings export, narration) — each entry stating what it reads or writes.
-- **No dead links by construction.** Both pages render from one destination
-  registry resolved through `url_path_for` at request time; a renamed route
-  fails the request and the tests, instead of shipping a stale href.
-- Directory pages read nothing from the estate database and render
-  identically with or without a snapshot. Shipped as opt-in destinations per
-  the Plan 025 sequencing gates; primary navigation is unchanged until WI-4.
+- **Deterministic Markdown/CSV exports (Plan 025 WI-6).** Download dossiers,
+  ledgers, filtered findings, occurrence history, accepted risks, briefings,
+  exact settings and snapshot/GPO/comparison differences. Upload comparisons
+  have an output selector; `gpo-lens export` provides CLI equivalents.
+  Exports carry filters, snapshot/evaluation provenance and scope caveats,
+  omit volatile generation timestamps, and accept explicit as-of inputs for
+  repeatable time-sensitive views. Output streams; existing `--json` contracts
+  are unchanged.
+- **Linux container and systemd deployment (WI-086).** Digest-pinned non-root
+  image, locked web dependencies, loopback Compose default, optional Caddy
+  TLS/basic-auth proxy and hardened systemd unit. Guides cover collector
+  transfers, installation, upgrade, WAL-safe backup/restore and rollback.
+  CI builds/smoke-tests the image, access control and synthetic upload.
+- **Findings occurrence view and deterministic Briefing (Plan 025 WI-1/2).**
+  Observations show evaluation provenance, severity/claim/rule changes,
+  predecessor regressions and append-only triage history. Briefing provides
+  linked vitals, snapshot/finding deltas and expiring risks, prominently
+  reporting coverage/incomplete-analysis warnings. First-snapshot, historical,
+  degraded and no-change scenarios have golden text tests.
+- **Explore/Tools directories and route reference (Plan 025 WI-3/4).** Retained
+  specialist workbenches are organized by operator question and resolved from
+  a route registry; the migration inventory is test-enforced.
+- **Operator handover.** `docs/handover.md` names v1.3.0 as the target, with a
+  private site sheet, collection/coverage rules, provider-egress boundaries,
+  deployment alternatives and backup/upgrade/rollback instructions.
 
-### Findings inbox on the Plan 024 core queries (Plan 025 WI-1)
+### Changed
 
-The Findings page now consumes the Plan 024 query layer instead of loading
-every active finding and filtering in Python. Previously `/findings` ran an
-unbounded `SELECT` over the whole `finding` table on every page view and
-applied severity, category, lifecycle, triage, and search filters row by row —
-the hardened `finding_inbox` query built for exactly this had no consumer.
+- IIS fresh network sites require Windows Authentication or an explicit
+  anonymous-access opt-out; upgrades preserve access and warn if anonymous.
+  New firewall rules default to LocalSubnet on Domain/Private profiles.
+- IIS uses committed hash-pinned web dependencies and installs the project
+  with `--no-deps`, preserving the shared-Python deployment design.
+- Unstable finding subjects are snapshot-scoped (`snapshot_scoped`) and refuse
+  triage (`485a5bd`).
+- Store writes use batched persistence inserts via `executemany` (`b5133fb`).
 
-- **Every filter and the page window run in SQL.** `finding_inbox` gained
-  `severities` (multi-select), `category_prefix` (a category now also selects
-  its `parent:child` descendants), `search` (case-insensitive substring over
-  GPO name, summary, and rule id, with LIKE wildcards escaped so a stray `%`
-  cannot match everything), `offset`, and lifecycle states `regressed` and
-  `new_or_regressed`. The WI-1.2 guarantee extends to the new filters:
-  `LIMIT`/`OFFSET` bound the matching set, never a pre-filter superset.
-- **New queries.** `finding_inbox_count` returns the true total for a filter
-  set, and `finding_inbox_categories` returns unfiltered rule-id facet counts.
-  Both share one predicate builder with `finding_inbox`, so a page of rows and
-  its total cannot disagree about what "matching" means.
-- **Default filter is now the actionable set** — new *or regressed*, open
-  (Plan 025 WI-1). A merely-persisting finding is no longer in the default
-  view; a finding that returned after being resolved is. Nothing is deleted:
-  `lifecycle=all` still shows everything, and the picker gained explicit
-  "New or regressed" and "Regressed" options.
-- **Pagination is bounded and stable.** The page window comes from SQL, ordered
-  by a total order (severity, rule id, occurrence id) so paging cannot repeat
-  or skip rows. An out-of-range `page=` clamps to the last page rather than
-  rendering an empty inbox for a bookmarked deep link, and an unrecognised
-  filter value widens the view instead of erroring.
-- One triage fold is shared across the count and the row query, so the two
-  always agree on which occurrences are open.
-- Lifecycle evidence now reports **evaluation run** provenance rather than
-  snapshot numbers, and shows the claim level.
+- **Navigation (Plan 025 WI-4).** Primary links are Briefing / Findings /
+  Explore / History / Tools, with configured-settings search. The wordmark
+  opens Briefing. Existing handlers and query parameters remain valid,
+  including the legacy dashboard at `/`; no permanent redirects are imposed.
+  `GPO_LENS_LEGACY_NAV=1` restores earlier primary links after a restart;
+  Ask stays under Tools.
+- **Optional web narration (Plan 025 WI-5).** Separate Explain these facts
+  actions use signed, bounded counts/caveats/provenance. Names, values, raw
+  evidence and HTML are excluded. The model can select only supplied fact IDs;
+  additional claims are rejected. Actions are absent without an API key and
+  never delay deterministic pages. Web Ask keeps routing/deterministic results
+  and uses the same checked explanation. CLI narration retains its separate
+  provider data-egress boundary.
+- **Findings inbox (Plan 025 WI-1).** Reads Plan 024 core queries with SQL
+  filtering/counting/pagination and stable ordering. Default is new or
+  regressed and open; all lifecycle/triage states remain accessible. Filter
+  totals and rows share one predicate and triage fold. GPO links now use a
+  targeted ID query instead of reconstructing the estate (WI-093), with
+  output equivalence and synthetic benchmark coverage.
+- **Plan bookkeeping.** Every plan's release status is reconciled with code
+  and tests. Studio interop/multi-estate comparison remain outside v1.3.0;
+  gMSA scheduling and module decomposition are deferred. Splunk HEC output is
+  shipped, but Splunk-sourced actor attribution is not implemented.
 
-Bookmarks are unaffected: every previous query parameter still addresses the
-same filter.
+### Fixed
 
-### Occurrence view (Plan 025 WI-1)
+- Danger findings avoid double-conversion and duplicate results (`c50549e`).
+- Release metadata and lockfile identify the v1.3.0 candidate as 1.3.0;
+  version checks bind to the draft target and the container API/package version.
+- Every proxy deployment configures `GPO_LENS_ALLOWED_HOSTS`; IIS merges
+  missing policy on fresh installs and upgrades without losing existing variables.
+- IIS recovery uses WAL-safe online/whole-directory offline backups, audit-log
+  copies, stale-sidecar removal and integrity/snapshot/GPO verification.
+- Collector transfer instructions use the collector's portable forward-slash ZIP.
 
-Each finding summary in the inbox now links to `/findings/{occurrence_id}`, a
-page for the question the inbox row has no room for: *why does this finding say
-what it says, and has that changed?*
+- **Triage convergence (WI-092).** UI triage writes the Plan 024 append-only
+  `finding_triage_event` log; compatibility projections no longer read an
+  isolated legacy store. Schema v8 migrates legacy triage idempotently,
+  preserving actor/time/note; legacy tables remain for audit. Risk acceptance
+  requires a non-empty rationale. Same-timestamp events remain distinct, and
+  orphaned legacy rows do not prevent startup.
+- Accepted-risk point-in-time queries retain expired/revoked history.
+- Registry.pol ledger rows include value names, types and decoded data.
+- Upload-backed `golden_diff` is no longer advertised through the GET query API.
+- Successful CLI ingest warns if finding evaluation fails, matching web ingest
+  behavior (WI-094).
+- Older database GPO names resolve through both stored and canonical GUID forms.
 
-- **Observations across evaluation runs**, oldest first, each with its bounded
-  evidence and the provenance of the run that produced it — snapshot,
-  evaluation kind, detector-set digest, comparator input, application version,
-  and run status.
-- **A "what changed between runs" table.** Severity, claim level, and
-  detector-set digest transitions are called out explicitly, so a severity
-  change can be attributed to the estate or to a detector revision rather than
-  left ambiguous.
-- **Regression provenance.** A regressed occurrence links to the predecessor
-  interval it reappeared from, and states plainly that accepted risk is not
-  inherited — the predecessor's acceptance does not silence the new occurrence.
-- **The full triage log**, append-only: an acceptance that was later revoked
-  stays visible above its revocation rather than being overwritten.
-- New core query `finding_observation_history` joins `finding_observation` to
-  `evaluation_run`. Malformed evidence JSON in one row degrades that row's
-  evidence to empty rather than failing the page.
+### Security
 
-### Briefing page (Plan 025 WI-2)
+- Caddy strips the Basic-auth Authorization header before forwarding to the
+  no-token app; a mock upstream smoke assertion guards credential forwarding.
 
-A new `/briefing` destination answering one question — *do I need to care
-today?* — as typed facts plus deterministic prose:
+- **anyio 4.13.0 → 4.14.2** in the lockfile, addressing
+  **PYSEC-2026-4024 / PYSEC-2026-4025** (`7d1c939`).
+- Exports share secret/raw-source redaction with HTML/API safe output;
+  spreadsheet formula cells are neutralized. Triage/audit attribution requires
+  triage authorization. Web narration uses signed safe facts and checked output.
+- Identifier hooks/gate fail closed when a public repository lacks a denylist;
+  staged bytes, commit messages and publication-declaration history are checked,
+  including UTF-16/symlink/type changes and shallow-history refusal.
+- Linux examples preserve the loopback-XOR-token access model and scheme-only
+  proxy forwarding. Remote browser access control belongs to the TLS proxy or
+  network; the examples do not create per-user app authorization.
 
-```text
-Since snapshot #1: 2 GPOs changed, 1 finding is new, and 3 resolved.
-```
+### Upgrade notes
 
-- **Deterministic, not narrated.** The sentences come from formatters over typed
-  deltas in the new `gpo_lens.briefing` core module. No model is involved and the
-  same inputs always produce byte-identical text, which is what makes the output
-  golden-testable. Goldens pin the exact prose for the first-snapshot, ordinary,
-  degraded, and no-change scenarios.
-- **Honest about what it cannot say.** With one snapshot it presents a
-  first-snapshot summary instead of implying a comparison against nothing. When
-  the latest evaluation run did not complete it reports the analysis as
-  incomplete and emits *no* delta sentence at all, rather than laundering
-  partial counts into a confident answer.
-- **Problems outrank good news.** Coverage gaps and missing or failed evaluation
-  provenance are rendered before favorable counts, so a reassuring "3 resolved"
-  can never appear above the reason it is untrustworthy.
-- **No unlinked stat tiles** (a WI-2 acceptance criterion). Vitals carry a
-  stable key rather than a URL — the core module stays web-free — and the web
-  layer maps keys to routes, so a vital with no destination fails loudly instead
-  of rendering a dead tile.
-- **Expiring accepted risks** are surfaced with their finding, severity, and
-  approver, noting that an expired acceptance returns the finding to the
-  actionable inbox rather than deleting it.
-- **Historical selection.** `?snapshot=N` produces the briefing as of that
-  snapshot, diffed against *its* predecessor rather than the current runner-up.
-- No detector re-runs: every number reads materialized lifecycle and snapshot
-  state, unlike the dashboard, which re-evaluates the estate per page view.
-
-The briefing ships alongside the dashboard rather than replacing it; Plan 027
-Phase 2 sequences the navigation migration separately.
-
-### Review hardening
-
-- Correct the accepted-risk register's point-in-time behavior and retain
-  expired or revoked acceptance history.
-- Preserve distinct same-timestamp triage events during schema migration and
-  skip orphaned legacy rows rather than blocking database startup.
-- Populate Registry.pol value names, types, and decoded data in the settings
-  ledger.
-- Stop advertising the upload-backed `golden_diff` query through the GET API.
-- Report finding-evaluation failures as warnings after a successful CLI
-  snapshot ingest, matching the web ingest path (WI-094).
-- Resolve GPO names through both stored and canonical GUID forms for older
-  snapshot databases.
-
-### Triage storage convergence (WI-092)
-
-- **One triage store.** The web triage endpoint previously wrote the v1
-  `finding_triage` table, which *no* Plan 024 query (`finding_inbox`,
-  `accepted_risk_register`, `load_triage_status_map`, `finding_history`)
-  reads — operator triage performed in the UI was invisible to the Plan 024
-  layer, a data-loss trap the moment the inbox moves onto `finding_inbox()`
-  (Plan 025 / Plan 027 Phase 2). Triage now lives only in the Plan 024
-  `finding_triage_event` log:
-  - `triage_finding` is a compatibility shim over `append_triage_event`
-    (v1 statuses map to v2 actions: `open` → `reopened`); it keeps the
-    not-resolved guard and its signature.
-  - `load_finding_triage` / `load_finding_triage_map` are legacy-shaped
-    projections of the event log (the web inbox template is unchanged).
-  - **Schema migration v7 → v8** copies existing `finding_triage` rows into
-    `finding_triage_event` (idempotent, timestamp/actor/note preserved;
-    `accepted_risk` falls back to the note as rationale — nothing
-    fabricated). The legacy table is retained for audit and is no longer
-    written.
-  - Both triage generations key off `finding.id`, so no identity mapping is
-    needed.
-- **Behavior change:** accepting risk now requires a non-empty note, which
-  doubles as the Plan 024-required rationale. Blank-note risk acceptance
-  previously stored in v1 is rejected with a 400 on the web path; the
-  template's note field says so.
+- **Back up the database and separate `audit.log` before upgrading to v1.3.0.**
+  Migrations on open are tested using actual databases from **v0.5.0, v0.7.0,
+  v0.7.1, v1.0.0, v1.1.0 and v1.2.0**, covering released schema generations
+  since v0.5.0 (not a fixture for every patch tag). Tests preserve entities,
+  snapshots, events and supported finding/risk decisions; a second open is
+  idempotent. Online SQLite backup/restore with committed WAL changes is tested.
+- Schema v8 converges legacy triage and v9 records stable versus snapshot-scoped
+  finding subjects. Review the v1.1.0 one-time re-key/triage note when upgrading
+  from before that release. Exact historical lifecycle provenance is not invented.
+- Restore an older backup into a newer install; rollback requires the matching
+  old backup **and** old code. A newer migrated database with older code is not
+  guaranteed. Use the deployment runbooks and test an isolated restore first.
+- Use the reversible navigation flag during rollout and check bookmarked
+  filters. Each database still represents one estate; cross-estate comparison
+  is not included.
 
 ## v1.2.0 — 2026-07-16
 

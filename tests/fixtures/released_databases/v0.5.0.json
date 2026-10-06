@@ -1,0 +1,19 @@
+{
+  "audit_file": null,
+  "commit": "066e72abe40b3aad01e41ed9f3a75544ce7b38fd",
+  "counts": {
+    "coverage_gap": 4,
+    "delegation": 4,
+    "events": 1,
+    "gpo": 4,
+    "gpo_link": 4,
+    "ou_tree": 4,
+    "setting": 4,
+    "snapshot": 2,
+    "som": 4,
+    "som_link": 6,
+    "wmi_filter": 0
+  },
+  "schema_version": 0,
+  "tag": "v0.5.0"
+}

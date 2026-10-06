@@ -7,7 +7,14 @@ import dataclasses
 import sqlite3
 
 from gpo_lens import ingest, queries, snapshot_diff, store
-from gpo_lens.cli._helpers import _get_admx, _get_estate, _print_table, _render_json
+from gpo_lens.cli._helpers import (
+    _add_secret_source,
+    _get_admx,
+    _get_estate,
+    _print_table,
+    _render_json,
+)
+from gpo_lens.cli._helpers import _safe_print as print
 
 
 def cmd_diff(args: argparse.Namespace) -> None:
@@ -184,6 +191,7 @@ def cmd_baseline_diff(args: argparse.Namespace) -> None:
         baseline_estate = _Estate(gpos=baseline_gpos)
     else:
         baseline_estate = ingest.load_estate(baseline_src)
+    _add_secret_source(baseline_estate)
     baseline = queries.load_baseline_from_estate(baseline_estate)
 
     admx = _get_admx(args)
@@ -241,6 +249,7 @@ def cmd_golden_diff(args: argparse.Namespace) -> None:
         golden_estate = ingest.load_estate(golden_src)
 
     admx = _get_admx(args)
+    _add_secret_source(golden_estate)
     results = queries.golden_diff(live_estate, golden_estate, admx)
     live_names = {g.name.lower() for g in live_estate.gpos}
     golden_names = {g.name.lower() for g in golden_estate.gpos}

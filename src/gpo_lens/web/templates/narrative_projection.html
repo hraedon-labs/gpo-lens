@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}gpo-lens — Narrative projection{% endblock %}
+{% block content %}
+<h1>Narrative projection</h1>
+<p>The model selected these computed facts. It supplied no factual prose. Refer to the original deterministic page for evidence and full analysis provenance.</p>
+{% if error %}<div class="gp-callout warn">{{ error }}</div>{% endif %}
+{% if provenance %}
+<p>Snapshots: {{ provenance.snapshot_ids | join(', ') or 'none recorded' }} · Analysis: {{ provenance.analysis }} · gpo-lens {{ provenance.application_version }}.</p>
+<p>{{ provenance.analysis_basis }}. Evaluation runs: {% for run in provenance.evaluation_runs %}{{ run.run_id }} (snapshot {{ run.snapshot_id }}){% if not loop.last %}, {% endif %}{% else %}none claimed{% endfor %}.</p>
+{% if provenance.provenance_truncated %}<p>Provenance is bounded to the first 64 entries; consult the deterministic history for the full sequence.</p>{% endif %}
+{% endif %}
+{% if projection %}<ul>{% for text in projection %}<li>{{ text }}</li>{% endfor %}</ul>{% endif %}
+{% endblock %}

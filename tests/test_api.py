@@ -23,7 +23,6 @@ except ImportError:
 pytestmark = pytest.mark.skipif(not _HAS_WEB, reason="web extra not installed")
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
-_CPASSWORD_FULL = "AzV93mAPDnE3UNvYggAjKSIi6wN6h/TnRqUyF+5Z0wWmS6D0mN8Y5g=="
 
 
 @pytest.fixture()
@@ -144,7 +143,7 @@ class TestApiQueryExecution:
         assert body["status"] == "error"
         assert "ou_path" in body["detail"]
 
-    def test_cpassword_masked(self, _client) -> None:
+    def test_cpassword_masked(self, _client, secret_corpus) -> None:
         resp = _client.get("/api/v1/query/cpassword_scan")
         assert resp.status_code == 200
         body = resp.json()
@@ -155,7 +154,7 @@ class TestApiQueryExecution:
         for hit in hits:
             cpw = hit["cpassword"]
             # The raw cpassword must never appear in the response.
-            assert cpw != _CPASSWORD_FULL
+            assert cpw not in secret_corpus
             # Masked form: first 4 chars + "****" (or "****" for short values).
             assert cpw.endswith("****")
 

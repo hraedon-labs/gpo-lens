@@ -10,6 +10,21 @@ permissions:
   contents: read
 
 jobs:
+  container-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Build locked non-root image
+        run: docker build -f deploy/container/Dockerfile -t gpo-lens:smoke .
+
+      - name: Smoke loopback, read-only image, TLS access control and fixture ingest
+        run: python3 deploy/container/smoke.py gpo-lens:smoke
+
   identifier-gate:
     runs-on: ubuntu-latest
 
@@ -123,10 +138,10 @@ jobs:
         with:
           enable-cache: true
 
-      # Audit the deployable surface (runtime + web extra) against the pinned
-      # lockfile. Dev-only tooling is excluded to keep the signal on what ships.
+      # Audit runtime, web and the IIS installer's executed build backend
+      # against the pinned lockfile. Other dev-only tooling stays excluded.
       - name: Export locked dependencies
-        run: uv export --locked --extra web --no-emit-project --format requirements-txt -o requirements-audit.txt
+        run: uv export --locked --extra web --group build --no-emit-project --format requirements-txt -o requirements-audit.txt
 
       - name: pip-audit
         run: uvx pip-audit --strict --requirement requirements-audit.txt

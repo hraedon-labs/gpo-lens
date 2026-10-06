@@ -1,5 +1,11 @@
 # Plan 009 — SOM Resolution Deep View (Topology Tier 2.5 Complete)
 
+**Status:** Shipped in v0.1.0; verified 2026-10-06. Evidence: [src/gpo_lens/topology.py](../src/gpo_lens/topology.py), [tests/test_topology.py](../tests/test_topology.py).
+
+OU-level settings and precedence annotations are implemented by `settings_at_som`; later scope caveats and the Plan 021 merge model qualify the original last-writer description.
+
+The design below is the historical specification; this status records the verified release scope.
+
 ## Context
 
 Plan 007 adds `som_conflicts` — same setting identity across the chain with

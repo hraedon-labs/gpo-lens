@@ -7,6 +7,7 @@ import sys
 
 from gpo_lens.authz import SID_RE
 from gpo_lens.cli._helpers import _get_estate, _render_json
+from gpo_lens.cli._helpers import _safe_print as print
 
 
 def cmd_resultant(args: argparse.Namespace) -> int:

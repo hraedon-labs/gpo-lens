@@ -1,6 +1,10 @@
 # Plan 026 — GPO Studio interoperability and independent verification
 
-**Status:** Proposed integration charter and phased execution plan
+**Status:** Not pursued for v1.3.0; coordinator disposition recorded 2026-10-06. Evidence: [src/gpo_lens/exports.py](../src/gpo_lens/exports.py), [tests/test_exports.py](../tests/test_exports.py).
+
+Out of release scope per Plan 027. Markdown/CSV view exports are shipped, but the Studio artifact contracts, peer links, proposed-state analysis and independent publication verification described here are not implemented. This two-product program remains deferred to the Studio roadmap.
+
+The design below is the historical specification; this status records the verified release scope.
 
 **Depends on:** Plan 023 canonical setting identity for setting-level links;
 Plan 024 only for durable finding handoff. GPO Studio Bundle v1 and publication

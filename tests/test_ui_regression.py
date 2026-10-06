@@ -204,25 +204,11 @@ class TestNavigationStructure:
     """The base template renders the same nav scaffold on every page."""
 
     _NAV_LINKS = [
-        # Estate
-        ("Dashboard", "/"),
-        ("Inventory", "/inventory"),
-        ("Directory", "/ou"),
-        ("Search", "/search"),
-        # Posture
+        ("Briefing", "/briefing"),
         ("Findings", "/findings"),
-        ("Conflicts", "/conflicts"),
-        ("Delegation", "/delegation"),
-        ("Coverage", "/admx-coverage"),
-        # Change
-        ("Changelog", "/changelog"),
-        ("Trends", "/trends"),
-        ("Baseline", "/baseline"),
-        ("Golden", "/golden-diff"),
-        # Tools
-        ("Resultant", "/resultant"),
-        ("Ask", "/ask"),
-        ("Ingest", "/ingest"),
+        ("Explore", "/explore"),
+        ("History", "/changelog"),
+        ("Tools", "/tools"),
     ]
 
     @pytest.mark.parametrize("path", _PAGES)
@@ -930,7 +916,8 @@ class TestGpoDetailRendering:
     def test_gpo_detail_has_delegation_section_when_present(self, _client) -> None:
         # GPO A has delegation entries in the fixture.
         html = _client.get(f"/gpo/{_GPO_A}").text
-        assert "Delegation" in html
+        assert "Control: who can change this" in html
+        assert "<th>Trustee</th>" in html
 
 
 # ---------------------------------------------------------------------------

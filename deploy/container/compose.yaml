@@ -1,0 +1,19 @@
+{
+  "name": "gpo-lens",
+  "services": {
+    "app": {
+      "image": "gpo-lens:local",
+      "build": {"context": "../..", "dockerfile": "deploy/container/Dockerfile"},
+      "network_mode": "host",
+      "command": ["--host", "127.0.0.1", "--port", "8000"],
+      "read_only": true,
+      "cap_drop": ["ALL"],
+      "security_opt": ["no-new-privileges:true"],
+      "tmpfs": ["/tmp:rw,noexec,nosuid,nodev,size=3221225472,mode=1777"],
+      "volumes": ["estate:/data"],
+      "restart": "unless-stopped",
+      "stop_grace_period": "30s"
+    }
+  },
+  "volumes": {"estate": {}}
+}

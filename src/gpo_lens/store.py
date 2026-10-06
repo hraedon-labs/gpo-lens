@@ -68,6 +68,15 @@ def _safe_json_loads(raw: str | None, default: Any) -> Any:
 
 def init_db(conn: sqlite3.Connection) -> None:
     """Create tables (idempotent, ``IF NOT EXISTS``)."""
+    user_version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+    if user_version > CURRENT_SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Database schema version {user_version} is newer than this "
+            f"gpo-lens release supports (version {CURRENT_SCHEMA_VERSION}). "
+            "Please upgrade gpo-lens to open this database."
+        )
+
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
@@ -545,10 +554,11 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         # stored payload field so distinct same-timestamp events are preserved.
         # Orphaned legacy rows are skipped defensively: old databases may have
         # been modified while foreign-key enforcement was disabled.
-        # Premise for the NOT EXISTS ordering assumption: no production DB can
-        # have pre-migration rows in ``finding_triage_event``, because no
-        # released code path called ``append_triage_event`` before this
-        # migration — so every row it finds is a legacy row to convert.
+        # Released v1.1/v1.2 exposed both APIs. Existing event IDs (including
+        # supersedes references) remain immutable; converted rows get stable IDs
+        # in legacy chronological order. Readers normalize timestamps to UTC
+        # and prefer reopen/revoke/expiry at equal instants before the ID
+        # tie-breaker, so migrated approvals cannot reinstate a reopened risk.
         conn.execute(
             """
             INSERT INTO finding_triage_event
@@ -578,7 +588,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
                       ELSE '' END
                   AND e.expires_at IS t.expires_at
             )
-            ORDER BY t.id
+            ORDER BY t.timestamp, t.id
             """
         )
 

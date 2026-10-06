@@ -1,6 +1,10 @@
 # Plan 019 — Scope-resultant view: per-candidate gate attribution
 
-**Status:** shipped (v0.6.3) 2026-06-18
+**Status:** Partially shipped in v0.6.3; verified 2026-10-06. Evidence: [src/gpo_lens/topology.py](../src/gpo_lens/topology.py), [tests/test_topology.py](../tests/test_topology.py).
+
+Phase A per-candidate `GateSummary` and OU gate chips shipped. Phase B user-entered group de-emphasis did not ship; snapshot principal narrowing is instead covered by Plan 021. The live-AD-bind proposal below is outside the product charter.
+
+The design below is the historical specification; this status records the verified release scope.
 **Author:** Claude (Opus 4.8), from an RSoP feasibility review
 **Strategic role:** People keep asking for "an RSoP view." The honest answer is
 that *most* of what they want already exists, the genuinely-hard part (true

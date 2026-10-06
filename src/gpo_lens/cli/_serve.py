@@ -7,6 +7,7 @@ import sys
 import webbrowser
 
 from gpo_lens.cli._helpers import DEFAULT_DB
+from gpo_lens.cli._helpers import _safe_print as print
 
 # Bind-time convenience guard. The canonical per-request loopback check lives
 # in gpo_lens.web.auth._is_loopback, which uses ipaddress resolution.

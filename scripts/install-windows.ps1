@@ -78,11 +78,20 @@ chain operators (&& / ||). Use if/else and -or/-and instead.
     Web-Windows-Auth role service if it is missing. Requires the server to
     be domain-joined (Kerberos/Negotiate does not work on a workgroup box).
 
-.EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -ConfigureIIS -Port 8443 -HostName host.example.com -TlsCertThumbprint "ABCDEF123456..."
+.PARAMETER AllowAnonymousNetworkAccess
+    Explicit opt-out for a fresh network site without Windows Authentication.
+    Every reachable caller receives full analyst permissions. Existing sites
+    preserve their authentication during upgrades and warn if anonymous.
+
+.PARAMETER FirewallRemoteAddress
+    Remote addresses for a NEW firewall rule. Default LocalSubnet, on Domain
+    and Private profiles only. Existing rules are preserved during upgrades.
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -ConfigureIIS -Port 443 -HostName gpo-lens.example.com -TlsCertThumbprint "ABCDEF..." -Sni
+    powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -ConfigureIIS -Port 8443 -HostName host.example.com -TlsCertThumbprint "ABCDEF123456..." -WindowsAuth
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -ConfigureIIS -Port 443 -HostName gpo-lens.example.com -TlsCertThumbprint "ABCDEF..." -Sni -WindowsAuth
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -ConfigureIIS -Port 8443 -HostName host.example.com -TlsCertThumbprint "ABCDEF..." -WindowsAuth
@@ -102,7 +111,9 @@ param(
     [string]$HostName = "",
     [string]$TlsCertThumbprint = "",
     [switch]$Sni,
-    [switch]$WindowsAuth
+    [switch]$WindowsAuth,
+    [switch]$AllowAnonymousNetworkAccess,
+    [string[]]$FirewallRemoteAddress = @("LocalSubnet")
 )
 
 # --- IIS binding / SNI / cert helper functions (extracted for Pester testing) ---
@@ -112,17 +123,18 @@ param(
 function Parse-BindingInformation {
     <#
     .SYNOPSIS
-        Parse an IIS bindingInformation string into port and host.
+        Parse an IIS bindingInformation string into IP, port and host.
         bindingInformation is "IP:Port:HostHeader". The IP is "*", an IPv4
         literal, or a bracketed "[ipv6]" literal.
     #>
     param([string]$BindingInformation)
-    $exPort = ""; $exHost = ""
+    $exPort = ""; $exHost = ""; $exIP = ""
     $bi = "$BindingInformation"
     if ($bi.StartsWith("[")) {
         # Bracketed IPv6 IP: "[addr]:port:host"
         $close = $bi.IndexOf("]")
         if ($close -gt 0 -and ($close + 1) -lt $bi.Length -and $bi.Substring($close + 1, 1) -eq ":") {
+            $exIP = $bi.Substring(0, $close + 1)
             $rest = $bi.Substring($close + 2)
             $c = $rest.IndexOf(":")
             if ($c -ge 0) { $exPort = $rest.Substring(0, $c); $exHost = $rest.Substring($c + 1) }
@@ -131,11 +143,12 @@ function Parse-BindingInformation {
         $i1 = $bi.IndexOf(":")
         $i2 = if ($i1 -ge 0) { $bi.IndexOf(":", $i1 + 1) } else { -1 }
         if ($i1 -ge 0 -and $i2 -gt $i1) {
+            $exIP = $bi.Substring(0, $i1)
             $exPort = $bi.Substring($i1 + 1, $i2 - $i1 - 1)
             $exHost = $bi.Substring($i2 + 1)
         }
     }
-    @{ Port = $exPort; Host = $exHost }
+    @{ Port = $exPort; Host = $exHost; IP = $exIP }
 }
 
 function Get-ExistingBindingConfig {
@@ -164,7 +177,7 @@ function Get-ExistingBindingConfig {
             } else {
                 $exSni = $rawFlags -match "Sni"
             }
-            $existing = @{ Port = $parsed.Port; Host = $parsed.Host; Sni = $exSni; Cert = "" }
+            $existing = @{ IP = $parsed.IP; Port = $parsed.Port; Host = $parsed.Host; Sni = $exSni; Cert = "" }
             # Read the currently bound cert hash. Try the IIS binding's
             # certificateHash first (most reliable), then fall back to netsh
             # http.sys queries (hostnameport for SNI/host bindings, ipport for
@@ -175,11 +188,12 @@ function Get-ExistingBindingConfig {
             try { if (-not $existing.Cert -and $httpsBind.certHash) { $existing.Cert = "$($httpsBind.certHash)" } } catch { }
             if (-not $existing.Cert) {
                 $show = ""
-                if ($exSni -or $parsed.Host) {
+                if ($exSni) {
                     $show = & netsh http show sslcert hostnameport="$($parsed.Host)`:$($parsed.Port)" 2>&1 | Out-String
                 }
                 if ($show -notmatch "(?m)^\s*Certificate Hash\s*:\s*([0-9A-Fa-f]+)") {
-                    $show = & netsh http show sslcert ipport="0.0.0.0:$($parsed.Port)" 2>&1 | Out-String
+                    $endpoint = Get-TlsIpPort -IPAddress $parsed.IP -Port $parsed.Port
+                    $show = & netsh http show sslcert ipport="$endpoint" 2>&1 | Out-String
                 }
                 if ($show -match "(?m)^\s*Certificate Hash\s*:\s*([0-9A-Fa-f]+)") {
                     $existing.Cert = $Matches[1]
@@ -236,14 +250,15 @@ function Test-BindingChanged {
     <#
     .SYNOPSIS
         Return $true when the existing binding differs from the effective port
-        or host and therefore needs to be rewritten.
+        or host/SNI mode and therefore needs to be rewritten.
     #>
     param(
         [hashtable]$Existing,
         [string]$EffectivePort,
-        [string]$EffectiveHost
+        [string]$EffectiveHost,
+        [bool]$EffectiveSni
     )
-    if (-not $Existing -or "$($Existing.Port)" -ne "$EffectivePort" -or "$($Existing.Host)" -ne "$EffectiveHost") {
+    if (-not $Existing -or "$($Existing.Port)" -ne "$EffectivePort" -or "$($Existing.Host)" -ne "$EffectiveHost" -or [bool]$Existing.Sni -ne $EffectiveSni) {
         return $true
     }
     return $false
@@ -271,20 +286,29 @@ function Set-SniBinding {
         [string]$Port,
         [string]$HostName,
         [bool]$Sni,
-        [hashtable]$Existing
+        [hashtable]$Existing,
+        [bool]$BindingAlreadyCreated = $false
     )
-    if ($Sni) {
-        if ($Existing -and $Existing.Sni -and "$($Existing.Port)" -eq "$Port" -and "$($Existing.Host)" -eq "$HostName") {
-            Write-Host "  SNI binding already configured (host=$HostName, port=$Port); preserving."
-        } else {
-            Write-Host "  Configuring SNI binding (sslFlags=1, host=$HostName) on port $Port ..."
-            # Clear-WebBinding removes only THIS site's https bindings -- the
-            # catch-all ipport binding on a shared port belongs to a different site.
-            Clear-WebBinding -Name $SiteName -Protocol https -ErrorAction SilentlyContinue
-            New-WebBinding -Name $SiteName -Protocol https -Port $Port -HostHeader $HostName -SslFlags 1 | Out-Null
-            Write-Host "    SNI binding installed."
-        }
+    # Fresh non-SNI sites already have a binding from New-Item below.
+    if (-not $Existing -and -not $Sni -and $BindingAlreadyCreated) { return }
+    if (-not (Test-BindingChanged -Existing $Existing -EffectivePort $Port -EffectiveHost $HostName -EffectiveSni $Sni)) {
+        Write-Host "  Site binding already configured; preserving."
+        return
     }
+    $flags = if ($Sni) { 1 } else { 0 }
+    Write-Host "  Configuring HTTPS binding (sslFlags=$flags, host=$HostName) on port $Port ..."
+    Clear-WebBinding -Name $SiteName -Protocol https -ErrorAction Stop
+    $ip = if ($Existing -and $Existing.IP) { "$($Existing.IP)".Trim('[', ']') } else { "*" }
+    New-WebBinding -Name $SiteName -Protocol https -IPAddress $ip -Port $Port -HostHeader $HostName -SslFlags $flags -ErrorAction Stop | Out-Null
+
+}
+
+function Get-TlsIpPort {
+    param([string]$IPAddress, [string]$Port)
+    if (-not $IPAddress -or $IPAddress -eq "*") { $IPAddress = "0.0.0.0" }
+    # http.sys needs brackets around IPv6 when combined with a port.
+    if ($IPAddress.Contains(":") -and -not $IPAddress.StartsWith("[")) { $IPAddress = "[$IPAddress]" }
+    "$IPAddress`:$Port"
 }
 
 function Set-TlsCertBinding {
@@ -297,7 +321,8 @@ function Set-TlsCertBinding {
         [string]$CertThumbprint,
         [string]$Port,
         [string]$HostName,
-        [bool]$Sni
+        [bool]$Sni,
+        [string]$IPAddress = "*"
     )
     $bindPort = "$Port"
     $appId = "{B2C3D4E5-F6A7-8901-BCDE-F23456789012}"
@@ -319,11 +344,8 @@ function Set-TlsCertBinding {
         Write-Host "    TLS certificate bound to $hostnameport (SNI, store: MY)."
     } else {
         # Non-SNI catch-all: bind the cert to ipport=0.0.0.0:Port.
-        $ipport = "0.0.0.0:$bindPort"
+        $ipport = Get-TlsIpPort -IPAddress $IPAddress -Port $bindPort
         & netsh http delete sslcert ipport="$ipport" 2>$null | Out-Null
-        if ($HostName) {
-            & netsh http delete sslcert hostnameport="$HostName`:$bindPort" 2>$null | Out-Null
-        }
         $addOut = & netsh http add sslcert ipport="$ipport" certhash="$CertThumbprint" appid="$appId" certstorename=MY 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host ($addOut | Out-String)
@@ -334,6 +356,190 @@ function Set-TlsCertBinding {
             throw "TLS certificate binding verification failed for $ipport (cert hash not present after add)."
         }
         Write-Host "    TLS certificate bound to $ipport (store: MY)."
+    }
+}
+
+
+function Test-IisAccessChoice {
+    param(
+        [bool]$ExistingSite,
+        [bool]$WindowsAuth,
+        [bool]$AllowAnonymousNetworkAccess,
+        [string]$SiteName = "gpo-lens",
+        [string]$EnableAuthCommand = ".\scripts\install-windows.ps1 -ConfigureIIS -WindowsAuth"
+    )
+    if (-not $ExistingSite -and -not $WindowsAuth -and -not $AllowAnonymousNetworkAccess) {
+        throw "Fresh -ConfigureIIS requires -WindowsAuth or the explicit -AllowAnonymousNetworkAccess opt-out."
+    }
+    if ($WindowsAuth) { return }
+    if ($ExistingSite) {
+        try {
+            $anonymous = Get-WebConfigurationProperty -Filter system.webServer/security/authentication/anonymousAuthentication `
+                -PSPath "IIS:\" -Location $SiteName -Name enabled -ErrorAction Stop
+            if (-not [bool]$anonymous.Value) { return }
+        } catch {
+            Write-Warning "ACCESS CONTROL: Could not inspect existing IIS authentication; preserving access. Verify it in IIS Manager. To enable Windows Authentication deliberately: $EnableAuthCommand"
+            return
+        }
+        Write-Warning "ANONYMOUS NETWORK ACCESS: Existing site access is preserved for this upgrade. Every reachable caller can view, ingest, delete, triage and narrate. To enable Windows Authentication deliberately: $EnableAuthCommand"
+    } else {
+        Write-Warning "ANONYMOUS NETWORK ACCESS explicitly allowed: Every reachable caller can view, ingest, delete, triage and narrate. Restrict the network/IIS IP rules before use."
+    }
+}
+
+function Set-IisFirewallRule {
+    param([string]$Port, [string[]]$RemoteAddress = @("LocalSubnet"))
+    $rule = "gpo-lens HTTPS $Port"
+    if (-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName $rule -Direction Inbound -Action Allow `
+            -Protocol TCP -LocalPort $Port -Profile Domain,Private -RemoteAddress $RemoteAddress | Out-Null
+    } else {
+        Write-Host "  Existing firewall rule preserved: $rule. Review its remote-address/profile scope separately."
+    }
+}
+
+function Set-IisEndpoint {
+    # This is the installer's shared decision path, exercised without IIS in
+    # Pester. Port, host and SNI changes require certificate rebinding even
+    # when the preserved thumbprint is identical.
+    param(
+        [string]$SiteName,
+        [string]$Port,
+        [string]$HostName,
+        [bool]$Sni,
+        [string]$CertThumbprint,
+        [hashtable]$Existing,
+        [bool]$BindingAlreadyCreated = $false
+    )
+    $changed = Test-BindingChanged -Existing $Existing -EffectivePort $Port -EffectiveHost $HostName -EffectiveSni $Sni
+    $ip = if ($Existing -and $Existing.IP) { "$($Existing.IP)" } else { "*" }
+    $currentCert = if ($Existing) { "$($Existing.Cert)" } else { "" }
+    if (-not $CertThumbprint) {
+        Set-SniBinding -SiteName $SiteName -Port $Port -HostName $HostName -Sni $Sni -Existing $Existing -BindingAlreadyCreated $BindingAlreadyCreated
+        Write-Warning "No TLS certificate configured. Assign one with -TlsCertThumbprint."
+        return
+    }
+    if (-not $changed -and (Compare-CertThumbprint -Current $currentCert -Desired $CertThumbprint)) {
+        Write-Host "  TLS certificate already bound; preserving."
+        return
+    }
+    # IP is preserved, so a TLS target is identified by SNI mode, port,
+    # and hostname only for SNI. Non-SNI host-header edits share an IP:port.
+    $sameTlsTarget = $Existing -and ([bool]$Existing.Sni -eq $Sni) -and
+        ("$($Existing.Port)" -eq "$Port") -and (-not $Sni -or "$($Existing.Host)" -eq "$HostName")
+    $tlsStarted = $false
+    try {
+        Set-SniBinding -SiteName $SiteName -Port $Port -HostName $HostName -Sni $Sni -Existing $Existing -BindingAlreadyCreated $BindingAlreadyCreated
+        $tlsStarted = $true
+        Set-TlsCertBinding -CertThumbprint $CertThumbprint -Port $Port -HostName $HostName -Sni $Sni -IPAddress $ip
+    } catch {
+        $failure = $_
+        if ($Existing) {
+            try {
+                if ($changed) {
+                    $attempted = @{ IP = $ip; Port = $Port; Host = $HostName; Sni = $Sni }
+                    Set-SniBinding -SiteName $SiteName -Port $Existing.Port -HostName $Existing.Host -Sni ([bool]$Existing.Sni) -Existing $attempted
+                }
+                # Rotation at the same endpoint can have removed the old cert.
+                # Restore its known thumbprint too, even when the tuple matches.
+                if ($tlsStarted -and $sameTlsTarget -and $Existing.Cert) {
+                    Set-TlsCertBinding -CertThumbprint $Existing.Cert -Port $Existing.Port -HostName $Existing.Host -Sni ([bool]$Existing.Sni) -IPAddress $ip
+                }
+            } catch {
+                Write-Warning "Could not restore the previous IIS endpoint: $_"
+            }
+        }
+        throw $failure
+    }
+    # Retire the old SNI endpoint only after the new cert has been verified.
+    # Non-SNI ipport certificates can be shared by other IIS sites; retain them.
+    if ($Existing -and $Existing.Sni -and
+        (-not $Sni -or "$($Existing.Port)" -ne "$Port" -or "$($Existing.Host)" -ne "$HostName")) {
+        & netsh http delete sslcert hostnameport="$($Existing.Host)`:$($Existing.Port)" 2>$null | Out-Null
+    }
+}
+
+function Get-IisAllowedHosts {
+    param(
+        [string]$SiteName,
+        [string]$MachineFqdn,
+        [string]$MachineName = $env:COMPUTERNAME
+    )
+    if (-not $MachineName) { $MachineName = [System.Net.Dns]::GetHostName() }
+    if (-not $MachineFqdn) {
+        try { $MachineFqdn = [System.Net.Dns]::GetHostEntry($MachineName).HostName } catch { }
+        if (-not $MachineFqdn -or $MachineFqdn -notmatch "\.") {
+            # Resolve the machine domain, not the interactive operator's domain.
+            try {
+                $computer = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+                if ($computer.PartOfDomain) { $MachineFqdn = "$MachineName.$($computer.Domain)" }
+            } catch { }
+        }
+        if (-not $MachineFqdn) { $MachineFqdn = $MachineName }
+    }
+    $authorities = @($MachineFqdn, $MachineName)
+    foreach ($binding in (Get-WebBinding -Name $SiteName -ErrorAction Stop)) {
+        if ($binding.protocol -ne "https") { continue }
+        $parsed = Parse-BindingInformation -BindingInformation "$($binding.bindingInformation)"
+        if (-not $parsed.Port) { continue }
+        $names = @($MachineFqdn, $MachineName)
+        if ($parsed.Host) { $names += $parsed.Host }
+        if (-not $parsed.Host -and $parsed.IP -and $parsed.IP -notin @("*", "0.0.0.0", "[::]")) {
+            $names += $parsed.IP
+        }
+        foreach ($name in $names) {
+            $authorities += $name
+            $authorities += "$name`:$($parsed.Port)"
+        }
+    }
+    (($authorities | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique) -join ",")
+}
+
+function Set-IisAllowedHosts {
+    param([string]$WebConfigPath, [string]$AllowedHosts)
+    $doc = New-Object System.Xml.XmlDocument
+    $doc.PreserveWhitespace = $true
+    $doc.Load($WebConfigPath)
+    $platform = $doc.SelectSingleNode("/configuration/system.webServer/httpPlatform")
+    if (-not $platform) {
+        throw "Missing httpPlatform in $WebConfigPath; configure GPO_LENS_ALLOWED_HOSTS in the actual application environment."
+    }
+    $variables = $platform.SelectSingleNode("environmentVariables")
+    if (-not $variables) {
+        $variables = $doc.CreateElement("environmentVariables")
+        $null = $platform.AppendChild($variables)
+    }
+    foreach ($variable in $variables.SelectNodes("environmentVariable")) {
+        if ($variable.GetAttribute("name") -eq "GPO_LENS_ALLOWED_HOSTS") { return }
+    }
+    $variable = $doc.CreateElement("environmentVariable")
+    $variable.SetAttribute("name", "GPO_LENS_ALLOWED_HOSTS")
+    $variable.SetAttribute("value", $AllowedHosts)
+    $null = $variables.AppendChild($variable)
+    # Write only after validating, beside the original, then replace atomically.
+    $temporary = "$WebConfigPath.gpo-lens-tmp"
+    try {
+        $settings = New-Object System.Xml.XmlWriterSettings
+        $settings.Encoding = New-Object System.Text.UTF8Encoding $false
+        $writer = [System.Xml.XmlWriter]::Create($temporary, $settings)
+        try { $doc.Save($writer) } finally { $writer.Dispose() }
+        [System.IO.File]::Replace($temporary, $WebConfigPath, [NullString]::Value)
+    } finally {
+        if (Test-Path $temporary) { Remove-Item $temporary -Force }
+    }
+    Write-Host "  Added GPO_LENS_ALLOWED_HOSTS=$AllowedHosts (other web.config settings preserved)."
+}
+
+function Write-InstallEstateMessage {
+    param([string]$InstallDir)
+    $database = Join-Path $InstallDir "gpo-lens.sqlite3"
+    if (Test-Path -LiteralPath $database -PathType Leaf) {
+        Write-Host "The existing database was kept and migrates automatically on first use."
+        Write-Host "Back up before first use of the upgrade. See the backup section:"
+        Write-Host "https://github.com/hraedon-labs/gpo-lens/blob/main/deploy/README.md#backup-restore-and-upgrade-rules"
+    } else {
+        Write-Host "The estate starts empty -- open the site and use Ingest to upload a"
+        Write-Host "collector export, or copy a gpo-lens.sqlite3 into the data dir."
     }
 }
 
@@ -351,6 +557,28 @@ if ($MyInvocation.InvocationName -ne ".") {
     }
 
     $repoRoot = (Resolve-Path "$PSScriptRoot\..").Path
+
+# Inspect access before stopping a live pool or changing any installation files.
+$siteName = "gpo-lens"
+$sitePathIIS = "IIS:\Sites\$siteName"
+$existingSite = $null
+$iisModuleAvailable = [bool](Get-Module -ListAvailable WebAdministration -ErrorAction SilentlyContinue)
+if ($iisModuleAvailable) {
+    Import-Module WebAdministration
+    $existingSite = Get-Item $sitePathIIS -ErrorAction SilentlyContinue
+    # A custom physical path is part of the existing installation too.
+    if ($existingSite -and -not $PSBoundParameters.ContainsKey("SitePath")) {
+        $SitePath = [Environment]::ExpandEnvironmentVariables("$($existingSite.physicalPath)")
+    }
+    if ($ConfigureIIS -or $existingSite) {
+        $enableAuthCommand = "powershell -ExecutionPolicy Bypass -File `"$PSCommandPath`" -ConfigureIIS -WindowsAuth -InstallDir `"$InstallDir`" -SitePath `"$SitePath`" -AppPool `"$AppPool`""
+        Test-IisAccessChoice -ExistingSite ([bool]$existingSite) -WindowsAuth ([bool]$WindowsAuth) `
+            -AllowAnonymousNetworkAccess ([bool]$AllowAnonymousNetworkAccess) -EnableAuthCommand $enableAuthCommand
+    }
+} elseif ($ConfigureIIS) {
+    throw "-ConfigureIIS requires the WebAdministration module to inspect and configure site access. Install IIS management scripting tools first."
+}
+
 $venv     = Join-Path $InstallDir "venv"
 $logs     = Join-Path $InstallDir "logs"
 
@@ -585,14 +813,23 @@ if ("$venvOut" -match "Unable to copy") {
     Write-Host "        venv creation; the venv was created and verified working, so it is not an error."
 }
 Write-Host "Installing gpo-lens ..."
-& $venvPy -m pip install --upgrade pip | Out-Null
+$requirements = Join-Path $repoRoot "deploy\iis\requirements-web.lock.txt"
+& $venvPy -m pip install --require-hashes -r $requirements
+if ($LASTEXITCODE -ne 0) {
+    throw "Hash-pinned web dependency install failed (exit $LASTEXITCODE)."
+}
 # The [web] extra pulls fastapi/uvicorn/jinja2/python-multipart needed to serve.
+$buildRequirements = Join-Path $repoRoot "deploy\iis\requirements-build.lock.txt"
+& $venvPy -m pip install --require-hashes -r $buildRequirements
+if ($LASTEXITCODE -ne 0) {
+    throw "Hash-pinned build dependency install failed (exit $LASTEXITCODE)."
+}
 $pkg = "$repoRoot[web]"
 # --upgrade so an in-place re-install actually refreshes the package metadata.
 # Without it pip could leave a prior version's dist-info in place, which is what
 # the app reports as its version (the GUI then shows a stale version after an
 # upgrade that otherwise appeared to succeed).
-& $venvPy -m pip install --upgrade $pkg
+& $venvPy -m pip install --upgrade --no-build-isolation --no-deps $pkg
 if ($LASTEXITCODE -ne 0) {
     throw "pip install of gpo-lens failed (exit $LASTEXITCODE)."
 }
@@ -657,7 +894,7 @@ if ($ConfigureIIS) {
     Write-Host "Configuring IIS ..."
 
     # Check prerequisites
-    if (-not (Get-Module -ListAvailable WebAdministration -ErrorAction SilentlyContinue)) {
+    if (-not $iisModuleAvailable) {
         Write-Host "  [skip] WebAdministration module not available; skipping IIS config."
         Write-Host "  See deploy\iis\README.md for manual IIS setup."
     } else {
@@ -716,6 +953,8 @@ if ($ConfigureIIS) {
         if (-not $existingPool) {
             Write-Host "  Creating app pool `"$AppPool`" ..."
             New-Item $poolPath | Out-Null
+            # Do not serve a fresh site until host policy and authentication are set.
+            Stop-WebAppPool -Name $AppPool
         } else {
             Write-Host "  App pool `"$AppPool`" already exists."
         }
@@ -785,54 +1024,22 @@ if ($ConfigureIIS) {
             Write-Host "  IIS site `"$siteName`" already exists."
             Set-ItemProperty $sitePathIIS -Name applicationPool -Value $AppPool
             Set-ItemProperty $sitePathIIS -Name physicalPath -Value $SitePath
-            # Only rewrite the binding when port/host actually change. The
-            # bindings collection carries no sslFlags, so an unconditional
-            # Set-ItemProperty would drop SNI on a no-op upgrade and churn a
-            # healthy endpoint.
-            if (Test-BindingChanged -Existing $existing -EffectivePort $effPort -EffectiveHost $effHost) {
-                Write-Host "    Updating site binding to $bindingInfo ..."
-                Set-ItemProperty $sitePathIIS -Name bindings -Value @{protocol="https"; bindingInformation=$bindingInfo}
-            } else {
-                Write-Host "    Site binding already matches (port $effPort, host `"$effHost`"); preserving."
-            }
         }
 
-        # 6. SNI binding (sslFlags=1). Re-apply only when the live binding is
-        # not already SNI with the right host/port, so a no-op upgrade does not
-        # drop it. sslFlags must be set BEFORE the netsh hostnameport sslcert
-        # add or http.sys rejects it with error 87.
-        Set-SniBinding -SiteName $siteName -Port $effPort -HostName $effHost -Sni $effSni -Existing $existing
+        # Compare the whole endpoint and certificate together. A plain upgrade
+        # keeps both, while explicit port/host/SNI edits rebind a preserved cert.
+        Set-IisEndpoint -SiteName $siteName -Port $effPort -HostName $effHost -Sni $effSni -CertThumbprint $effCert -Existing $existing -BindingAlreadyCreated (-not [bool]$existingSite)
 
-        # 7. TLS cert binding. Rebind only when the cert changed (idempotent);
-        # an omitted -TlsCertThumbprint preserves the existing cert via $effCert.
-        if ($effCert) {
-            $curCert = if ($existing) { "$($existing.Cert)" } else { "" }
-            $same = Compare-CertThumbprint -Current $curCert -Desired $effCert
-            if ($same) {
-                Write-Host "  TLS certificate already bound ($effCert); preserving."
-            } else {
-                Write-Host "  Binding TLS certificate $effCert to port $effPort ..."
-                Set-TlsCertBinding -CertThumbprint $effCert -Port $effPort -HostName $effHost -Sni $effSni
-            }
-        } else {
-            Write-Host "  [warn] No TLS certificate configured. HTTPS binding exists but no certificate is assigned."
-            Write-Host "         Assign one via IIS Manager or re-run with -TlsCertThumbprint."
-        }
 
-        # 8. Open the firewall for the chosen port (idempotent). cert-watch's
-        # 443 is typically already open; gpo-lens runs on a non-standard port, so
-        # add a rule unless one already exists.
-        $fwRule = "gpo-lens HTTPS $effPort"
+        # Merge the host policy after bindings are effective; preserve an operator's value.
+        $allowedHosts = Get-IisAllowedHosts -SiteName $siteName
+        Set-IisAllowedHosts -WebConfigPath $webConfigDst -AllowedHosts $allowedHosts
+
+        # New firewall rules are management-subnet scoped. Existing rules stay intact.
         if (Get-Command New-NetFirewallRule -ErrorAction SilentlyContinue) {
-            if (-not (Get-NetFirewallRule -DisplayName $fwRule -ErrorAction SilentlyContinue)) {
-                Write-Host "  Opening firewall for TCP $effPort ..."
-                New-NetFirewallRule -DisplayName $fwRule -Direction Inbound -Action Allow `
-                    -Protocol TCP -LocalPort $effPort -Profile Any | Out-Null
-            } else {
-                Write-Host "  Firewall rule `"$fwRule`" already present."
-            }
+            Set-IisFirewallRule -Port $effPort -RemoteAddress $FirewallRemoteAddress
         } else {
-            Write-Host "  [warn] New-NetFirewallRule unavailable; open TCP $effPort manually if blocked."
+            Write-Warning "New-NetFirewallRule unavailable; allow TCP $effPort from the intended management network manually."
         }
 
         # 9. Windows Authentication (optional - closes the access-control gap).
@@ -877,6 +1084,13 @@ if ($ConfigureIIS) {
     }
 }
 
+if (-not $ConfigureIIS -and $existingSite) {
+    $installedWebConfig = Join-Path $SitePath "web.config"
+    if (Test-Path $installedWebConfig) {
+        Set-IisAllowedHosts -WebConfigPath $installedWebConfig -AllowedHosts (Get-IisAllowedHosts -SiteName $siteName)
+    }
+}
+
 # If we stopped the pool to release locked files but did NOT run the IIS-config
 # path (which restarts it), bring it back up now. Otherwise a plain
 # upgrade-in-place (install without -ConfigureIIS) leaves the site stopped and
@@ -906,8 +1120,7 @@ if ($script:iisActuallyConfigured) {
     Write-Host "Browse: https://$hn`:$epPort/"
 }
 Write-Host ""
-Write-Host "The estate starts empty -- open the site and use Ingest to upload a"
-Write-Host "collector export, or copy a gpo-lens.sqlite3 into the data dir."
+Write-InstallEstateMessage -InstallDir $InstallDir
 Write-Host ""
 Write-Host "ACCESS CONTROL: gpo-lens has no per-user login. Behind IIS every caller"
 Write-Host "is treated as the trusted local analyst. Restrict the site at the IIS"

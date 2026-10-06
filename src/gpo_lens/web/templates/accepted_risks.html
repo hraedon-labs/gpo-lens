@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% import '_pagination.html' as pg %}
+{% block title %}gpo-lens — Accepted-risk register{% endblock %}
+{% block content %}
+<h1>Accepted-risk register</h1>
+{% include "_exports.html" %}
+<form method="get" class="gp-filter-bar" aria-label="Filter accepted risks">
+  <label>Search <input class="gp-input" type="search" name="q" value="{{ filters.q }}"></label>
+  <label>Category <input class="gp-input" name="category" value="{{ filters.category }}"></label>
+  <label>Severity <input class="gp-input" name="severity" value="{{ filters.severity }}"></label>
+  {% if filters.as_of %}<input type="hidden" name="as_of" value="{{ filters.as_of }}">{% endif %}
+  <button class="gp-btn" type="submit">Apply</button>
+</form>
+<p class="muted">Local workflow decisions; accepting risk never changes Group Policy. Expired decisions become actionable again.</p>
+<div class="gp-table-wrap"><table class="gp-table">
+<thead><tr><th>Occurrence</th><th>Category</th><th>Summary</th><th>Accepted</th><th>Expires</th><th>State</th>{% if can_triage %}<th>Actor</th><th>Rationale</th>{% endif %}</tr></thead>
+<tbody>{% for risk in risks %}<tr>
+<td><a href="{{ url_for('finding_occurrence', occurrence_id=risk.occurrence_id) }}">#{{ risk.occurrence_id }}</a></td>
+<td>{{ risk.category }}</td><td>{{ risk.summary }}</td><td>{{ risk.accepted_at }}</td><td>{{ risk.expires_at or 'no expiry' }}</td>
+<td>{{ 'revoked' if risk.revoked_at else ('expired' if risk.is_expired else 'active') }}</td>
+{% if can_triage %}<td>{{ risk.actor }}</td><td>{{ risk.rationale }}</td>{% endif %}
+</tr>{% else %}<tr><td colspan="8">No matching risk acceptances.</td></tr>{% endfor %}</tbody>
+</table></div>
+{{ pg.pagination(pag, f_base_qs) }}
+{% endblock %}

@@ -1,6 +1,10 @@
 # Plan 013 — Scope Honesty, Consolidation, and Decomposition
 
-**Status:** proposed 2026-06-13
+**Status:** Shipped in v0.3.0; verified 2026-10-06. Evidence: [src/gpo_lens/topology.py](../src/gpo_lens/topology.py), [tests/test_scope_honesty.py](../tests/test_scope_honesty.py).
+
+Scope, WMI, ILT and stale-GPO caveats shipped; `topology.py` and the `queries/` package supply the decomposition. The historical site-collection ceiling below was superseded by Plan 014 (v0.4.0); the original module-size targets are not current architecture requirements.
+
+The design below is the historical specification; this status records the verified release scope.
 **Author:** GLM 5.2 (session consolidation of user-selected improvements)
 **Strategic role:** This plan implements the user's selected improvements from the
 portfolio review: scope honesty (Plan 011 Workstream S), queries.py decomposition,

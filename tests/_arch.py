@@ -32,6 +32,8 @@ CORE_MODULES: tuple[str, ...] = (
     "detection",
     "admx_parser",
     "display",
+    "exports",
+    "safe_output",
     "report",
     "events",
     "sinks",

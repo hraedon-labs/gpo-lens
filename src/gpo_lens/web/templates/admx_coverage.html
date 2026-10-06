@@ -16,6 +16,18 @@
   </div>
 </div>
 
+{% if report.skipped_files %}
+<section class="gp-section">
+  <h2>{{ report.summary.unreadable_file_count }} template files could not be read</h2>
+  <p>ADMX names and coverage may be incomplete.</p>
+  <ul>
+    {% for skipped in report.skipped_files %}
+    <li><span class="mono">{{ skipped.filename }}</span>: {{ skipped.reason_class }}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 <section class="gp-section">
   <h2>Referenced policies <span class="count">{{ report.referenced | length }}</span></h2>
   {% if report.referenced %}

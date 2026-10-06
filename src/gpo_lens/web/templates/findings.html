@@ -12,6 +12,11 @@
 {% endblock %}
 
 {% block content %}
+{% include "_exports.html" %}
+{% if analysis_warning %}
+<p class="gp-callout" role="alert">{{ analysis_warning }}</p>
+{% endif %}
+<a class="gp-btn" href="{{ url_for('accepted_risks') }}">Accepted-risk register</a>
 <div class="gp-page-head">
   <div>
     <div class="gp-eyebrow">Findings inbox</div>

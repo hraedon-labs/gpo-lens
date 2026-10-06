@@ -1,6 +1,10 @@
 # Plan 017 — Directory search & scoping
 
-**Status:** shipped (v0.6.1) 2026-06-18
+**Status:** Partially shipped in v0.6.1; verified 2026-10-06. Evidence: [src/gpo_lens/web/routes/ou.py](../src/gpo_lens/web/routes/ou.py), [tests/test_web.py](../tests/test_web.py).
+
+Phase A directory search/type/sort/pagination shipped. Phase B nested tree/focus/search expansion is not implemented and is not pursued for v1.3.0; the current Directory is a filtered list.
+
+The design below is the historical specification; this status records the verified release scope.
 **Author:** GLM 5.2 (from live IIS-deployment feedback)
 **Strategic role:** The Directory page (`/ou`, `ou_list.html`) is the entry
 point to topology — every OU/domain/site a GPO can link to. Today it is a flat,

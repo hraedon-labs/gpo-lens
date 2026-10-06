@@ -1,6 +1,10 @@
 # Plan 022 — Web responsiveness + defect-pattern consolidation
 
-**Status:** Proposed 2026-07-01
+**Status:** Superseded by Plans 024/025 for the web workflow; consolidation shipped in v1.0.0; verified 2026-10-06. Evidence: [src/gpo_lens/web/templates/ou_detail.html](../src/gpo_lens/web/templates/ou_detail.html), [tests/test_registry_cse_guard.py](../tests/test_registry_cse_guard.py).
+
+Sync DB handlers, registry/datetime helpers, deterministic 409 test, GUID fixture lint, forwarded audit attribution, grouped danger cards and OU caveat counts are present (see also `tests/test_datetime_guard.py`, `tests/test_fixture_guid_lint.py`, `tests/test_web.py`). The proposed WI-1 dedicated async-store AST guard and slow/fast concurrent-request acceptance test are not present; their acceptance is not claimed. Plan 025 replaces the old nav while retaining specialist routes.
+
+The design below is the historical specification; this status records the verified release scope.
 **Author:** Claude (Fable 5), from the 2026-07-01 portfolio evaluation
 **Strategic role:** gpo-lens is deployed and load-bearing at work; the 2026-06-29
 adversarial cycle (31 + 4 findings) is done and fixed. What the cycle left behind is not

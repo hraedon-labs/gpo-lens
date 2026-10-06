@@ -317,18 +317,31 @@ def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None
 
     admx_path = admx_dir or os.environ.get("GPO_LENS_ADMX_DIR")
     app.state.admx = None
-    if admx_path and Path(admx_path).is_dir():
-        from gpo_lens.admx_parser import parse_admx_dir
-
-        app.state.admx = parse_admx_dir(admx_path)
-    else:
+    app.state.admx_notice = ""
+    try:
         from gpo_lens.admx_parser import find_admx_dir, parse_admx_dir
 
-        auto = find_admx_dir(Path.cwd())
-        if auto is None and db_path != ":memory:":
-            auto = find_admx_dir(Path(db_path).resolve().parent)
-        if auto is not None:
-            app.state.admx = parse_admx_dir(auto)
+        if admx_path and Path(admx_path).is_dir():
+            app.state.admx = parse_admx_dir(admx_path)
+        else:
+            auto = find_admx_dir(Path.cwd())
+            if auto is None and db_path != ":memory:":
+                auto = find_admx_dir(Path(db_path).resolve().parent)
+            if auto is not None:
+                app.state.admx = parse_admx_dir(auto)
+        if app.state.admx is not None and app.state.admx.skipped_files:
+            app.state.admx_notice = (
+                f"{len(app.state.admx.skipped_files)} template files could not be read; "
+                "ADMX names and coverage may be incomplete. See ADMX Coverage for details."
+            )
+    except Exception as exc:
+        # Templates are optional enrichment and must never prevent startup.
+        app.state.admx = None
+        app.state.admx_notice = (
+            f"ADMX templates could not be loaded ({type(exc).__name__}). "
+            "Policy names are unavailable; ADMX coverage may be incomplete."
+        )
+        _logger.warning("ADMX template loading failed: %s", type(exc).__name__)
 
     # Ensure the DB file exists and is initialized. A file may exist but be
     # empty (e.g. ``touch gpo-lens.sqlite3``) — init_db is idempotent
@@ -346,6 +359,15 @@ def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None
     from gpo_lens import __version__
 
     templates = Jinja2Templates(directory=str(_WEB_DIR / "templates"))
+    from gpo_lens.web import page_narration
+    from gpo_lens.web.navigation import section_for_path
+
+    templates.env.globals["legacy_nav"] = os.environ.get("GPO_LENS_LEGACY_NAV", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    templates.env.globals["section_for_path"] = section_for_path
     templates.env.globals["app_version"] = __version__
     templates.env.globals["setting_label"] = _setting_label
 
@@ -395,9 +417,8 @@ def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None
         - uvicorn binds loopback and runs with ``proxy_headers=False``, so the
           Host header reflects the proxy/browser rather than a spoofable
           forwarded hop. This trusts the documented TLS+SNI reverse-proxy
-          deployment; plain-HTTP non-SNI hosting is out of scope (see
-          deploy/iis/README.md) — over plain HTTP a DNS-rebinding attacker could
-          align Origin and Host on a name they control.
+          deployment. The outer Host allow-list independently blocks a
+          DNS-rebinding origin from selecting an attacker-controlled authority.
         """
         from urllib.parse import urlparse
 
@@ -538,7 +559,7 @@ def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None
     @app.middleware("http")
     async def _request_id(request: Request, call_next):  # type: ignore[no-untyped-def]
         # Stable per-request id so audit entries correlate with future request
-        # logging if added. Registered last so it is outermost (runs first).
+        # logging if added. The Host allow-list runs before this middleware.
         request.state.request_id = uuid.uuid4().hex[:12]
         return await call_next(request)
 
@@ -591,5 +612,13 @@ def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None
     findings.register(app, templates)
     explore.register(app, templates)
     api.register(app, templates)
+    page_narration.register(app, templates)
 
+    # Starlette's last registered middleware runs first, including before
+    # request IDs, authentication, CSRF, redirects and request.url/url_for.
+    from gpo_lens.web.allowed_hosts import HostAllowListMiddleware
+
+    app.add_middleware(
+        HostAllowListMiddleware, allowed_hosts=os.environ.get("GPO_LENS_ALLOWED_HOSTS")
+    )
     return app

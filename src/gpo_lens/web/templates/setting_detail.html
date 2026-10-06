@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}gpo-lens — Setting{% endblock %}
+{% block content %}
+<h1>{{ identity }}</h1>
+<p class="mono muted">As of snapshot #{{ snapshot_id }}. Exact setting identity across GPOs.</p>
+{% include "_exports.html" %}
+<p class="muted">Authored configuration only. Security filtering, WMI, loopback, item targeting and site membership are not simulated; this is not object-level RSoP.</p>
+<div class="gp-table-wrap"><table class="gp-table">
+<thead><tr><th>GPO</th><th>Side</th><th>CSE</th><th>Setting</th><th>Value</th><th>Source</th></tr></thead>
+<tbody>{% for row in ledger %}<tr>
+<td><a href="{{ url_for('gpo_detail', gpo_id=row.gpo_id) }}?snapshot={{ snapshot_id }}">{{ row.gpo_name }}</a></td>
+<td>{{ row.side }}</td><td>{{ row.cse }}</td><td>{{ row.admx_name or row.display_name }}</td><td>{{ row.display_value }}</td>
+<td>{{ row.source_state }}{{ ' / disabled side' if row.from_disabled_side else '' }}</td>
+</tr>{% else %}<tr><td colspan="6">No matching settings in this snapshot.</td></tr>{% endfor %}</tbody>
+</table></div>
+{% endblock %}

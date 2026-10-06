@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import builtins
 import json
 import sqlite3
 import sys
 from collections.abc import Sequence
+from contextvars import ContextVar, Token
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TextIO
 
 from gpo_lens import __version__, ingest, store
 from gpo_lens.display import render_table
 from gpo_lens.model import Estate
+from gpo_lens.safe_output import safe_data, safe_text, secret_values
 
 if TYPE_CHECKING:
     from gpo_lens.admx_parser import PolicyDefinitions
@@ -38,16 +41,82 @@ def _set_json_kind(kind: str | None) -> None:
     _json_kind = kind
 
 
+_output_secrets: ContextVar[tuple[str, ...]] = ContextVar("cli_output_secrets", default=())
+
+
+def _begin_output(args: argparse.Namespace) -> Token[tuple[str, ...]]:
+    """Read secret context for copied values; reset it after each invocation."""
+    values: tuple[str, ...] = ()
+    db = Path(args.db)
+    command = getattr(args, "command", "")
+    source_only = bool(getattr(args, "src", None) or getattr(args, "sample_dir", None))
+    if command == "report" and getattr(args, "since", None) is not None:
+        source_only = False
+    if command not in {"serve", "ingest", "settings-diff"} and not source_only and db.is_file():
+        from gpo_lens.exports import snapshot_secrets
+
+        conn = sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='setting'").fetchone():
+                values = snapshot_secrets(
+                    conn, (row[0] for row in conn.execute("SELECT id FROM snapshot"))
+                )
+        finally:
+            conn.close()
+    return _output_secrets.set(values)
+
+
+def _end_output(token: Token[tuple[str, ...]]) -> None:
+    _output_secrets.reset(token)
+
+
+def _add_secret_source(source: object) -> None:
+    _output_secrets.set(tuple(set(_output_secrets.get()) | set(secret_values(source))))
+
+
+def _project_output(value: object) -> object:
+    return safe_data(value, secrets=_output_secrets.get())
+
+
+def _safe_document(text: str) -> str:
+    return safe_text(text, secrets=_output_secrets.get())
+
+
+def _safe_print(
+    *objects: object,
+    sep: str = " ",
+    end: str = "\n",
+    file: TextIO | None = None,
+    flush: bool = False,
+) -> None:
+    builtins.print(
+        *(
+            safe_text(obj, secrets=_output_secrets.get())
+            if isinstance(obj, str)
+            else safe_data(obj, secrets=_output_secrets.get())
+            for obj in objects
+        ),
+        sep=sep,
+        end=end,
+        file=file,
+        flush=flush,
+    )
+
+
 def _get_estate(args: argparse.Namespace) -> Estate:
     src = getattr(args, "src", None) or getattr(args, "sample_dir", None)
     if src:
-        return ingest.load_estate(src)
+        estate = ingest.load_estate(src)
+        _add_secret_source(estate)
+        return estate
     db = Path(args.db)
     if not db.exists():
         raise FileNotFoundError(f"Database not found: {db}")
     conn = sqlite3.connect(str(db))
     try:
-        return store.load_estate(conn)
+        estate = store.load_estate(conn)
+        _add_secret_source(estate)
+        return estate
     finally:
         conn.close()
 
@@ -67,11 +136,14 @@ def _render_json(obj: object) -> None:
         "generated_at": datetime.now(UTC).isoformat(),
         "data": obj,
     }
-    print(json.dumps(envelope, indent=2, default=str))
+    print(json.dumps(safe_data(envelope, secrets=_output_secrets.get()), indent=2, default=str))
 
 
 def _print_table(headers: list[str], rows: list[Sequence[str]]) -> None:
-    print(render_table(headers, rows))
+    projected = safe_data(
+        [dict(zip(headers, row, strict=True)) for row in rows], secrets=_output_secrets.get()
+    )
+    print(render_table(headers, [[str(row[h]) for h in headers] for row in projected]))
 
 
 def _get_admx(args: argparse.Namespace) -> PolicyDefinitions | None:
@@ -86,6 +158,16 @@ def _get_admx(args: argparse.Namespace) -> PolicyDefinitions | None:
     """
     from gpo_lens.admx_parser import find_admx_dir, parse_admx_dir
 
+    def load(path: str | Path) -> PolicyDefinitions:
+        admx = parse_admx_dir(path)
+        if admx.skipped_files:
+            print(
+                f"Warning: {len(admx.skipped_files)} template files could not be read; "
+                "ADMX names and coverage may be incomplete.",
+                file=sys.stderr,
+            )
+        return admx
+
     admx_dir = getattr(args, "admx_dir", None)
     if admx_dir:
         if not Path(admx_dir).is_dir():
@@ -94,12 +176,12 @@ def _get_admx(args: argparse.Namespace) -> PolicyDefinitions | None:
                 file=sys.stderr,
             )
         else:
-            return parse_admx_dir(admx_dir)
+            return load(admx_dir)
 
     src = getattr(args, "src", None) or getattr(args, "sample_dir", None)
     if src:
         auto = find_admx_dir(src)
         if auto is not None:
-            return parse_admx_dir(auto)
+            return load(auto)
 
     return None

@@ -1,0 +1,27 @@
+{
+  "audit_file": "v1.2.0.audit.log",
+  "commit": "7739a3862be2b2dbcebc31d6b2ac84a4d01fa426",
+  "counts": {
+    "analysis_input": 0,
+    "coverage_gap": 6,
+    "delegation": 4,
+    "evaluation_run": 2,
+    "events": 1,
+    "finding": 7,
+    "finding_observation": 14,
+    "finding_triage": 2,
+    "finding_triage_event": 1,
+    "gpo": 4,
+    "gpo_link": 4,
+    "group_member": 0,
+    "ou_tree": 4,
+    "principal": 0,
+    "setting": 4,
+    "snapshot": 2,
+    "som": 4,
+    "som_link": 6,
+    "wmi_filter": 0
+  },
+  "schema_version": 7,
+  "tag": "v1.2.0"
+}

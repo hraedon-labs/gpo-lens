@@ -1,0 +1,35 @@
+[Unit]
+Description=gpo-lens read-only Group Policy analysis
+After=network.target
+
+[Service]
+Type=simple
+User=gpo-lens
+Group=gpo-lens
+WorkingDirectory=/var/lib/gpo-lens
+ExecStart=/opt/gpo-lens/venv/bin/gpo-lens --db /var/lib/gpo-lens/gpo-lens.sqlite3 serve --host 127.0.0.1 --port 8000
+# Loopback XOR token: browser deployment uses loopback and proxy access control.
+Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 GPO_LENS_AUTH_TOKEN= GPO_LENS_FORWARDED_USER_HEADER=
+EnvironmentFile=/etc/gpo-lens/environment
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+UMask=0077
+StateDirectory=gpo-lens
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/gpo-lens
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

@@ -19,7 +19,9 @@ from gpo_lens.cli._diff import (
 )
 from gpo_lens.cli._estate import cmd_ingest, cmd_summary
 from gpo_lens.cli._events import cmd_events, cmd_events_export
-from gpo_lens.cli._helpers import DEFAULT_DB, _set_json_kind
+from gpo_lens.cli._export import EXPORT_VIEWS, cmd_export
+from gpo_lens.cli._helpers import DEFAULT_DB, _begin_output, _end_output, _set_json_kind
+from gpo_lens.cli._helpers import _safe_print as print
 from gpo_lens.cli._hygiene import (
     cmd_blocked,
     cmd_broken_refs,
@@ -623,6 +625,43 @@ _COMMANDS: list[CliCommand] = [
 ]
 
 
+_COMMANDS.append(
+    CliCommand(
+        name="export",
+        func=cmd_export,
+        help="Deterministic redacted Markdown/CSV from a stored view",
+        positional_args=[CliArg(name="view", choices=EXPORT_VIEWS)],
+        args=[
+            CliArg(name="--format", choices=["md", "csv"], default="md"),
+            CliArg(name="--gpo-id"),
+            CliArg(name="--compare", default=""),
+            CliArg(name="--snapshot", type=int),
+            CliArg(name="--snapshot-a", type=int),
+            CliArg(name="--snapshot-b", type=int),
+            CliArg(name="--occurrence-id", type=int),
+            CliArg(name="--identity"),
+            CliArg(name="--side", default=""),
+            CliArg(name="--cse", default=""),
+            CliArg(name="--q", default=""),
+            CliArg(name="--category", default=""),
+            CliArg(name="--severity", default=""),
+            CliArg(name="--gpo-name", default=""),
+            CliArg(name="--lifecycle", default="new_or_regressed"),
+            CliArg(name="--triage", default="open"),
+            CliArg(name="--page", type=int, default=1),
+            CliArg(name="--per-page", type=int, default=50),
+            CliArg(
+                name="--as-of", help="Explicit ISO timestamp for time-sensitive briefing/risk facts"
+            ),
+            CliArg(name="--admx-dir"),
+            CliArg(name="--comparator"),
+            CliArg(name="--file-a"),
+            CliArg(name="--file-b"),
+        ],
+    )
+)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="gpo-lens")
     parser.add_argument("--version", action="version", version=f"gpo-lens {__version__}")
@@ -669,7 +708,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     _set_json_kind(getattr(args, "command", None))
     args.json = bool(args.json) or bool(getattr(args, "_sub_json", False))
+    output_token = None
     try:
+        output_token = _begin_output(args)
         return args.func(args) or 0
     except SystemExit:
         raise
@@ -679,6 +720,9 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if output_token is not None:
+            _end_output(output_token)
 
 
 if __name__ == "__main__":

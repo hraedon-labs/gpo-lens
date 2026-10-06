@@ -1,6 +1,10 @@
 # Plan 024 — Durable finding identity, lifecycle, evaluation provenance, and triage
 
-**Status:** Proposed; requires dedicated model and adversarial review
+**Status:** Shipped in v1.1.0, hardened through v1.3.0; verified 2026-10-06. Evidence: [src/gpo_lens/finding_model.py](../src/gpo_lens/finding_model.py), [tests/test_plan024.py](../tests/test_plan024.py).
+
+The durable identity/evaluation/occurrence/observation/triage protocol and core queries are implemented in `findings.py`, with typed identity fixes and SQL filtering. Schema v8 preserves legacy triage; v9 marks unstable subjects snapshot-scoped. Intrinsic evaluation is wired to ingest. Contextual series are supported by the core, but persisting baseline/golden workbench evaluations remains a gated follow-on, not a shipped UI workflow. Historical backfill is explicitly absent where exact provenance cannot be reproduced.
+
+The design below is the historical specification; this status records the verified release scope.
 
 **Depends on:** Plan 023 canonical identities and snapshot provenance vocabulary
 

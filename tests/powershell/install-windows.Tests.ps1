@@ -197,6 +197,26 @@ Describe "install-windows.ps1" {
             function Get-WebBinding { }
         }
 
+        It "retains concrete binding IP and reads its certificate" -ForEach @(
+            @{IP="192.0.2.10"}, @{IP="[2001:db8::10]"}
+        ) {
+            Mock Get-WebBinding {
+                @([pscustomobject]@{protocol="https"; bindingInformation="$IP`:8443:"; sslFlags=0})
+            }
+            $r = Get-ExistingBindingConfig -SiteName gpo-lens
+            $r.IP | Should -Be $IP
+            $r.Cert | Should -Be "ABCDEF123456"
+            $global:NetshCalls | Where-Object { ($_ -join " ") -eq "http show sslcert ipport=$IP`:8443" } | Should -Not -Be $null
+        }
+
+        It "reads non-SNI host-header certificate from IP rather than stale hostnameport" {
+            Mock Get-WebBinding { @([pscustomobject]@{protocol="https"; bindingInformation="192.0.2.10:8443:lens.lab.example.com"; sslFlags=0}) }
+            $r = Get-ExistingBindingConfig -SiteName gpo-lens
+            $r.Cert | Should -Be "ABCDEF123456"
+            $global:NetshCalls | Where-Object { ($_ -join " ") -match 'hostnameport=' } | Should -Be $null
+            $global:NetshCalls | Where-Object { ($_ -join " ") -eq 'http show sslcert ipport=192.0.2.10:8443' } | Should -Not -Be $null
+        }
+
         It "returns `$null when there is no https binding" {
             Mock Get-WebBinding {
                 @(
@@ -241,8 +261,8 @@ Describe "install-windows.ps1" {
             $r.Sni | Should -Be $false
             $r.Cert | Should -Be "ABCD5678"
 
-            $hostnameportShow = $global:NetshCalls | Where-Object { ($_ -join " ") -match 'show sslcert hostnameport=gpo-lens.local:8443' }
-            $hostnameportShow | Should -Not -Be $null
+            $ipportShow = $global:NetshCalls | Where-Object { ($_ -join " ") -match 'show sslcert ipport=\[::\]:8443' }
+            $ipportShow | Should -Not -Be $null
         }
 
         It "detects SNI from sslFlags string and reads the hostnameport cert" {
@@ -371,13 +391,21 @@ Describe "install-windows.ps1" {
         It "does nothing when Sni is `$false" {
             Mock Clear-WebBinding { }
             Mock New-WebBinding { }
-            Set-SniBinding -SiteName "gpo-lens" -Port "8443" -HostName "" -Sni $false -Existing $null
+            Set-SniBinding -SiteName "gpo-lens" -Port "8443" -HostName "" -Sni $false -Existing $null -BindingAlreadyCreated $true
             Should -Invoke Clear-WebBinding -Exactly 0
             Should -Invoke New-WebBinding -Exactly 0
         }
     }
 
     Describe "Set-TlsCertBinding" {
+        It "targets the preserved concrete IP for non-SNI certificates" -ForEach @(
+            @{IP="192.0.2.10"}, @{IP="[2001:db8::10]"}
+        ) {
+            Set-TlsCertBinding -CertThumbprint "ABCDEF123456" -Port "8443" -HostName "" -Sni $false -IPAddress $IP
+            $global:NetshCalls | Where-Object { ($_ -join " ") -like "*add sslcert ipport=$([WildcardPattern]::Escape($IP))`:8443*" } | Should -Not -Be $null
+            $global:NetshCalls | Where-Object { ($_ -join " ") -match 'ipport=0\.0\.0\.0' } | Should -Be $null
+        }
+
         It "uses hostnameport for an SNI binding" {
             Set-TlsCertBinding -CertThumbprint "ABCDEF123456" -Port "8443" -HostName "gpo-lens.local" -Sni $true
 
@@ -406,7 +434,7 @@ Describe "install-windows.ps1" {
             $hn     | Should -Be $null
         }
 
-        It "removes stale hostnameport for a non-SNI binding with a hostname" {
+        It "leaves hostnameport cleanup to the endpoint transition after successful binding" {
             Set-TlsCertBinding -CertThumbprint "ABCDEF123456" -Port "8443" -HostName "gpo-lens.local" -Sni $false
 
             $deleteIp    = $global:NetshCalls | Where-Object { ($_ -join " ") -match 'delete sslcert ipport=0\.0\.0\.0:8443' }
@@ -414,7 +442,7 @@ Describe "install-windows.ps1" {
             $add         = $global:NetshCalls | Where-Object { ($_ -join " ") -match 'add sslcert ipport=0\.0\.0\.0:8443' }
 
             $deleteIp   | Should -Not -Be $null
-            $deleteHost | Should -Not -Be $null
+            $deleteHost | Should -Be $null
             $add        | Should -Not -Be $null
         }
 
