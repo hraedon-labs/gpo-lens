@@ -100,3 +100,44 @@ class TestAdmxCoverageRoute:
         resp = client.get("/admx-coverage")
         assert resp.status_code == 200
         assert "Gaps" in resp.text or "gaps" in resp.text.lower()
+
+
+def test_startup_with_poisoned_templates(fixture_db, tmp_path, monkeypatch):
+    monkeypatch.setenv("GPO_LENS_AUTH_TOKEN", "test-secret-token")
+    pd_dir = tmp_path / "PolicyDefinitions"
+    pd_dir.mkdir()
+    (pd_dir / "poison.admx").write_bytes(b'<?xml version="1.0" encoding="unicode"?><x>\xff</x>')
+    app = create_app(fixture_db, admx_dir=str(pd_dir))
+    with TestClient(app, headers={"Authorization": "Bearer test-secret-token"}) as client:
+        response = client.get("/")
+        assert response.status_code == 200
+        assert "1 template files could not be read" in response.text
+        response = client.get("/admx-coverage")
+        assert response.status_code == 200
+        assert "poison.admx" in response.text
+        assert "UnicodeDecodeError" in response.text
+
+
+@pytest.mark.parametrize("auto_detect", [False, True])
+def test_startup_when_template_loading_fails_wholesale(
+    fixture_db, tmp_path, monkeypatch, auto_detect
+):
+    from gpo_lens import admx_parser
+
+    monkeypatch.setenv("GPO_LENS_AUTH_TOKEN", "test-secret-token")
+    monkeypatch.delenv("GPO_LENS_ADMX_DIR", raising=False)
+    pd_dir = tmp_path / "PolicyDefinitions"
+    pd_dir.mkdir()
+
+    def fail(_path):
+        raise LookupError("synthetic failure")
+
+    monkeypatch.setattr(admx_parser, "parse_admx_dir", fail)
+    monkeypatch.setattr(admx_parser, "find_admx_dir", lambda _path: pd_dir)
+    app = create_app(fixture_db, admx_dir=None if auto_detect else str(pd_dir))
+    assert app.state.admx is None
+    with TestClient(app, headers={"Authorization": "Bearer test-secret-token"}) as client:
+        for route in ["/", "/admx-coverage"]:
+            response = client.get(route)
+            assert response.status_code == 200
+            assert "ADMX templates could not be loaded" in response.text

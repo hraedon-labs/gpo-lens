@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from gpo_lens.admx_parser import TemplateFileSkip
 from gpo_lens.normalize import is_registry_cse
 
 if TYPE_CHECKING:
@@ -45,6 +46,7 @@ class AdmxCoverageSummary:
     referenced_policies: int  # policies referenced by >=1 GPO
     unreferenced_policies: int  # policies defined but not used
     gap_count: int  # estate Registry settings with no ADMX match
+    unreadable_file_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,7 @@ class AdmxCoverageReport:
     referenced: list[AdmxCoverageEntry] = field(default_factory=list)
     unreferenced: list[AdmxCoverageEntry] = field(default_factory=list)
     gaps: list[AdmxCoverageEntry] = field(default_factory=list)
+    skipped_files: list[TemplateFileSkip] = field(default_factory=list)
 
 
 def admx_coverage(
@@ -83,6 +86,7 @@ def admx_coverage(
         admx = _PD()
 
     policies = getattr(admx, "policies", [])
+    skipped_files = list(getattr(admx, "skipped_files", []))
 
     referenced: list[AdmxCoverageEntry] = []
     unreferenced: list[AdmxCoverageEntry] = []
@@ -172,10 +176,12 @@ def admx_coverage(
         referenced_policies=len(referenced),
         unreferenced_policies=len(unreferenced),
         gap_count=len(gaps),
+        unreadable_file_count=len(skipped_files),
     )
     return AdmxCoverageReport(
         summary=summary,
         referenced=referenced,
         unreferenced=unreferenced,
         gaps=gaps,
+        skipped_files=skipped_files,
     )

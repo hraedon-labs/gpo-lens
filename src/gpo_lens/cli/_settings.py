@@ -373,6 +373,7 @@ def cmd_admx_coverage(args: argparse.Namespace) -> None:
                 "referenced": [dataclasses.asdict(e) for e in report.referenced],
                 "unreferenced": [dataclasses.asdict(e) for e in report.unreferenced],
                 "gaps": [dataclasses.asdict(e) for e in report.gaps],
+                "skipped_files": [dataclasses.asdict(e) for e in report.skipped_files],
             }
         )
     else:
@@ -383,6 +384,10 @@ def cmd_admx_coverage(args: argparse.Namespace) -> None:
         print(f"  Referenced:     {s.referenced_policies}")
         print(f"  Unreferenced:   {s.unreferenced_policies}")
         print(f"  Gap settings:   {s.gap_count}")
+        if report.skipped_files:
+            print(f"  {s.unreadable_file_count} template files could not be read:")
+            for skipped in report.skipped_files:
+                print(f"    {skipped.filename}: {skipped.reason_class}")
         print()
         if report.gaps:
             print("--- Gap Settings (no ADMX match) ---")

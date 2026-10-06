@@ -158,6 +158,16 @@ def _get_admx(args: argparse.Namespace) -> PolicyDefinitions | None:
     """
     from gpo_lens.admx_parser import find_admx_dir, parse_admx_dir
 
+    def load(path: str | Path) -> PolicyDefinitions:
+        admx = parse_admx_dir(path)
+        if admx.skipped_files:
+            print(
+                f"Warning: {len(admx.skipped_files)} template files could not be read; "
+                "ADMX names and coverage may be incomplete.",
+                file=sys.stderr,
+            )
+        return admx
+
     admx_dir = getattr(args, "admx_dir", None)
     if admx_dir:
         if not Path(admx_dir).is_dir():
@@ -166,12 +176,12 @@ def _get_admx(args: argparse.Namespace) -> PolicyDefinitions | None:
                 file=sys.stderr,
             )
         else:
-            return parse_admx_dir(admx_dir)
+            return load(admx_dir)
 
     src = getattr(args, "src", None) or getattr(args, "sample_dir", None)
     if src:
         auto = find_admx_dir(src)
         if auto is not None:
-            return parse_admx_dir(auto)
+            return load(auto)
 
     return None

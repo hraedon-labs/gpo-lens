@@ -7,6 +7,10 @@ Unreleased until the release is dated and tagged.
 
 ### Fixed
 
+- **Resilient ADMX/ADML loading.** Decode BOMs and nonstandard XML encoding
+  declarations before protected parsing. Unreadable templates are isolated and
+  reported in CLI warnings and ADMX coverage; template loading failures leave
+  the web app available with a visible notice.
 - **Upgrade triage ordering (F-01).** Merge legacy approvals and Plan 024 events
   chronologically, with immutable event IDs as the stable tie-breaker. A newer
   withdrawal stays open after upgrade; inbox and accepted-risk folds agree.

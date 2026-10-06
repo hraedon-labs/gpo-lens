@@ -89,6 +89,9 @@
                 <span class="sep">/</span><span>Specialist view · existing bookmarks and filters retained</span>
             </nav>
             {% endif %}
+            {% if request.app.state.admx_notice %}
+            <p role="status">{{ request.app.state.admx_notice }}</p>
+            {% endif %}
             {% block content %}{% endblock %}
             {% include "explain_facts.html" %}
         </div>
