@@ -1,0 +1,10 @@
+# An allowlist: real exports, .git, local env files and credentials never enter
+# the build context. This Dockerfile-specific file overrides a root ignore file.
+**
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+!src/**
+**/__pycache__
+**/*.pyc

@@ -1,0 +1,22 @@
+{
+  "services": {
+    "proxy": {
+      "image": "caddy:2.11.2-alpine@sha256:834468128c7696cec0ceea6172f7d692daf645ae51983ca76e39da54a97c570d",
+      "network_mode": "host",
+      "user": "10001:10001",
+      "read_only": true,
+      "cap_drop": ["ALL"],
+      "cap_add": ["NET_BIND_SERVICE"],
+      "security_opt": ["no-new-privileges:true"],
+      "tmpfs": ["/tmp:rw,noexec,nosuid,nodev,size=16777216,mode=1777", "/config:rw,noexec,nosuid,nodev,size=16777216,mode=1777", "/data:rw,noexec,nosuid,nodev,size=16777216,mode=1777"],
+      "environment": {
+        "GPO_LENS_HOSTNAME": "${GPO_LENS_HOSTNAME:?Set the DNS name covered by the TLS certificate}",
+        "GPO_LENS_BASIC_USER": "${GPO_LENS_BASIC_USER:?Set a proxy login name}",
+        "GPO_LENS_BASIC_HASH": "${GPO_LENS_BASIC_HASH:?Set a Caddy password hash}"
+      },
+      "volumes": ["./Caddyfile:/etc/caddy/Caddyfile:ro", "./tls:/etc/caddy/tls:ro"],
+      "depends_on": {"app": {"condition": "service_healthy"}},
+      "restart": "unless-stopped"
+    }
+  }
+}
