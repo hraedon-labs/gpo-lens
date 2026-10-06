@@ -9,6 +9,7 @@ import sys
 import threading
 import uuid
 import zipfile
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -304,7 +305,9 @@ class _FileLock:
             self._thread_lock.release()
 
 
-def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None) -> FastAPI:
+def create_app(
+    db_path: str, *, root_path: str = "", admx_dir: str | Sequence[str] | None = None
+) -> FastAPI:
     app = FastAPI(root_path=root_path, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.db_path = db_path
     if db_path == ":memory:":
@@ -319,10 +322,20 @@ def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None
     app.state.admx = None
     app.state.admx_notice = ""
     try:
-        from gpo_lens.admx_parser import find_admx_dir, parse_admx_dir
+        from gpo_lens.admx_parser import (
+            admx_directories,
+            find_admx_dir,
+            parse_admx_dir,
+            parse_admx_dirs,
+        )
 
-        if admx_path and Path(admx_path).is_dir():
-            app.state.admx = parse_admx_dir(admx_path)
+        if admx_path:
+            directories = admx_directories(admx_path)
+            app.state.admx = parse_admx_dirs(directories)
+            if any(not p.is_dir() for p in directories):
+                app.state.admx_notice = (
+                    "An ADMX directory is unavailable; template coverage may be incomplete."
+                )
         else:
             auto = find_admx_dir(Path.cwd())
             if auto is None and db_path != ":memory:":
@@ -581,6 +594,7 @@ def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None
         conflicts,
         dashboard,
         delegation,
+        dependencies,
         explore,
         export,
         findings,
@@ -611,6 +625,7 @@ def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None
     golden.register(app, templates)
     findings.register(app, templates)
     explore.register(app, templates)
+    dependencies.register(app, templates)
     api.register(app, templates)
     page_narration.register(app, templates)
 

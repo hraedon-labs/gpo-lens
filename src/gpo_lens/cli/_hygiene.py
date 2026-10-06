@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from gpo_lens import queries
-from gpo_lens.cli._helpers import _get_estate, _print_table, _render_json
+from gpo_lens.cli._helpers import _get_admx, _get_estate, _print_table, _render_json
 from gpo_lens.cli._helpers import _safe_print as print
 from gpo_lens.detection import local_group_mods, mask_cpassword, scheduled_tasks
 
@@ -245,7 +245,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     from gpo_lens.narration import NarrationUnavailable, explain_findings
 
     estate = _get_estate(args)
-    findings = queries.estate_doctor(estate)
+    findings = queries.estate_doctor(estate, admx=_get_admx(args))
     findings_dicts = _doctor_findings_as_dicts(findings)
     explain = getattr(args, "explain", False)
 

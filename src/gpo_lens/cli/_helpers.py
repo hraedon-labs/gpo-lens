@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import builtins
 import json
+import os
 import sqlite3
 import sys
 from collections.abc import Sequence
@@ -26,9 +27,9 @@ DEFAULT_DB = "./gpo-lens.sqlite3"
 # Version of the machine-readable JSON output contract. Every `--json` payload
 # is wrapped in a self-describing envelope carrying this number so downstream
 # consumers can detect and adapt to contract evolution. Bump only on a
-# breaking change to a `data` shape; additive fields keep the same version.
+# breaking change to a `data` shape or meaning; additive fields keep the same version.
 # See docs/spec/json-contract.md for the frozen shapes.
-JSON_CONTRACT_VERSION = 1
+JSON_CONTRACT_VERSION = 2
 
 # The current subcommand name, set once per invocation by the CLI entrypoint
 # before dispatch. Used as the envelope `kind` so each payload is self-labelling.
@@ -150,16 +151,16 @@ def _get_admx(args: argparse.Namespace) -> PolicyDefinitions | None:
     """Resolve the ADMX resolver from CLI args or auto-detection.
 
     Priority:
-    1. ``--admx-dir`` if provided and valid
+    1. Repeatable ``--admx-dir`` or ``GPO_LENS_ADMX_DIR`` path list
     2. Auto-detect ``PolicyDefinitions`` in the export directory (``src``)
     3. ``None`` (no ADMX resolution)
 
     Prints a warning to stderr if ``--admx-dir`` is given but invalid.
     """
-    from gpo_lens.admx_parser import find_admx_dir, parse_admx_dir
+    from gpo_lens.admx_parser import admx_directories, find_admx_dir, parse_admx_dirs
 
-    def load(path: str | Path) -> PolicyDefinitions:
-        admx = parse_admx_dir(path)
+    def load(path: str | Path | list[Path]) -> PolicyDefinitions:
+        admx = parse_admx_dirs(path)
         if admx.skipped_files:
             print(
                 f"Warning: {len(admx.skipped_files)} template files could not be read; "
@@ -168,15 +169,19 @@ def _get_admx(args: argparse.Namespace) -> PolicyDefinitions | None:
             )
         return admx
 
-    admx_dir = getattr(args, "admx_dir", None)
+    admx_dir = getattr(args, "admx_dir", None) or os.environ.get("GPO_LENS_ADMX_DIR")
     if admx_dir:
-        if not Path(admx_dir).is_dir():
-            print(
-                f"Warning: --admx-dir not found or not a directory: {admx_dir}",
-                file=sys.stderr,
-            )
-        else:
-            return load(admx_dir)
+        valid = []
+        for directory in admx_directories(admx_dir):
+            if directory.is_dir():
+                valid.append(directory)
+            else:
+                print(
+                    f"Warning: --admx-dir not found or not a directory: {directory}",
+                    file=sys.stderr,
+                )
+        if valid:
+            return load(valid)
 
     src = getattr(args, "src", None) or getattr(args, "sample_dir", None)
     if src:

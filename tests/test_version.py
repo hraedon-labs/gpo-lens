@@ -24,7 +24,11 @@ def test_changelog_top_version_matches() -> None:
     # older released heading (which masked the v1.3 candidate's stale version).
     top = re.split(r"^## ", text, flags=re.MULTILINE)[1]
     if top.startswith("Unreleased"):
-        match = re.search(r"Draft \*\*v(\d+\.\d+\.\d+)\*\*", top)
+        match = re.search(r"Current package metadata: \*\*v(\d+\.\d+\.\d+)\*\*", top)
+        target = re.search(r"Draft \*\*v(\d+\.\d+\.\d+)\*\*", top)
+        assert target, "Unreleased section must declare its coordinated target"
+        if match is None:
+            match = target
     else:
         match = re.match(r"v(\d+\.\d+\.\d+)", top)
     assert match, "Top changelog section must declare a release target"

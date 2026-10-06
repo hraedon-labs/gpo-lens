@@ -30,6 +30,7 @@ CORE_MODULES: tuple[str, ...] = (
     "queries",
     "snapshot_diff",
     "detection",
+    "dependencies",
     "admx_parser",
     "display",
     "exports",

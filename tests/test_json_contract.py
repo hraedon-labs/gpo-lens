@@ -171,13 +171,54 @@ def test_settings_dump_shape(capsys, contract_db):
     )
 
 
-def test_broken_refs_shape(capsys, contract_db):
-    data = _payload(capsys, contract_db, "broken-refs")
-    assert isinstance(data, list) and data  # fixture has a broken UNC ref
+def test_contract_version_2():
+    assert JSON_CONTRACT_VERSION == 2
+
+
+def test_dependencies_shape(capsys, contract_db):
+    data = _payload(capsys, contract_db, "dependencies")
+    assert isinstance(data, list) and data
     _assert_keys(
         data[0],
-        {"gpo_id", "gpo_name", "ref_type", "ref_value", "detail"},
-        "broken-refs[]",
+        {"server", "shares", "dependency_count", "gpo_count", "gpo_ids", "dependencies"},
+        "dependencies[]",
+    )
+    _assert_keys(
+        data[0]["dependencies"][0],
+        {"gpo_id", "gpo_name", "side", "dependency_type", "server", "share", "target", "detail"},
+        "dependencies[].dependencies[]",
+    )
+
+
+def test_broken_refs_shape(capsys, contract_db):
+    # The fixture's external UNC is inventory now. Add an offline-verifiable
+    # malformed UNC to exercise the unchanged broken-reference row shape.
+    import sqlite3
+
+    from gpo_lens import store
+    from gpo_lens.model import Setting
+
+    assert _payload(capsys, contract_db, "broken-refs") == []
+    with sqlite3.connect(contract_db) as conn:
+        estate = store.load_estate(conn)
+        gpo = estate.gpos[0]
+        gpo.settings.append(
+            Setting(
+                gpo.id,
+                "User",
+                "Files",
+                "Lab malformed",
+                "Lab malformed",
+                r"\\lab-server",
+                {},
+                False,
+            )
+        )
+        store.save_estate(conn, estate)
+    data = _payload(capsys, contract_db, "broken-refs")
+    assert len(data) == 1 and data[0]["ref_type"] == "malformed_path"
+    _assert_keys(
+        data[0], {"gpo_id", "gpo_name", "ref_type", "ref_value", "detail"}, "broken-refs[]"
     )
 
 

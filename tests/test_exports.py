@@ -898,7 +898,7 @@ def test_ordinary_cli_commands_share_credential_projection(
     if as_json:
         import json
 
-        assert json.loads(output)["schema_version"] == 1
+        assert json.loads(output)["schema_version"] == 2
 
 
 def test_cli_event_export_masks_copied_credentials_without_changing_store(

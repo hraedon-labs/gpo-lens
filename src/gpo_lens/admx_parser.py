@@ -24,7 +24,9 @@ policy names.
 from __future__ import annotations
 
 import codecs
+import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from xml.etree.ElementTree import Element
@@ -198,6 +200,44 @@ def find_admx_dir(export_dir: str | Path) -> Path | None:
         except OSError:
             continue
     return None
+
+
+def admx_directories(value: str | Path | Sequence[str | Path]) -> list[Path]:
+    """Path lists use the host's os.pathsep; CLI lists retain literal paths."""
+    values = (
+        value.split(os.pathsep)
+        if isinstance(value, str)
+        else [value]
+        if isinstance(value, Path)
+        else value
+    )
+    return list(dict.fromkeys(Path(v) for v in values if str(v).strip()))
+
+
+def parse_admx_dirs(value: str | Path | Sequence[str | Path]) -> PolicyDefinitions:
+    """Merge catalogues in supplied order; the first matching policy wins.
+
+    Each directory resolves its own language resources. Identical policies are
+    deduplicated and skipped-file diagnostics identify their source directory.
+    No Microsoft's templates are bundled.
+    """
+    result = PolicyDefinitions()
+    seen: set[AdmxPolicy] = set()
+    directories = admx_directories(value)
+    for index, directory in enumerate(directories, 1):
+        parsed = parse_admx_dir(directory)
+        for policy in parsed.policies:
+            if policy not in seen:
+                seen.add(policy)
+                result.policies.append(policy)
+        result.skipped_files.extend(
+            TemplateFileSkip(
+                f"directory-{index}/{s.filename}" if len(directories) > 1 else s.filename,
+                s.reason_class,
+            )
+            for s in parsed.skipped_files
+        )
+    return result
 
 
 def parse_admx_dir(policy_defs_dir: str | Path) -> PolicyDefinitions:

@@ -1,9 +1,9 @@
 # Taking over a gpo-lens installation
 
 Start here if you've inherited a running gpo-lens and the person who set it up
-isn't around to ask. **Run v1.3.0 and upgrade older installations to v1.3.0**
-once the coordinator publishes that release. The release candidate is not a
-dated/tagged release yet. gpo-lens has two halves that are easy to forget about
+isn't around to ask. **Run v1.3.1 and upgrade older installations to v1.3.1.**
+v1.3.1 fixes the v1.3.0 regression that over-redacted broken-reference details.
+gpo-lens has two halves that are easy to forget about
 separately:
 
 - **Collection.** A PowerShell script, run on a DC or RSAT box, exports the
@@ -157,7 +157,7 @@ produces deterministic findings or exports.
 
 ## 6. Upgrading
 
-**Target v1.3.0. Back up first.** The upgrade suite covers releases since
+**Target v1.3.1. Back up first.** The upgrade suite covers releases since
 v0.5.0 with actual databases created by v0.5.0, v0.7.0, v0.7.1, v1.0.0,
 v1.1.0 and v1.2.0 (the released schema generations). This is the tested upgrade
 path from any release since v0.5.0; it is not a separate fixture for every patch
@@ -191,14 +191,14 @@ The steps below are for IIS. Alternatives:
 and [systemd upgrade/rollback](../deploy/systemd/README.md#upgrade-and-rollback).
 
 1. Read the [CHANGELOG](../CHANGELOG.md) entries between your version and the
-   target **v1.3.0**, once released. Releases are annotated git tags (`vX.Y.Z`).
+   target **v1.3.1**. Releases are annotated git tags (`vX.Y.Z`).
 2. Back up the database and `audit.log` (rule 3).
-3. In the server's checkout: `git fetch --tags` then `git checkout v1.3.0` (after the coordinator publishes the tag).
+3. In the server's checkout: `git fetch --tags` then `git checkout v1.3.1`.
 4. From an elevated PowerShell in that checkout:
    `.\scripts\install-windows.ps1 -ConfigureIIS`. It stops the pool, refreshes
    the venv using the committed hash-pinned requirements and the checkout
    with `--no-deps`, adds the host policy if missing, and restarts it.
-5. Confirm the header and `/api/version` show **1.3.0**, then run one ingest. Schema
+5. Confirm the header and `/api/version` show **1.3.1**, then run one ingest. Schema
    changes are additive and applied automatically when the database is opened.
 
 **To roll back**, stop the pool, restore the previous code/venv and the
@@ -225,3 +225,28 @@ with it; see [AGENTS.md](../AGENTS.md) for the module map and conventions.
 | What the collector exports and what permissions it needs | `scripts/Export-GpoEstate.ps1` (comment-based help: `Get-Help .\scripts\Export-GpoEstate.ps1 -Full`) |
 | The JSON output contract | [docs/spec/json-contract.md](spec/json-contract.md) |
 | The data model | [docs/tier1-normalized-model.md](tier1-normalized-model.md) |
+
+## Unreleased dependency and ADMX guidance
+
+The current release to run is **v1.3.1**, fixing the v1.3.0 regression that
+over-redacted broken-reference diagnostics. F2 adds **Explore → External
+dependencies** and `gpo-lens dependencies --server old-fs01 --json` for file/print
+server migration planning. Counts and targets describe configured paths, not
+reachability or application. The view has deterministic, authorized, redacted
+Markdown/CSV downloads. External paths no longer create doctor findings.
+
+Load central-store and Microsoft toolkit templates together with repeatable
+`--admx-dir` on ingest, doctor, ADMX queries, comparisons and serve, or
+`GPO_LENS_ADMX_DIR` (platform separator: `:` on Linux, `;` on Windows). Explicit
+flags replace the environment list. Each directory resolves its own ADML
+resources; the first matching policy wins. Obtain MSS-legacy and SecGuide from
+the [Security Compliance Toolkit](https://www.microsoft.com/en-us/download/details.aspx?id=55319);
+no Microsoft templates are vendored. Re-ingest after loading templates to
+refresh durable findings. ADMX gaps aggregate per GPO with counts and setting
+identities, while the raw gap query continues to return individual settings.
+
+JSON contract version 2 changes the meaning of broken-reference counts/rows and
+aggregates doctor ADMX findings. Old noise resolves only after a completed
+evaluation with meaningful coverage; history and triage remain available by
+occurrence ID. Aggregated ADMX findings require fresh review. High-severity
+dangers lead the default inbox and appear in briefing problems.
