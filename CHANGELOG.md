@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.3.1 — 2026-10-06
+
+### Fixed
+
+- **Broken-reference details.** Preserve descriptive GPP drive-mapping and
+  printer UNC locators in CLI, web and exports. Credential values remain
+  masked, and raw XML evidence remains omitted.
+
 ## v1.3.0 — 2026-10-06
 
 Draft **v1.3.0** — release date TBD by coordinator. This section remains
