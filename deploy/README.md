@@ -66,9 +66,10 @@ described in the [IIS guide](iis/README.md#optional-per-user-audit-attribution).
    generic archive command can store backslashes as literal Linux filenames,
    causing SYSVOL content to be missed. Keep the collector's ZIP unchanged.
    On Windows PowerShell 5.1, paths over 260 characters can be skipped. If the
-   collector warns about a **partial ZIP**, transfer the complete output folder
-   instead, or collect again under a shorter root (for example `C:\GpoExport`)
-   and confirm that the warning is gone before transferring the new ZIP.
+   collector encounters any file enumeration error, it fails with a clear error
+   and removes the **partial ZIP**. Collect again under a shorter `-OutputRoot`
+   (for example `C:\GpoExport`), or run with `-NoZip` and transfer the output folder.
+   Confirm that collection succeeds before transferring a new ZIP.
    Ingest a transferred folder on the server with
    `gpo-lens --db <server-db> ingest <transferred-folder>`, using the same
    database path as the running service.

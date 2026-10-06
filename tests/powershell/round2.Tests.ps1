@@ -114,4 +114,15 @@ Describe "Round 2 IIS upgrade regressions" {
         (Parse-BindingInformation "192.0.2.10:8443:").IP | Should -Be "192.0.2.10"
         (Parse-BindingInformation "[2001:db8::10]:9443:").IP | Should -Be "[2001:db8::10]"
     }
+    It "creates HTTPS when an existing site has no usable HTTPS binding: SNI=<Sni>" -ForEach @(@{Sni=$false}, @{Sni=$true}) {
+        Set-IisEndpoint -SiteName gpo-lens -Port 8443 -HostName lens.example -Sni $Sni -CertThumbprint ABCDEF -Existing $null
+        Should -Invoke New-WebBinding -Exactly 1
+        Should -Invoke Set-TlsCertBinding -Exactly 1
+    }
+    It "preserves a shared non-SNI certificate endpoint when one site switches to SNI" {
+        Mock Get-WebBinding { @([pscustomobject]@{protocol='https';bindingInformation='*:8443:other.example';sslFlags=0}) }
+        $old = @{Port='8443';Host='lens.example';Sni=$false;Cert='ABCDEF'}
+        Set-IisEndpoint -SiteName gpo-lens -Port 8443 -HostName lens.example -Sni $true -CertThumbprint ABCDEF -Existing $old
+        Should -Invoke netsh -Exactly 0
+    }
 }

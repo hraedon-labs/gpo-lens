@@ -18,7 +18,9 @@
     - principals.json        SID -> name map for all SIDs found in GPO SDDL (Plan 020)
     - group-members.json     group SID -> member SIDs (transitive expansion) (Plan 020-B)
     - SYSVOL-Policies\        raw SYSVOL policy files (settings + GPP XML)
-  Then zips the lot for handoff.
+  Then zips the lot for handoff. Any file enumeration error aborts ZIP creation
+  and removes the partial archive. Use a shorter -OutputRoot or transfer the
+  output folder with -NoZip.
 
   Performs no AD writes. Run on a Domain Controller or an RSAT management box.
 
@@ -52,6 +54,41 @@ param(
     [switch]$NoZip,
     [switch]$DryRun
 )
+
+function New-GpoExportZip {
+    param([string]$ExportPath)
+    # File-only entries with forward slashes preserve Linux directory traversal.
+    # PS 5.1 can skip paths over MAX_PATH, so any enumeration error fails closed.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+    $archive = "$ExportPath.zip"
+    try {
+        if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force -ErrorAction Stop }
+        $zipEnumErr = $null
+        $diskFiles = @(Get-ChildItem -LiteralPath $ExportPath -Recurse -File `
+            -ErrorAction SilentlyContinue -ErrorVariable +zipEnumErr)
+        if ($zipEnumErr) {
+            throw "$($zipEnumErr.Count) file enumeration error(s); the export cannot be archived completely."
+        }
+        $zip = [System.IO.Compression.ZipFile]::Open($archive, 'Create')
+        try {
+            $rootLen = $ExportPath.Length + 1
+            foreach ($f in $diskFiles) {
+                $entryName = $f.FullName.Substring($rootLen).Replace('\', '/')
+                [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                    $zip, $f.FullName, $entryName)
+            }
+        } finally {
+            $zip.Dispose()
+        }
+        Write-Host "Done: $archive ($($diskFiles.Count) files)"
+    } catch {
+        # Never leave a partial ZIP that could be mistaken for a complete export.
+        if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force -ErrorAction Stop }
+        throw ("ZIP creation failed: $($_.Exception.Message) " +
+            "The partial ZIP was removed. Use a shorter -OutputRoot (Windows PowerShell 5.1 can skip paths over 260 characters), " +
+            "or collect with -NoZip and transfer the folder: $ExportPath")
+    }
+}
 
 $ErrorActionPreference = 'Stop'
 
@@ -473,42 +510,5 @@ if ($failedSections.Count -gt 0) {
 }
 
 if (-not $NoZip) {
-    # NB: Windows PowerShell 5.1's Compress-Archive writes BACKSLASH path
-    # separators and directory entries that extract on Linux without the
-    # traversal (x) bit - which breaks ingest on a non-Windows analysis box.
-    # Build the archive by hand with forward-slash, file-only entries so it is
-    # portable regardless of the extractor.
-    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
-    try {
-        if (Test-Path -LiteralPath "$out.zip") { Remove-Item -LiteralPath "$out.zip" -Force }
-        # Windows PowerShell 5.1's Get-ChildItem -Recurse SILENTLY skips paths
-        # over MAX_PATH (260 chars) - exactly the deep SYSVOL/GPP trees - which
-        # can drop whole subtrees from the archive while the run still reports
-        # "Done". Capture enumeration errors and reconcile the zipped count
-        # against the on-disk count so a partial archive is loud, not silent.
-        $zipEnumErr = $null
-        $diskFiles = @(Get-ChildItem -LiteralPath $out -Recurse -File `
-            -ErrorAction SilentlyContinue -ErrorVariable +zipEnumErr)
-        $zipped = 0
-        $zip = [System.IO.Compression.ZipFile]::Open("$out.zip", 'Create')
-        try {
-            $rootLen = $out.Length + 1
-            foreach ($f in $diskFiles) {
-                $entryName = $f.FullName.Substring($rootLen).Replace('\', '/')
-                [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
-                    $zip, $f.FullName, $entryName)
-                $zipped++
-            }
-        } finally {
-            $zip.Dispose()
-        }
-        Write-Host "Done: $out.zip ($zipped files)"
-        if ($zipEnumErr) {
-            Write-Warning ("$($zipEnumErr.Count) path(s) could not be enumerated " +
-                "(likely >260 chars) and are MISSING from the archive. Send the " +
-                "folder instead, or re-run from a shorter -OutputRoot: $out")
-        }
-    } catch {
-        Write-Warning "Zip failed ($($_.Exception.Message)). Send the folder instead: $out"
-    }
+    New-GpoExportZip -ExportPath $out
 }

@@ -286,10 +286,11 @@ function Set-SniBinding {
         [string]$Port,
         [string]$HostName,
         [bool]$Sni,
-        [hashtable]$Existing
+        [hashtable]$Existing,
+        [bool]$BindingAlreadyCreated = $false
     )
     # Fresh non-SNI sites already have a binding from New-Item below.
-    if (-not $Existing -and -not $Sni) { return }
+    if (-not $Existing -and -not $Sni -and $BindingAlreadyCreated) { return }
     if (-not (Test-BindingChanged -Existing $Existing -EffectivePort $Port -EffectiveHost $HostName -EffectiveSni $Sni)) {
         Write-Host "  Site binding already configured; preserving."
         return
@@ -407,13 +408,14 @@ function Set-IisEndpoint {
         [string]$HostName,
         [bool]$Sni,
         [string]$CertThumbprint,
-        [hashtable]$Existing
+        [hashtable]$Existing,
+        [bool]$BindingAlreadyCreated = $false
     )
     $changed = Test-BindingChanged -Existing $Existing -EffectivePort $Port -EffectiveHost $HostName -EffectiveSni $Sni
     $ip = if ($Existing -and $Existing.IP) { "$($Existing.IP)" } else { "*" }
     $currentCert = if ($Existing) { "$($Existing.Cert)" } else { "" }
     if (-not $CertThumbprint) {
-        Set-SniBinding -SiteName $SiteName -Port $Port -HostName $HostName -Sni $Sni -Existing $Existing
+        Set-SniBinding -SiteName $SiteName -Port $Port -HostName $HostName -Sni $Sni -Existing $Existing -BindingAlreadyCreated $BindingAlreadyCreated
         Write-Warning "No TLS certificate configured. Assign one with -TlsCertThumbprint."
         return
     }
@@ -427,7 +429,7 @@ function Set-IisEndpoint {
         ("$($Existing.Port)" -eq "$Port") -and (-not $Sni -or "$($Existing.Host)" -eq "$HostName")
     $tlsStarted = $false
     try {
-        Set-SniBinding -SiteName $SiteName -Port $Port -HostName $HostName -Sni $Sni -Existing $Existing
+        Set-SniBinding -SiteName $SiteName -Port $Port -HostName $HostName -Sni $Sni -Existing $Existing -BindingAlreadyCreated $BindingAlreadyCreated
         $tlsStarted = $true
         Set-TlsCertBinding -CertThumbprint $CertThumbprint -Port $Port -HostName $HostName -Sni $Sni -IPAddress $ip
     } catch {
@@ -526,6 +528,19 @@ function Set-IisAllowedHosts {
         if (Test-Path $temporary) { Remove-Item $temporary -Force }
     }
     Write-Host "  Added GPO_LENS_ALLOWED_HOSTS=$AllowedHosts (other web.config settings preserved)."
+}
+
+function Write-InstallEstateMessage {
+    param([string]$InstallDir)
+    $database = Join-Path $InstallDir "gpo-lens.sqlite3"
+    if (Test-Path -LiteralPath $database -PathType Leaf) {
+        Write-Host "The existing database was kept and migrates automatically on first use."
+        Write-Host "Back up before first use of the upgrade. See the backup section:"
+        Write-Host "https://github.com/hraedon-labs/gpo-lens/blob/main/deploy/README.md#backup-restore-and-upgrade-rules"
+    } else {
+        Write-Host "The estate starts empty -- open the site and use Ingest to upload a"
+        Write-Host "collector export, or copy a gpo-lens.sqlite3 into the data dir."
+    }
 }
 
 # Guard: only run the main installation body when executed directly. Dot-sourcing
@@ -1013,7 +1028,7 @@ if ($ConfigureIIS) {
 
         # Compare the whole endpoint and certificate together. A plain upgrade
         # keeps both, while explicit port/host/SNI edits rebind a preserved cert.
-        Set-IisEndpoint -SiteName $siteName -Port $effPort -HostName $effHost -Sni $effSni -CertThumbprint $effCert -Existing $existing
+        Set-IisEndpoint -SiteName $siteName -Port $effPort -HostName $effHost -Sni $effSni -CertThumbprint $effCert -Existing $existing -BindingAlreadyCreated (-not [bool]$existingSite)
 
 
         # Merge the host policy after bindings are effective; preserve an operator's value.
@@ -1105,8 +1120,7 @@ if ($script:iisActuallyConfigured) {
     Write-Host "Browse: https://$hn`:$epPort/"
 }
 Write-Host ""
-Write-Host "The estate starts empty -- open the site and use Ingest to upload a"
-Write-Host "collector export, or copy a gpo-lens.sqlite3 into the data dir."
+Write-InstallEstateMessage -InstallDir $InstallDir
 Write-Host ""
 Write-Host "ACCESS CONTROL: gpo-lens has no per-user login. Behind IIS every caller"
 Write-Host "is treated as the trusted local analyst. Restrict the site at the IIS"

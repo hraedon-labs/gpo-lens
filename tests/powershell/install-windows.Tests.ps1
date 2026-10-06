@@ -391,7 +391,7 @@ Describe "install-windows.ps1" {
         It "does nothing when Sni is `$false" {
             Mock Clear-WebBinding { }
             Mock New-WebBinding { }
-            Set-SniBinding -SiteName "gpo-lens" -Port "8443" -HostName "" -Sni $false -Existing $null
+            Set-SniBinding -SiteName "gpo-lens" -Port "8443" -HostName "" -Sni $false -Existing $null -BindingAlreadyCreated $true
             Should -Invoke Clear-WebBinding -Exactly 0
             Should -Invoke New-WebBinding -Exactly 0
         }

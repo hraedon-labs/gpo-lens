@@ -13,6 +13,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from gpo_lens.exports import snapshot_secrets
 from gpo_lens.findings import (
     accepted_risk_register,
     finding_inbox,
@@ -22,6 +23,7 @@ from gpo_lens.findings import (
     load_triage_status_map,
 )
 from gpo_lens.ingest import load_estate
+from gpo_lens.model import Setting
 from gpo_lens.safe_output import REDACTED, safe_data, secret_values
 from gpo_lens.store import init_db, save_estate
 from gpo_lens.web.allowed_hosts import HostAllowListMiddleware
@@ -71,6 +73,8 @@ def test_glv1_triage_edges(tmp_path, legacy_time, reopen_time, action):
                 if r.occurrence_id == 2
             )
             assert risk.is_expired if action == "risk_acceptance_expired" else risk.revoked_at
+            if action != "risk_acceptance_expired":
+                assert risk.revoked_by == "lab-reviewer"
             assert all(
                 row in conn.execute("SELECT * FROM finding_triage_event").fetchall()
                 for row in original
@@ -87,6 +91,9 @@ COMMANDS = [
     ("cmdkey.exe", "/add:lab /user:svc /pass:", '"SYNTH CMDKEY SECRET"'),
     ("powershell.exe", "-Password", "'SYNTH POWERSHELL SECRET'"),
     ("pwsh.exe", "-ProxyPassword:", "SYNTH-PROXY-SECRET"),
+    (r"C:\Windows\System32\schtasks.exe", "/Query /S lens /P", "SYNTH-TASK-SECRET"),
+    (r"C:\Program Files\PowerShell\7\pwsh.exe", "-Password", '"SYNTH TASK SECRET"'),
+    ("pwsh", "-ProxyPassword", "'SYNTH TASK SECRET'"),
 ]
 
 
@@ -103,6 +110,44 @@ def test_task_command_secrets_and_copied_evidence(command, switch, quoted):
     # Collector XML has a different shape from the structured scanner result.
     raw = {"tag": "Properties", "@attr": {"appName": command, "arguments": args}}
     assert secret in secret_values({"raw": raw})
+    # Persisted setting projections must carry the same discovered credentials.
+    estate = load_estate(FIXTURES)
+    estate.gpos[0].settings.append(
+        Setting(
+            estate.gpos[0].id,
+            "Computer",
+            "Scheduled Tasks",
+            "task",
+            "Task",
+            command + " " + args,
+            raw,
+            False,
+        )
+    )
+    with sqlite3.connect(":memory:") as conn:
+        init_db(conn)
+        sid = save_estate(conn, estate)
+        secrets = snapshot_secrets(conn, [sid])
+        assert secret in secrets
+        assert safe_data({"summary": "Copied " + secret}, secrets=secrets)["summary"] == (
+            "Copied " + REDACTED
+        )
+
+
+@pytest.mark.parametrize(
+    ("command", "arguments", "secret"),
+    [
+        ("schtasks.exe", r'/RP "SYNTH \"QUOTE\" SECRET"', 'SYNTH "QUOTE" SECRET'),
+        ("pwsh.exe", '-Password "SYNTH `"QUOTE`" SECRET"', 'SYNTH "QUOTE" SECRET'),
+        ("powershell.exe", "-Password 'SYNTH ''QUOTE'' SECRET'", "SYNTH 'QUOTE' SECRET"),
+    ],
+)
+def test_escaped_task_passwords_and_decoded_copies(command, arguments, secret):
+    task = {"command": command, "arguments": arguments}
+    assert secret in secret_values(task)
+    projected = safe_data({"task": task, "evidence": secret})
+    assert projected["evidence"] == REDACTED
+    assert "QUOTE" not in projected["task"]["arguments"]
 
 
 @pytest.mark.parametrize(("command", "switch", "quoted"), COMMANDS)

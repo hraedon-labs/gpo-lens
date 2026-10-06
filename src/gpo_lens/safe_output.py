@@ -154,12 +154,25 @@ def _command_secrets(mapping: Mapping[str, Any]) -> tuple[str, ...]:
     option = _COMMAND_OPTIONS.get(executable)
     if option is None:
         return ()
-    pattern = rf"""(?i)(?:^|\s){option}(?:\s*[:=]\s*|\s+)(?:"([^"]*)"|'([^']*)'|([^\s]+))"""
-    return tuple(
-        value
-        for match in re.finditer(pattern, arguments)
-        if (value := next((g for g in match.groups() if g is not None), ""))
+    pattern = (
+        rf"(?i)(?:^|\s){option}(?:\s*[:=]\s*|\s+)"
+        r"""(?:"((?:\\.|`.|""|[^"\\`])*)"|'((?:''|[^'])*)'|([^\s]+))"""
     )
+    values: set[str] = set()
+    for match in re.finditer(pattern, arguments):
+        double, single, bare = match.groups()
+        value = next((g for g in match.groups() if g is not None), "")
+        if not value:
+            continue
+        # Keep the source spelling as well as the decoded value: arguments and
+        # copied evidence can contain different representations of a password.
+        values.add(value)
+        if double is not None:
+            decoded = re.sub(r'\\(["\\])|`(.)|""', lambda m: m[1] or m[2] or '"', double)
+            values.add(decoded)
+        elif single is not None:
+            values.add(single.replace("''", "'"))
+    return tuple(sorted(values))
 
 
 def secret_values(value: object) -> tuple[str, ...]:
