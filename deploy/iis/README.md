@@ -107,6 +107,13 @@ letters are not available in noninteractive tasks. Use a separate root for
 each task/account; never point retention at a shared archive root. Linked output
 roots and reparse points anywhere within a folder to be pruned are rejected.
 Protect the output tree from other writers; pre-deletion checks require that ACL boundary.
+The task-ownership marker (`.gpo-lens-collection-owner`) prevents two tasks
+from accidentally sharing a root; it is not a security boundary against
+someone who can already write to that root or its parent. Registration never
+writes through an existing marker (it unlinks it and creates a new file) and
+refuses linked markers. Make the output root **and its parent folders**
+writable only by administrators and the collector account, because a writer
+there could race path checks during elevated registration.
 
 For a gMSA, provision it through your normal AD administration process, install
 it on the collector host and verify `Test-ADServiceAccount collector` returns

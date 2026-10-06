@@ -3,7 +3,7 @@
 import json
 import re
 from pathlib import Path
-from urllib.parse import quote, quote_plus
+from urllib.parse import quote
 
 import pytest
 
@@ -55,19 +55,42 @@ def _unicode_escape(secret, upper=False):
     )
 
 
+def _alternate_hex_case(escaped):
+    # Alternate the case of hex letters across escapes, e.g. a%C3%a9 / \uD83D\ude00.
+    count = 0
+
+    def flip(m):
+        nonlocal count
+        count += 1
+        prefix, digits = (m[0][:1], m[0][1:]) if m[0][0] == "%" else (m[0][:2], m[0][2:])
+        return prefix + (digits.upper() if count % 2 else digits.lower())
+
+    return re.sub(r"%[0-9A-Fa-f]{2}|\\u[0-9A-Fa-f]{4}", flip, escaped)
+
+
 @pytest.mark.parametrize("secret", ["a@", 'a"', "a b", "long secret", "0", "aé", "a😀"])
 @pytest.mark.parametrize(
-    "encoding", ["percent_upper", "percent_lower", "plus", "json", "unicode", "unicode_upper"]
+    "encoding",
+    [
+        "percent_upper",
+        "percent_lower",
+        "percent_mixed",
+        "json",
+        "unicode",
+        "unicode_upper",
+        "unicode_mixed",
+    ],
 )
 def test_discovered_secret_encoded_copies_are_masked(secret, encoding):
     percent = quote(secret, safe="")
     encoded = {
         "percent_upper": percent,
         "percent_lower": re.sub(r"%[0-9A-F]{2}", lambda m: m[0].lower(), percent),
-        "plus": quote_plus(secret, safe=""),
+        "percent_mixed": _alternate_hex_case(percent),
         "json": json.dumps(secret)[1:-1],
         "unicode": _unicode_escape(secret),
         "unicode_upper": _unicode_escape(secret, upper=True),
+        "unicode_mixed": _alternate_hex_case(_unicode_escape(secret)),
     }[encoding]
     projected = safe_data({"password": secret, "copy": "copy=" + encoded})
     assert projected == {"password": REDACTED, "copy": "copy=" + REDACTED}
@@ -76,6 +99,18 @@ def test_discovered_secret_encoded_copies_are_masked(secret, encoding):
         # Every encoded spelling inherits the original secret's token boundary.
         identifier = "id-" + encoded + "-end"
         assert safe_text(identifier, secrets=[secret]) == identifier
+
+
+def test_secret_with_space_does_not_mask_unrelated_plus_text():
+    # Form-encoding is not a masking variant: 'a+b' is unrelated arithmetic.
+    projected = safe_data({"password": "a b", "note": "Equation: a+b = c"})
+    assert projected == {"password": REDACTED, "note": "Equation: a+b = c"}
+
+
+def test_secret_with_isolated_surrogate_projects_without_error():
+    secret = json.loads('"x\\ud800y"')
+    projected = safe_data({"password": secret, "copy": "copy=" + secret})
+    assert projected == {"password": REDACTED, "copy": "copy=" + REDACTED}
 
 
 @pytest.mark.parametrize("document", ["CHANGELOG.md", "docs/handover.md"])

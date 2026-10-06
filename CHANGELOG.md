@@ -57,7 +57,11 @@ Draft **v1.4.0** — release date to be assigned by the coordinator.
   keys, while exact aggregate count fields and table headers remain visible.
   Short and numeric copies use token boundaries so they cannot corrupt dates,
   identifiers or larger counts; longer nonnumeric copies still mask substrings.
-  Escaped copies retain the original secret's boundary policy.
+  Escaped copies retain the original secret's boundary policy. Percent-encoded
+  and JSON/Unicode-escaped copies are masked with case-insensitive hex digits;
+  form-encoded (`+` for space) copies are not, so unrelated text such as
+  `a+b` is never masked. Copies already escaped in source data for a later
+  renderer are out of scope; secret-keyed fields are always redacted by key.
 - Snapshot import and required finding evaluation now commit atomically. On
   failure CLI exits nonzero and web returns an error; nothing is imported and
   no success audit is emitted. This also affected v1.3.1.

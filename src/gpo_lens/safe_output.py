@@ -13,7 +13,7 @@ import json
 import re
 from collections.abc import Iterable, Mapping
 from typing import Any
-from urllib.parse import quote, quote_plus, unquote
+from urllib.parse import quote, unquote
 
 from gpo_lens.display import serialize_result
 
@@ -272,32 +272,47 @@ def _sensitive(mapping: Mapping[str, Any]) -> bool:
     return bool(_registry_payload(mapping))
 
 
-def _secret_variants(secrets: Iterable[str]) -> tuple[tuple[str, bool], ...]:
+def _variant_pattern(variant: str) -> str:
+    # Hex digits in %XX and \\uXXXX escapes are case-insensitive; literal
+    # characters are not, so a differently-cased non-secret is never masked.
+    def hex_digits(digits: str) -> str:
+        return "".join(f"[{d.lower()}{d.upper()}]" if d.isalpha() else d for d in digits)
+
+    parts: list[str] = []
+    for m in re.finditer(r"%([0-9A-Fa-f]{2})|\\u([0-9A-Fa-f]{4})|(.)", variant, re.DOTALL):
+        if m[1] is not None:
+            parts.append("%" + hex_digits(m[1]))
+        elif m[2] is not None:
+            parts.append(r"\\u" + hex_digits(m[2]))
+        else:
+            parts.append(re.escape(m[3]))
+    return "".join(parts)
+
+
+def _secret_variants(secrets: Iterable[str]) -> tuple[tuple[re.Pattern[str], bool], ...]:
     # Older report generators escape at their own render boundary. Include
     # those known renderings so output files and stdout cannot reveal an
     # entity-encoded copy of a credential. Structured views mask before render.
+    # Form-encoding ('+' for space) is deliberately absent: it would mask
+    # unrelated text such as 'a+b' for a secret 'a b'; '%20' is covered.
+    # Copies already escaped in the source data for a later renderer
+    # (Markdown backslashes, CSV-doubled quotes, double HTML entities) are
+    # out of scope: secret-keyed fields are always redacted by key.
     variants: dict[str, bool] = {}
     for secret in secrets:
         substring_mask = len(secret) >= 6 and not secret.isnumeric()
-        percent = quote(secret, safe="")
-        plus = quote_plus(secret, safe="")
+        utf8 = secret.encode("utf-8", errors="surrogatepass")
+        percent = quote(utf8, safe="")
         utf16 = secret.encode("utf-16-be", errors="surrogatepass")
-        unicode_lower = "".join(
+        unicode_escaped = "".join(
             rf"\u{int.from_bytes(utf16[i : i + 2], 'big'):04x}" for i in range(0, len(utf16), 2)
-        )
-        unicode_upper = "".join(
-            rf"\u{int.from_bytes(utf16[i : i + 2], 'big'):04X}" for i in range(0, len(utf16), 2)
         )
         for variant in {
             secret,
             percent,
-            re.sub(r"%[0-9A-F]{2}", lambda m: m[0].lower(), percent),
-            plus,
-            re.sub(r"%[0-9A-F]{2}", lambda m: m[0].lower(), plus),
             json.dumps(secret, ensure_ascii=True)[1:-1],
             json.dumps(secret, ensure_ascii=False)[1:-1],
-            unicode_lower,
-            unicode_upper,
+            unicode_escaped,
             html.escape(secret),
             html.escape(secret, quote=False),
             secret.replace("`", "&#96;"),
@@ -308,19 +323,27 @@ def _secret_variants(secrets: Iterable[str]) -> tuple[tuple[str, bool], ...]:
                 # A real long credential can equal a short one's escaped form.
                 # In that ambiguous case the long credential must stay masked.
                 variants[variant] = variants.get(variant, False) or substring_mask
-    return tuple(sorted(variants.items(), key=lambda item: (-len(item[0]), item[0])))
+    ordered = sorted(variants.items(), key=lambda item: (-len(item[0]), item[0]))
+    return tuple(
+        (
+            re.compile(
+                _variant_pattern(variant)
+                if substring_mask
+                else r"(?<![\w.-])" + _variant_pattern(variant) + r"(?![\w.-])"
+            ),
+            substring_mask,
+        )
+        for variant, substring_mask in ordered
+    )
 
 
-def _mask_text(value: str, variants: tuple[tuple[str, bool], ...]) -> str:
-    for secret, substring_mask in variants:
-        if substring_mask:
-            value = value.replace(secret, REDACTED)
-        else:
-            # Short/numeric credentials still mask standalone copies (WI-101),
-            # but never substrings of dates, GUIDs, counts or policy names.
-            # Treat '-' and '.' as part of a token to preserve identifiers and
-            # decimal values too. Credential keys are redacted independently.
-            value = re.sub(r"(?<![\w.-])" + re.escape(secret) + r"(?![\w.-])", REDACTED, value)
+def _mask_text(value: str, variants: tuple[tuple[re.Pattern[str], bool], ...]) -> str:
+    # Short/numeric credentials still mask standalone copies (WI-101), but
+    # never substrings of dates, GUIDs, counts or policy names: their patterns
+    # carry token boundaries that treat '-' and '.' as part of a token.
+    # Credential keys are redacted independently.
+    for pattern, _substring_mask in variants:
+        value = pattern.sub(REDACTED, value)
     return _ASSIGNMENT.sub(lambda m: m[1] + "=" + REDACTED, value)
 
 

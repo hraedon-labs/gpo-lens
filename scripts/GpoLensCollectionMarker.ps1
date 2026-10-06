@@ -46,9 +46,13 @@ namespace GpoLens {
             }
             $links = [GpoLens.MarkerFileInfo]::LinkCount($stream.SafeFileHandle)
         } else {
-            # GNU stat (Linux); BSD stat uses -f instead. Never trust a failed check.
-            $count = & stat --format=%h -- $Marker 2>$null
-            if ($LASTEXITCODE -ne 0) { $count = & stat -f %l $Marker 2>$null }
+            # Non-Windows exists for the Linux test suite; the scripts are supported
+            # on Windows only. Stat the inode already open on this stream (via
+            # /proc), never the path, so a substituted directory entry cannot pass.
+            $fd = $stream.SafeFileHandle.DangerousGetHandle().ToInt64()
+            $opened = "/proc/$PID/fd/$fd"
+            if (-not (Test-Path -LiteralPath $opened)) { throw 'Cannot verify owner marker link count.' }
+            $count = & stat -L --format=%h -- $opened 2>$null
             $links = 0
             if ($LASTEXITCODE -ne 0 -or -not [uint32]::TryParse([string]$count, [ref]$links)) {
                 throw 'Cannot verify owner marker link count.'
