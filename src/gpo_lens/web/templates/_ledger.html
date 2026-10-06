@@ -53,6 +53,9 @@
                 <table class="gp-kv">
                   <tbody>
                     <tr><th>Identity</th><td class="mono"><a href="{{ url_for('setting_detail') }}?identity={{ row.identity|urlencode }}&amp;cse={{ row.cse|urlencode }}&amp;side={{ row.side|urlencode }}{% if request.query_params.get('snapshot') %}&amp;snapshot={{ request.query_params.get('snapshot')|urlencode }}{% endif %}">{{ row.identity }}</a></td></tr>
+                    {% if row.source_note %}
+                    <tr><th>Source note</th><td>{{ row.source_note }}</td></tr>
+                    {% endif %}
                     {% if row.reg_key %}
                     <tr><th>Registry key</th><td class="mono">{{ row.reg_key }}</td></tr>
                     {% endif %}
@@ -79,6 +82,7 @@
           <td>{{ row.display_value }}</td>
           <td>
             {% if row.source_state == "blocked" %}<span class="gp-chip warn" title="Blocked extension">blocked</span>
+            {% elif row.source_state == "legacy_deprecated" %}<span class="gp-chip low" title="Legacy, deprecated extension">legacy</span>
             {% elif row.from_disabled_side %}<span class="gp-chip warn" title="Disabled side">disabled</span>
             {% else %}<span class="muted">—</span>{% endif %}
           </td>

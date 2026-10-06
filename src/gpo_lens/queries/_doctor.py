@@ -82,6 +82,40 @@ def estate_doctor(
     """
     findings: list[DoctorFinding] = []
 
+    for gpo in estate.gpos:
+        legacy_reported = False
+        for setting in gpo.settings:
+            note = str(setting.raw.get("source_note") or "")
+            category = ""
+            if setting.raw.get("cse_parser") == "legacy_deprecated" and not legacy_reported:
+                category = "legacy_extension"
+                legacy_reported = True
+            elif setting.raw.get("audit_disagreement"):
+                category = "audit_source_disagreement"
+            elif setting.cse == "Advanced Audit Configuration" and note:
+                category = "audit_parse_warning"
+            elif setting.cse == "Public Key" and note:
+                category = "pki_parse_warning"
+            if category:
+                evidence_kind = (
+                    "Public Key" if category == "pki_parse_warning" else "Advanced audit"
+                )
+                findings.append(
+                    DoctorFinding(
+                        severity="info" if category == "legacy_extension" else "low",
+                        category=category,
+                        gpo_id=gpo.id,
+                        gpo_name=gpo.name,
+                        summary="Legacy, deprecated Internet Explorer Maintenance extension"
+                        if category == "legacy_extension"
+                        else f"{evidence_kind} evidence: {setting.display_name}",
+                        detail=note,
+                        dimensions=()
+                        if category == "legacy_extension"
+                        else (("side", setting.side), ("identity", setting.identity)),
+                    )
+                )
+
     _COVERAGE_SUMMARY = {
         "inaccessible": "GPO could not be collected — estate analysis is incomplete",
         "missing_sysvol": ("No SYSVOL collected — GPP/cPassword detectors are BLIND, not clean"),
