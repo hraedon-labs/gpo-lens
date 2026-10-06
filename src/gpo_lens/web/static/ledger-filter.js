@@ -13,6 +13,11 @@
 
   function filter() {
     var q = input.value.toLowerCase().trim();
+    document.querySelectorAll("[data-ledger-export]").forEach(function (link) {
+      var url = new URL(link.href);
+      url.searchParams.set("ledger_q", input.value.trim());
+      link.href = url.toString();
+    });
     var visible = 0;
     rows.forEach(function (row) {
       var hay = row.getAttribute("data-ledger-search") || "";

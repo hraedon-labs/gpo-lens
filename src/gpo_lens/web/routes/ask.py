@@ -23,6 +23,7 @@ from gpo_lens.query_dispatch import (
     dispatch_query,
     validate_params,
 )
+from gpo_lens.safe_output import safe_data, secret_values
 from gpo_lens.web._helpers import get_ro_conn, get_rw_conn, sanitize_question
 from gpo_lens.web.auth import Permission, Principal, requires
 from gpo_lens.web.page_narration import make_action
@@ -113,7 +114,11 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                                 )
                                 for hit in hits
                             ]
-                        serialized = serialize_result(query_result)
+                        serialized = (
+                            serialize_result(query_result)
+                            if query_name == "cpassword_scan"
+                            else safe_data(query_result, secrets=secret_values(estate.gpos))
+                        )
                         # Routing sees the user's question, never estate evidence.
                         # Deterministic results render immediately after routing;
                         # optional narration is a separate checked page action.

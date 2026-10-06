@@ -13,7 +13,7 @@ import csv
 import io
 import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
@@ -421,8 +421,12 @@ def json_attachment(payload: object, filename: str) -> Response:
 
 
 def setting_label(s: object, admx: AdmxResolver | None) -> tuple[str, str]:
-    identity = getattr(s, "identity", "")
-    display_name = getattr(s, "display_name", identity) or identity
+    if isinstance(s, Mapping):
+        identity = s.get("identity", "")
+        display_name = s.get("display_name", identity) or identity
+    else:
+        identity = getattr(s, "identity", "")
+        display_name = getattr(s, "display_name", identity) or identity
     if admx is not None:
         name = admx.resolve_display_name(identity)
         if name:

@@ -1511,13 +1511,17 @@ class TestExport:
         assert resp.headers["content-type"].split(";")[0] == "text/csv"
         assert "attachment" in resp.headers["content-disposition"]
         assert "gpo-lens-findings.csv" in resp.headers["content-disposition"]
-        assert resp.text.startswith("severity,category,gpo_id,gpo_name,summary,detail")
-        assert "gpo-cpassword" in resp.text
+        assert resp.text.startswith("section,record,field,value")
+        assert "snapshot_ids" in resp.text
+        assert resp.content == client.get("/findings?format=csv").content
 
     def test_export_findings_csv_row_count(self, client) -> None:
         resp = client.get("/export/findings?format=csv")
         rows = list(csv.reader(io.StringIO(resp.text)))
-        assert len(rows) == 25  # header + 24 findings
+        assert rows[0] == ["section", "record", "field", "value"]
+        # This fixture has no lifecycle evaluation; the inbox does not invent one.
+        assert all(row[0] == "metadata" for row in rows[1:])
+        assert "No evaluation provenance recorded" in resp.text
 
     def test_export_findings_csv_sanitizes_formula_cells(self, client) -> None:
         # CSV injection (CWE-1236): cells starting with = + - @ trigger formula
@@ -1574,10 +1578,11 @@ class TestExport:
         resp = client.get("/export/gpo/00000000000000000000000000000000?format=json")
         assert resp.status_code == 404
 
-    def test_export_gpo_rejects_csv(self, client) -> None:
-        # GPO is a nested object — JSON only. CSV is explicitly unsupported.
+    def test_export_gpo_supports_csv(self, client) -> None:
+        # Human downloads now mirror the dossier, preserving its filters.
         resp = client.get("/export/gpo/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?format=csv")
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        assert "settings_ledger" in resp.text
 
     def test_export_ou_csv(self, client) -> None:
         resp = client.get("/export/ou/dc=fakefixture,dc=local?format=csv")

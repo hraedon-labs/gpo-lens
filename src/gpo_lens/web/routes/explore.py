@@ -111,6 +111,11 @@ TOOLS_SECTIONS: tuple[DirectorySection, ...] = (
             Destination("changelog", "History", "Compare snapshots and inspect setting changes."),
             Destination("trends", "Trends", "Posture over stored snapshots."),
             Destination(
+                "accepted_risks",
+                "Accepted-risk register",
+                "Inspect local risk decisions and download the filtered register.",
+            ),
+            Destination(
                 "route_reference",
                 "Route reference",
                 "Every retained page, export, operation and API, with its specialist home.",
@@ -245,7 +250,10 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             path = getattr(route, "path", "")
             methods = ", ".join(sorted(getattr(route, "methods", {"MOUNT"})))
             section, _ = section_for_path(path)
-            if "{" not in path and "GET" in methods:
+            if path == "/setting":
+                # An exact identity is required; choose it through search/ledgers.
+                href = request.scope.get("root_path", "") + str(app.url_path_for("search"))
+            elif "{" not in path and "GET" in methods:
                 href = request.scope.get("root_path", "") + path
             else:
                 owner = "gpo_list" if "/gpo/" in path else "ou_list" if "/ou/" in path else section

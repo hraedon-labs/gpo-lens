@@ -80,3 +80,22 @@ def work_estate(tmp_path_factory):
 def lab_estate(tmp_path_factory):
     """lab.example.com — the clean lab domain."""
     return _estate("lab", "LABDOMAIN", "lab", tmp_path_factory)
+
+
+@pytest.fixture(scope="session")
+def secret_corpus():
+    """One corpus for HTML/CSV/Markdown/API/narration secret tests.
+
+    Reuse the established synthetic cpassword carriers, including the golden
+    estate; add a synthetic plaintext credential to cover non-cpassword data.
+    """
+    import xml.etree.ElementTree as ET
+
+    base = Path(__file__).parent
+    values = set()
+    for directory in (base / "fixtures", base / "golden_estate"):
+        for path in directory.rglob("Groups.xml"):
+            for elem in ET.parse(path).iter():
+                if elem.get("cpassword"):
+                    values.add(elem.get("cpassword"))
+    return tuple(sorted(values)) + ("synthetic-credential-027-ONLY-FOR-TESTS",)

@@ -54,7 +54,8 @@
       "destination": "/briefing",
       "translation": "identity: route, method and all query/form parameters retained; no redirect",
       "discover_via": "briefing",
-      "representative_query": "snapshot=1"
+      "representative_query": "snapshot=1",
+      "representative_export_query": "snapshot=1&as_of=2026-02-01T00:00:00Z&format=md"
     },
     {
       "path": "/inventory",
@@ -76,7 +77,8 @@
       "destination": "/gpo/{gpo_id}",
       "translation": "identity: route, method and all query/form parameters retained; no redirect",
       "discover_via": "gpo_list",
-      "representative_query": "compare=22222222-2222-2222-2222-222222222222"
+      "representative_query": "compare=22222222-2222-2222-2222-222222222222",
+      "representative_export_query": "snapshot=1&ledger_q=Audit&side=Computer&cse=Security&format=csv&view=ledger"
     },
     {
       "path": "/danger",
@@ -109,7 +111,8 @@
       "destination": "/search",
       "translation": "identity: route, method and all query/form parameters retained; no redirect",
       "discover_via": "search",
-      "representative_query": "q=Audit&cse=Security&side=Computer"
+      "representative_query": "q=Audit&cse=Security&side=Computer",
+      "representative_export_query": "q=Audit&cse=Security&side=Computer&page=2&format=md"
     },
     {
       "path": "/ou",
@@ -197,7 +200,8 @@
       "destination": "/changelog",
       "translation": "identity: route, method and all query/form parameters retained; no redirect",
       "discover_via": "changelog",
-      "representative_query": "snap_a=1&snap_b=2"
+      "representative_query": "snap_a=1&snap_b=2",
+      "representative_export_query": "snap_a=1&snap_b=2&format=csv"
     },
     {
       "path": "/baseline",
@@ -219,7 +223,8 @@
       "destination": "/baseline",
       "translation": "identity: route, method and all query/form parameters retained; no redirect",
       "discover_via": "baseline_get",
-      "representative_query": ""
+      "representative_query": "",
+      "representative_export_form": "file=<synthetic.zip>&format=csv|md; empty format renders the comparison"
     },
     {
       "path": "/export/findings",
@@ -228,9 +233,10 @@
         "GET"
       ],
       "destination": "/export/findings",
-      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "translation": "identity: legacy JSON retained; Markdown/CSV redirect with all query parameters to the filtered typed view",
       "discover_via": "export_findings",
-      "representative_query": ""
+      "representative_query": "",
+      "representative_export_query": "lifecycle=all&triage=all&format=csv"
     },
     {
       "path": "/export/gpo/{gpo_id}",
@@ -239,9 +245,10 @@
         "GET"
       ],
       "destination": "/export/gpo/{gpo_id}",
-      "translation": "identity: route, method and all query/form parameters retained; no redirect",
+      "translation": "identity: legacy JSON retained; Markdown/CSV redirect with all query parameters to the filtered typed view",
       "discover_via": "gpo_list",
-      "representative_query": ""
+      "representative_query": "",
+      "representative_export_query": "snapshot=1&ledger_q=Audit&view=ledger&format=md"
     },
     {
       "path": "/export/ou/{path:path}",
@@ -329,7 +336,8 @@
       "destination": "/golden-diff",
       "translation": "identity: route, method and all query/form parameters retained; no redirect",
       "discover_via": "golden_diff_get",
-      "representative_query": ""
+      "representative_query": "",
+      "representative_export_form": "file=<synthetic.zip>&format=csv|md; empty format renders the comparison"
     },
     {
       "path": "/findings",
@@ -340,7 +348,8 @@
       "destination": "/findings",
       "translation": "identity: route, method and all query/form parameters retained; no redirect",
       "discover_via": "findings_inbox",
-      "representative_query": "category=unlinked&severity=high&lifecycle=all&triage=all&q=Lab&page=2"
+      "representative_query": "category=unlinked&severity=high&lifecycle=all&triage=all&q=Lab&page=2",
+      "representative_export_query": "lifecycle=all&triage=all&severity=high&category=synthetic&q=Lab&page=2&per_page=50&format=md"
     },
     {
       "path": "/findings/{occurrence_id}",
@@ -351,7 +360,8 @@
       "destination": "/findings/{occurrence_id}",
       "translation": "identity: route, method and all query/form parameters retained; no redirect",
       "discover_via": "findings_inbox",
-      "representative_query": ""
+      "representative_query": "",
+      "representative_export_query": "format=csv"
     },
     {
       "path": "/findings/{finding_id}/triage",
@@ -451,6 +461,28 @@
       "translation": "identity: route, method and all query/form parameters retained; no redirect",
       "discover_via": "tools",
       "representative_query": ""
+    },
+    {
+      "path": "/accepted-risks",
+      "name": "accepted_risks",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/accepted-risks",
+      "translation": "identity: route, method and all query parameters retained; Markdown/CSV mirror the filtered typed view",
+      "discover_via": "findings_inbox",
+      "representative_query": "category=synthetic&severity=high&q=Lab&as_of=2026-02-01T00:00:00Z&page=2&format=csv"
+    },
+    {
+      "path": "/setting",
+      "name": "setting_detail",
+      "methods": [
+        "GET"
+      ],
+      "destination": "/setting",
+      "translation": "identity: route, method and all query parameters retained; Markdown/CSV mirror the filtered typed view",
+      "discover_via": "search",
+      "representative_query": "identity=Synthetic%3AValue&cse=Registry&side=Computer&snapshot=1&format=md"
     }
   ]
 }

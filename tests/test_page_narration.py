@@ -17,7 +17,7 @@ from gpo_lens.web.app import create_app
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, secret_corpus):
     from gpo_lens.ingest import load_estate
     from gpo_lens.store import init_db, save_estate
 
@@ -27,10 +27,15 @@ def client(tmp_path, monkeypatch):
     estate = load_estate(Path(__file__).parent / "fixtures")
     # Secrets in arbitrary names, display values and raw evidence must never
     # become a narration input. Count-only projection excludes all three.
-    estate.gpos[0].name = "synthetic-secret-name"
+    estate.gpos[0].name = "synthetic-secret-name " + " ".join(secret_corpus)
     if estate.gpos[0].settings:
-        estate.gpos[0].settings[0].display_value = "synthetic-secret-value"
-        estate.gpos[0].settings[0].raw = {"password": "synthetic-secret-raw"}
+        estate.gpos[0].settings[0].display_value = "synthetic-secret-value " + " ".join(
+            secret_corpus
+        )
+        estate.gpos[0].settings[0].raw = {
+            "password": "synthetic-secret-raw",
+            "credentials": [{"cpassword": value} for value in secret_corpus],
+        }
     save_estate(conn, estate)
     conn.close()
     monkeypatch.setenv("GPO_LENS_AUTH_TOKEN", "test-narration-token")
@@ -71,7 +76,7 @@ def test_explain_is_optional_and_never_calls_model_on_page(client, monkeypatch, 
         assert 'name="payload"' not in page.text
 
 
-def test_payload_is_bounded_and_has_snapshot_and_analysis_provenance(client):
+def test_payload_is_bounded_and_has_snapshot_and_analysis_provenance(client, secret_corpus):
     page = client.get(
         "/gpo/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?compare=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     )
@@ -81,7 +86,12 @@ def test_payload_is_bounded_and_has_snapshot_and_analysis_provenance(client):
     assert payload["application_version"]
     assert payload["evaluation_runs"] == []
     assert len(json.dumps(payload)) < 12000
-    for secret in ("synthetic-secret-name", "synthetic-secret-value", "synthetic-secret-raw"):
+    for secret in (
+        "synthetic-secret-name",
+        "synthetic-secret-value",
+        "synthetic-secret-raw",
+        *secret_corpus,
+    ):
         assert secret not in json.dumps(payload)
     assert "raw" not in payload and "html" not in payload
 

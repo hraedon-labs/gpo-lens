@@ -6,7 +6,7 @@ from __future__ import annotations
 def section_for_path(path: str) -> tuple[str, str]:
     if path.startswith("/briefing"):
         return "briefing", "Briefing"
-    if path.startswith("/findings"):
+    if path.startswith(("/findings", "/accepted-risks")):
         return "findings_inbox", "Findings"
     if path.startswith(("/changelog", "/trends")):
         return "changelog", "History"
@@ -17,6 +17,7 @@ def section_for_path(path: str) -> tuple[str, str]:
             "/gpo/",
             "/ou",
             "/search",
+            "/setting",
             "/conflicts",
             "/delegation",
             "/danger",

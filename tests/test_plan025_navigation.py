@@ -40,6 +40,33 @@ def test_inventory_covers_all_existing_routes(client):
         client.app.url_path_for(row["discover_via"])
 
 
+def test_inventory_documents_all_deterministic_export_interfaces(client):
+    inventory = json.loads((ROOT / "docs/web-route-inventory.json").read_text())
+    rows = {row["name"]: row for row in inventory["routes"]}
+    for name in (
+        "gpo_detail",
+        "findings_inbox",
+        "finding_occurrence",
+        "briefing",
+        "changelog",
+        "search",
+        "export_findings",
+        "export_gpo",
+        "accepted_risks",
+        "setting_detail",
+    ):
+        row = rows[name]
+        query = row.get("representative_export_query", row["representative_query"])
+        assert "format=" in query
+    for name in ("baseline_post", "golden_diff_post"):
+        assert "format=csv|md" in rows[name]["representative_export_form"]
+    assert rows["accepted_risks"]["discover_via"] == "findings_inbox"
+    assert rows["setting_detail"]["discover_via"] == "search"
+    assert 'href="/accepted-risks"' in client.get("/tools").text
+    reference = client.get("/tools/routes").text
+    assert 'href="/search"' in reference.split("GET /setting")[0].rsplit("<a ", 1)[1]
+
+
 def test_new_primary_nav_and_accessibility(client):
     page = client.get("/explore").text
     nav = page.split('aria-label="Primary"')[1].split("</nav>")[0]

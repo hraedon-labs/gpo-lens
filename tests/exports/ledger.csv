@@ -1,0 +1,6 @@
+section,record,field,value
+metadata,1,evaluation_ids,[3]
+metadata,1,filters,"{""side"":""Computer""}"
+metadata,1,snapshot_id,7
+settings,1,display_value,1
+settings,1,identity,Test

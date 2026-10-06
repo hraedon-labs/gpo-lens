@@ -268,5 +268,7 @@ _SYSTEM_PROMPT = (
 def explain_findings(findings_json: list[dict[str, str]]) -> str:
     if not findings_json:
         return "No issues detected — the estate looks healthy."
-    user_prompt = json.dumps(findings_json, indent=2)
+    from gpo_lens.safe_output import safe_data
+
+    user_prompt = json.dumps(safe_data(findings_json), indent=2)
     return call_llm(_SYSTEM_PROMPT, user_prompt)
