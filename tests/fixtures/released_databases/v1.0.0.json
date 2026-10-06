@@ -1,0 +1,21 @@
+{
+  "audit_file": "v1.0.0.audit.log",
+  "commit": "15227dcf13ee9e4cffdbd213a82616c8763872c7",
+  "counts": {
+    "coverage_gap": 6,
+    "delegation": 4,
+    "events": 1,
+    "gpo": 4,
+    "gpo_link": 4,
+    "group_member": 0,
+    "ou_tree": 4,
+    "principal": 0,
+    "setting": 4,
+    "snapshot": 2,
+    "som": 4,
+    "som_link": 6,
+    "wmi_filter": 0
+  },
+  "schema_version": 3,
+  "tag": "v1.0.0"
+}
