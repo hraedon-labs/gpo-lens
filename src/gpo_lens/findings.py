@@ -1717,7 +1717,7 @@ def _doctor_finding_to_candidate(
     category = getattr(f, "category", "") or ""
 
     # Evidence reference (safe projection — no raw secrets).
-    evidence = (
+    evidence: tuple[EvidenceRef, ...] = (
         EvidenceRef(
             snapshot_id=snapshot_id,
             gpo_id=gpo_id,
@@ -1726,6 +1726,20 @@ def _doctor_finding_to_candidate(
             safe_projection=summary[:200],
         ),
     )
+    if category == "admx_gap":
+        # Persist the setting list per observation as well as current detail.
+        # The lifecycle's bounded detail column can truncate a large catalogue;
+        # separate bounded references keep each setting visible in history.
+        evidence += tuple(
+            EvidenceRef(
+                snapshot_id=snapshot_id,
+                gpo_id=gpo_id,
+                source="estate_doctor",
+                field_path=f"admx_gap.settings.{index}",
+                safe_projection=identity[:500],
+            )
+            for index, identity in enumerate(f.detail.splitlines())
+        )
 
     compliance = getattr(f, "compliance", ()) or ()
     compliance_tuples = tuple((c.framework, c.control_id) for c in compliance) if compliance else ()
@@ -1771,7 +1785,9 @@ def _doctor_finding_to_candidate(
 
     return FindingCandidate(
         detector_id=category,
-        detector_version="1",
+        detector_version="2"
+        if category == "admx_gap" or category.startswith("broken_ref:")
+        else "1",
         category=category,
         severity=getattr(f, "severity", "info"),
         subject_type=subject_type,
@@ -1864,10 +1880,10 @@ def candidates_from_estate(
       tuple for estate-level findings.
     - **Dimensions:** identity-bearing fields (side, ref_value, trustee SID)
       that distinguish multiple findings on the same subject.
-    - **Rule versioning:** ``detector_version="1"`` for all intrinsic
-      detectors. A future rule-semantics change bumps the version and must
-      declare whether it continues the old lifecycle series or starts a new
-      one.
+    - **Rule versioning:** ADMX aggregation and offline broken references use
+      version 2. Aggregated ADMX findings start a new series; old value-level
+      triage stays with resolved historical occurrences. Surviving offline
+      reference identities continue their series. Other rules use version 1.
     - **Evidence projection:** summary text truncated to 200 chars; no raw
       cpassword values, SDDL strings, or credentials stored.
     - **Coverage requirements:** absence is meaningful only when the subject

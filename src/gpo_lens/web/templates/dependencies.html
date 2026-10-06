@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}gpo-lens — External dependencies{% endblock %}
+{% block content %}
+{% include "_exports.html" %}
+<h1>External dependencies</h1>
+<p>Configured server and share references in collected copies. Reachability and actual use cannot be verified offline. Security/WMI/loopback/item targeting and disabled sides are not evaluated.</p>
+<form method="get" class="gp-filter-bar">
+  <label for="server">Server</label>
+  <input id="server" name="server" value="{{ server }}" placeholder="old-fs01">
+  <button type="submit" class="gp-btn">Filter</button>
+</form>
+<p>{{ groups | length }} servers · {{ dependency_count }} dependencies</p>
+{% for group in groups %}
+<h2>{{ group.server }}</h2>
+<p>{{ group.dependency_count }} references · {{ group.gpo_count }} GPOs · Shares: {{ group.shares | join(', ') }}</p>
+<table class="gp-table">
+<thead><tr><th>GPO</th><th>Side</th><th>Type</th><th>Target</th><th>Evidence</th></tr></thead>
+<tbody>{% for ref in group.dependencies %}
+<tr><td><a href="{{ url_for('gpo_detail', gpo_id=ref.gpo_id) }}">{{ ref.gpo_name }}</a></td><td>{{ ref.side }}</td><td>{{ ref.dependency_type }}</td><td><code>{{ ref.target }}</code></td><td>{{ ref.detail }}</td></tr>
+{% endfor %}</tbody></table>
+{% else %}<p>No external UNC dependencies found in the collected inputs.</p>{% endfor %}
+{% endblock %}

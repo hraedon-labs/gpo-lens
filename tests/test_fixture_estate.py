@@ -24,6 +24,7 @@ from gpo_lens.queries import (
     empty_gpos,
     enforced_links,
     estate_doctor,
+    external_dependencies,
     is_security_filtered,
     loopback_awareness,
     loopback_gpos,
@@ -169,11 +170,12 @@ def test_fixture_cpassword_hit(fixture_estate):
 
 
 def test_fixture_broken_unc(fixture_estate):
-    hits = broken_refs(fixture_estate)
-    unc_hits = [h for h in hits if h.ref_type == "unc_path"]
+    assert broken_refs(fixture_estate) == []
+    hits = [r for group in external_dependencies(fixture_estate) for r in group.dependencies]
+    unc_hits = [h for h in hits if h.dependency_type == "unc_path"]
     assert len(unc_hits) == 1
     assert unc_hits[0].gpo_id == GPO_IDS["broken_unc"]
-    assert "\\oldserver\\share" in unc_hits[0].ref_value
+    assert "\\oldserver\\share" in unc_hits[0].target
 
 
 def test_fixture_no_dangling_links(fixture_estate):
@@ -259,7 +261,7 @@ def test_fixture_estate_doctor(fixture_estate):
     assert summary.cpassword_hit_count == 1
     assert summary.version_skew_count == 1
     assert summary.loopback_gpo_count == 3
-    assert summary.broken_ref_count == 1
+    assert summary.broken_ref_count == 0
     # 2 OU/domain enforced links + 1 enforced site link.
     assert summary.enforced_link_count == 3
     assert summary.linked_site_count == 1

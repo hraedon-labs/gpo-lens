@@ -293,6 +293,18 @@ def build_briefing(
     # preserved by later resolution/regression. Current occurrence severity is
     # mutable; the observation is the historical evidence.
     selected_run_id = current_run[0] if current_run else 0
+    # Lead with observed high-severity dangers even when low-priority hygiene
+    # dominates the estate. Use selected-run observations, never mutable current
+    # occurrence prose, so historical briefings keep their original evidence.
+    top_dangers = conn.execute(
+        "SELECT o.severity, o.summary, f.gpo_name FROM finding f "
+        "JOIN finding_observation o ON o.occurrence_id = f.id "
+        "WHERE o.run_id = ? AND f.rule_id LIKE 'danger:%' "
+        "AND o.severity IN ('critical', 'high') "
+        "ORDER BY CASE o.severity WHEN 'critical' THEN 0 ELSE 1 END, f.id LIMIT 5",
+        (selected_run_id,),
+    ).fetchall()
+    problems.extend(f"{severity}: {summary} ({name})" for severity, summary, name in top_dangers)
     historical_counts = conn.execute(
         "SELECT COUNT(*), COALESCE(SUM(o.severity = 'critical'), 0) "
         "FROM finding f JOIN finding_observation o ON o.occurrence_id = f.id "

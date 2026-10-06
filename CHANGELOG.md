@@ -61,6 +61,33 @@ Draft **v1.4.0** — release date and package version bump by coordinator.
   and temporary files are cleaned up on success or failure.
 
 
+### Added
+
+- External dependency inventory under Explore and `gpo-lens dependencies`
+  (`--server`, `--json`), grouped by server/share with GPO links, dependency
+  types, counts, and deterministic redacted Markdown/CSV exports.
+- Multiple ADMX directories via repeatable `--admx-dir` and the platform path
+  list in `GPO_LENS_ADMX_DIR`; load toolkit templates alongside the central store.
+
+### Changed / Breaking
+
+- **JSON contract version 2.** `broken-refs` keeps its row shape but now reports
+  only malformed paths and files missing from a GPO own collected SYSVOL. UNC
+  dependencies and machine-local task paths no longer create findings. Summary
+  and trend broken-reference counts follow the new meaning.
+- ADMX gaps produce one doctor/inbox finding per GPO with the setting count
+  and full setting list in detail. Old noise occurrences resolve on a completed
+  evaluation with meaningful coverage; historical evidence and triage remain.
+  Aggregated ADMX findings start a new series requiring their own review.
+
+### Fixed
+
+- Printer connections have their own dependency type instead of drive mappings.
+- Doctor uses the supplied ADMX resolver; briefings surface high-severity dangers
+  before routine hygiene counts, while the inbox retains severity-first ordering.
+
+
+
 ## v1.3.1 — 2026-10-06
 
 ### Fixed

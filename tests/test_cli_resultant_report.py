@@ -297,7 +297,7 @@ class TestResultantCLI:
         )
         assert r.returncode == 0
         data = json.loads(r.stdout)
-        assert data["schema_version"] == 1
+        assert data["schema_version"] == 2
         assert data["kind"] == "resultant"
         assert data["data"]["principal_sid"] == USER_SID
         assert data["data"]["principal_name"] == "TEST\\jdoe"

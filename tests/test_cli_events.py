@@ -114,7 +114,7 @@ class TestEventsCommand:
         )
         assert r.returncode == 0
         env = json.loads(r.stdout)
-        assert env["schema_version"] == 1
+        assert env["schema_version"] == 2
         assert env["kind"] == "events"
         assert isinstance(env["data"], list)
         assert len(env["data"]) == 3

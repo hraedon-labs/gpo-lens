@@ -70,7 +70,7 @@ _QUERIES: dict[str, QuerySpec] = {
     "broken_refs": QuerySpec(
         name="broken_refs",
         func=lambda **kw: queries.broken_refs(kw["estate"]),
-        description="GPOs with broken references (UNC paths, missing scripts, etc.)",
+        description="Malformed paths or files missing from the GPO own collected SYSVOL",
     ),
     "enforced_links": QuerySpec(
         name="enforced_links",

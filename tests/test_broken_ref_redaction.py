@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gpo_lens.cli import main
+from gpo_lens.dependencies import external_dependencies
 from gpo_lens.detection import broken_refs
 from gpo_lens.findings import evaluate_finding_lifecycle_v2
 from gpo_lens.ingest import load_estate
@@ -20,8 +21,8 @@ from gpo_lens.web.app import create_app
 
 GID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 DETAILS = (
-    "GPP User/Preferences/Drives/Drives.xml <Drive/Properties @path>: UNC path",
-    "GPP User/Preferences/Printers/Printers.xml <SharedPrinter/Properties @path>: UNC path",
+    "GPP User/Preferences/Drives/Drives.xml <Drive/Properties @path>: path reference",
+    "GPP User/Preferences/Printers/Printers.xml <SharedPrinter/Properties @path>: path reference",
 )
 SECRETS = (
     "SYNTH-HOTFIX-CPASSWORD-ONLY",
@@ -62,10 +63,11 @@ def build_preference_estate(tmp_path, credentials):
     ET.ElementTree(report).write(source / "AllGPOs.xml", encoding="utf-8")
     estate = load_estate(source)
     assert bool(secret_values(estate)) == credentials
-    refs = broken_refs(estate)
+    assert broken_refs(estate) == []
+    refs = [r for group in external_dependencies(estate) for r in group.dependencies]
     assert len(refs) == 2
     assert {r.detail for r in refs} == set(DETAILS)
-    assert {r.ref_type for r in refs} == {"drive_mapping_unc"}
+    assert {r.dependency_type for r in refs} == {"drive_mapping", "printer_connection"}
     db = tmp_path / "lab.sqlite3"
     with sqlite3.connect(db) as conn:
         init_db(conn)
@@ -84,12 +86,10 @@ def assert_safe_output(output, credentials):
     decoded = html.unescape(output).replace(r"\[", "[").replace(r"\]", "]")
     for secret in SECRETS:
         assert secret not in decoded
-    if credentials:
-        assert REDACTED in decoded
 
 
 @pytest.mark.parametrize("as_json", [False, True])
-@pytest.mark.parametrize("command", ["broken-refs", "doctor"])
+@pytest.mark.parametrize("command", ["broken-refs", "doctor", "dependencies"])
 @pytest.mark.parametrize("input_mode", ["source", "database"])
 def test_cli_preference_details(preference_estate, capsys, command, as_json, input_mode):
     source, db, credentials = preference_estate
@@ -99,15 +99,14 @@ def test_cli_preference_details(preference_estate, capsys, command, as_json, inp
     assert main(argv) == 0
     output = capsys.readouterr().out
     assert_safe_output(output, credentials)
-    if as_json:
-        rows = json.loads(output)["data"]
-        if command == "doctor":
-            rows = rows["findings"]
-        field = "detail" if command == "broken-refs" else "summary"
-        assert set(DETAILS) <= {r[field] for r in rows}
-    else:
-        for detail in DETAILS:
-            assert detail in output
+    if command == "dependencies":
+        if as_json:
+            rows = [r for group in json.loads(output)["data"] for r in group["dependencies"]]
+            assert set(DETAILS) <= {r["detail"] for r in rows}
+        if credentials:
+            assert REDACTED in output
+    elif command == "broken-refs" and as_json:
+        assert json.loads(output)["data"] == []
     if not credentials:
         assert REDACTED not in output
 
@@ -116,6 +115,9 @@ def test_cli_preference_details(preference_estate, capsys, command, as_json, inp
     "route",
     [
         "/api/v1/query/broken_refs",
+        "/dependencies",
+        "/dependencies?format=md",
+        "/dependencies?format=csv",
         "/api/v1/query/estate_doctor",
         "/gpo/" + GID,
         "/gpo/" + GID + "?view=ledger",
@@ -136,13 +138,11 @@ def test_web_preference_redaction(preference_estate, monkeypatch, route):
     assert_safe_output(response.text, credentials)
     if route.startswith(("/findings?", "/export/findings?")):
         for detail in DETAILS:
-            assert detail in html.unescape(response.text)
-    if "query/" in route or "export/findings?format=json" in route:
-        rows = response.json()
-        if "query/" in route:
-            rows = rows["data"]
-        field = "detail" if "broken_refs" in route else "summary"
-        assert set(DETAILS) <= {r[field] for r in rows}
+            assert detail not in html.unescape(response.text)
+    if "broken_refs" in route:
+        assert response.json()["data"] == []
+    if route.startswith("/dependencies") and credentials:
+        assert REDACTED in response.text.replace(r"\[", "[").replace(r"\]", "]")
 
 
 @pytest.mark.parametrize("format", ["md", "csv"])
@@ -155,7 +155,7 @@ def test_cli_preference_exports(preference_estate, capsys, view, format):
     assert_safe_output(output, credentials)
     if view == "findings":
         for detail in DETAILS:
-            assert detail in html.unescape(output)
+            assert detail not in html.unescape(output)
 
 
 @pytest.mark.parametrize(

@@ -1467,10 +1467,11 @@ def test_broken_refs_detects_unc_in_display_value():
         ],
     )
     estate = Estate(gpos=[gpo])
-    result = queries.broken_refs(estate)
+    assert queries.broken_refs(estate) == []
+    result = [r for group in queries.external_dependencies(estate) for r in group.dependencies]
     assert len(result) == 1
-    assert result[0].ref_type == "unc_path"
-    assert result[0].ref_value == r"\\server\share\app"
+    assert result[0].dependency_type == "unc_path"
+    assert result[0].target == r"\\server\share\app"
 
 
 def test_broken_refs_empty_when_clean():
@@ -1498,10 +1499,11 @@ def test_broken_refs_detects_unc_in_raw_dict():
         ],
     )
     estate = Estate(gpos=[gpo])
-    result = queries.broken_refs(estate)
-    unc_refs = [r for r in result if r.ref_type == "unc_path"]
+    assert queries.broken_refs(estate) == []
+    result = [r for group in queries.external_dependencies(estate) for r in group.dependencies]
+    unc_refs = [r for r in result if r.dependency_type == "unc_path"]
     assert len(unc_refs) >= 1
-    assert r"\\server\share\path" in unc_refs[0].ref_value
+    assert r"\\server\share\path" in unc_refs[0].target
 
 
 def test_broken_refs_detects_missing_script(tmp_path):
@@ -1581,9 +1583,10 @@ def test_broken_refs_deduplicates():
         ],
     )
     estate = Estate(gpos=[gpo])
-    result = queries.broken_refs(estate)
+    assert queries.broken_refs(estate) == []
+    result = [r for group in queries.external_dependencies(estate) for r in group.dependencies]
     unc_refs = [
-        r for r in result if r.ref_type == "unc_path" and r.ref_value == r"\\server\share\path"
+        r for r in result if r.dependency_type == "unc_path" and r.target == r"\\server\share\path"
     ]
     assert len(unc_refs) == 1
 
@@ -2377,10 +2380,11 @@ def test_broken_refs_drive_mapping_unc():
         ],
     )
     estate = Estate(gpos=[gpo])
-    result = queries.broken_refs(estate)
-    drive_refs = [r for r in result if r.ref_type == "drive_mapping_unc"]
+    assert queries.broken_refs(estate) == []
+    result = [r for group in queries.external_dependencies(estate) for r in group.dependencies]
+    drive_refs = [r for r in result if r.dependency_type == "drive_mapping"]
     assert len(drive_refs) == 1
-    assert r"\\server\share\home" in drive_refs[0].ref_value
+    assert r"\\server\share\home" in drive_refs[0].target
 
 
 def test_broken_refs_scheduled_task_path():
@@ -2403,9 +2407,7 @@ def test_broken_refs_scheduled_task_path():
     )
     estate = Estate(gpos=[gpo])
     result = queries.broken_refs(estate)
-    task_refs = [r for r in result if r.ref_type == "scheduled_task_path"]
-    assert len(task_refs) == 1
-    assert r"C:\Scripts\cleanup.bat" in task_refs[0].ref_value
+    assert result == []
 
 
 def test_broken_refs_gpp_xml_unc(tmp_path):
@@ -2420,10 +2422,11 @@ def test_broken_refs_gpp_xml_unc(tmp_path):
 
     gpo = _make_gpo(id="gpo-1", sysvol_path=str(gpo_dir))
     estate = Estate(gpos=[gpo])
-    result = queries.broken_refs(estate)
-    gpp_refs = [r for r in result if r.ref_type == "gpp_file_ref"]
+    assert queries.broken_refs(estate) == []
+    result = [r for group in queries.external_dependencies(estate) for r in group.dependencies]
+    gpp_refs = [r for r in result if r.dependency_type == "scheduled_task_action"]
     assert len(gpp_refs) >= 1
-    assert r"\\fileserver\tasks\cleanup.bat" in gpp_refs[0].ref_value
+    assert r"\\fileserver\tasks\cleanup.bat" in gpp_refs[0].target
 
 
 def test_broken_refs_gpp_xml_scheduled_task_exe(tmp_path):
@@ -2439,9 +2442,7 @@ def test_broken_refs_gpp_xml_scheduled_task_exe(tmp_path):
     gpo = _make_gpo(id="gpo-1", sysvol_path=str(gpo_dir))
     estate = Estate(gpos=[gpo])
     result = queries.broken_refs(estate)
-    task_refs = [r for r in result if r.ref_type == "scheduled_task_path"]
-    assert len(task_refs) >= 1
-    assert r"C:\Tools\run.exe" in task_refs[0].ref_value
+    assert result == []
 
 
 def test_broken_refs_gpp_xml_drive_unc(tmp_path):
@@ -2456,10 +2457,11 @@ def test_broken_refs_gpp_xml_drive_unc(tmp_path):
 
     gpo = _make_gpo(id="gpo-1", sysvol_path=str(gpo_dir))
     estate = Estate(gpos=[gpo])
-    result = queries.broken_refs(estate)
-    drive_refs = [r for r in result if r.ref_type == "drive_mapping_unc"]
+    assert queries.broken_refs(estate) == []
+    result = [r for group in queries.external_dependencies(estate) for r in group.dependencies]
+    drive_refs = [r for r in result if r.dependency_type == "drive_mapping"]
     assert len(drive_refs) >= 1
-    assert r"\\fileserver\shares\home" in drive_refs[0].ref_value
+    assert r"\\fileserver\shares\home" in drive_refs[0].target
     assert "Drive" in drive_refs[0].detail
 
 
@@ -2476,10 +2478,11 @@ def test_broken_refs_gpp_xml_file_unc(tmp_path):
 
     gpo = _make_gpo(id="gpo-1", sysvol_path=str(gpo_dir))
     estate = Estate(gpos=[gpo])
-    result = queries.broken_refs(estate)
-    gpp_refs = [r for r in result if r.ref_type == "gpp_file_ref"]
+    assert queries.broken_refs(estate) == []
+    result = [r for group in queries.external_dependencies(estate) for r in group.dependencies]
+    gpp_refs = [r for r in result if r.dependency_type == "file_copy"]
     assert len(gpp_refs) >= 1
-    unc_values = {r.ref_value for r in gpp_refs}
+    unc_values = {r.target for r in gpp_refs}
     assert r"\\source\dist\app.msi" in unc_values
     detail_texts = " ".join(r.detail for r in gpp_refs)
     assert "File" in detail_texts
@@ -2497,10 +2500,11 @@ def test_broken_refs_gpp_xml_service_unc(tmp_path):
 
     gpo = _make_gpo(id="gpo-1", sysvol_path=str(gpo_dir))
     estate = Estate(gpos=[gpo])
-    result = queries.broken_refs(estate)
-    gpp_refs = [r for r in result if r.ref_type == "gpp_file_ref"]
+    assert queries.broken_refs(estate) == []
+    result = [r for group in queries.external_dependencies(estate) for r in group.dependencies]
+    gpp_refs = [r for r in result if r.dependency_type == "service_path"]
     assert len(gpp_refs) >= 1
-    assert r"\\malicious\service_path" in gpp_refs[0].ref_value
+    assert r"\\malicious\service_path" in gpp_refs[0].target
     assert "Service" in gpp_refs[0].detail
 
 
@@ -2517,10 +2521,11 @@ def test_broken_refs_gpp_xml_datasource_unc(tmp_path):
 
     gpo = _make_gpo(id="gpo-1", sysvol_path=str(gpo_dir))
     estate = Estate(gpos=[gpo])
-    result = queries.broken_refs(estate)
-    gpp_refs = [r for r in result if r.ref_type == "gpp_file_ref"]
+    assert queries.broken_refs(estate) == []
+    result = [r for group in queries.external_dependencies(estate) for r in group.dependencies]
+    gpp_refs = [r for r in result if r.dependency_type == "data_source"]
     assert len(gpp_refs) >= 1
-    unc_values = {r.ref_value for r in gpp_refs}
+    unc_values = {r.target for r in gpp_refs}
     assert r"\\dbserver\data\inventory.mdb" in unc_values
     detail_texts = " ".join(r.detail for r in gpp_refs)
     assert "DataSource" in detail_texts
@@ -3694,7 +3699,7 @@ def test_broken_refs_prefers_gpp_detail_over_settings(tmp_path):
         settings=[
             Setting(
                 gpo_id="gpo-1",
-                side="User",
+                side="Computer",
                 cse="Drives",
                 identity="DriveMap:H:",
                 display_name="H Drive",
@@ -3705,11 +3710,12 @@ def test_broken_refs_prefers_gpp_detail_over_settings(tmp_path):
         ],
     )
     estate = Estate(gpos=[gpo])
-    result = queries.broken_refs(estate)
-    matching = [r for r in result if r.ref_value == r"\\fileserver\share\home"]
+    assert queries.broken_refs(estate) == []
+    result = [r for group in queries.external_dependencies(estate) for r in group.dependencies]
+    matching = [r for r in result if r.target == r"\\fileserver\share\home"]
     assert len(matching) == 1
     # Both sources produce drive_mapping_unc; SYSVOL detail should win
-    assert matching[0].ref_type == "drive_mapping_unc"
+    assert matching[0].dependency_type == "drive_mapping"
     assert "GPP" in matching[0].detail or "Drive" in matching[0].detail
 
 
@@ -3732,10 +3738,11 @@ def test_broken_refs_settings_detail_kept_when_no_gpp(tmp_path):
         ],
     )
     estate = Estate(gpos=[gpo])
-    result = queries.broken_refs(estate)
-    matching = [r for r in result if r.ref_value == r"\\server\share"]
+    assert queries.broken_refs(estate) == []
+    result = [r for group in queries.external_dependencies(estate) for r in group.dependencies]
+    matching = [r for r in result if r.target == r"\\server\share"]
     assert len(matching) == 1
-    assert matching[0].ref_type == "drive_mapping_unc"
+    assert matching[0].dependency_type == "drive_mapping"
 
 
 # ---- baseline_diff ----------------------------------------------------------

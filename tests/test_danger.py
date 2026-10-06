@@ -1556,7 +1556,7 @@ class TestDangerCli:
         out = capsys.readouterr().out
         assert rc == 0
         env = json.loads(out)
-        assert env["schema_version"] == 1
+        assert env["schema_version"] == 2
         assert env["kind"] == "danger"
         data = env["data"]
         assert isinstance(data, list)

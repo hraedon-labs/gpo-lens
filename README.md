@@ -193,8 +193,54 @@ must set `GPO_LENS_ALLOWED_HOSTS` to the browser authority (IIS merges a missing
 value, Compose/systemd provide it). Unset accepts only loopback Host authorities;
 a disallowed Host returns 400 naming the variable. See the deployment guides
 for firewall scope, locked installs and WAL-safe backup/restore commands.
-Inherited a running installation? Start with the [v1.3.0 operator
+Inherited a running installation? Start with the [v1.3.1 operator
 handover](docs/handover.md), including backup and upgrade rules.
+
+## External dependencies and ADMX templates
+
+Run **v1.3.1** as the current released version; it fixes v1.3.0's over-redacted
+broken-reference details. The following dependency inventory is Unreleased.
+
+Before decommissioning or migrating a file or print server, ask “which GPOs
+reference `\\old-fs01`?” Open **Explore → External dependencies**, filter by
+server, or use `gpo-lens dependencies --server old-fs01 --json`. The inventory
+shows servers, shares, counts, GPO links and targets, distinguishing drive maps,
+printer connections, file copies, shortcuts, task actions, scripts, installation
+packages and folder redirection wherever those paths are exposed in the inputs.
+Markdown and CSV downloads preserve the filter and use deterministic redaction.
+This is configured dependency evidence: no server is contacted, reachability is
+unknown, and conditional/disabled settings do not imply actual use. Broken
+references now mean malformed paths or missing files in the GPO's own collected
+SYSVOL, not ordinary external UNC paths. Machine-local paths are unverifiable.
+
+ADMX gaps now create one finding per GPO with the gap count and setting list.
+Load additional templates with repeatable flags, for example:
+
+```bash
+gpo-lens ingest ./lab-export --admx-dir ./central-store --admx-dir ./toolkit-templates
+gpo-lens admx-gaps --admx-dir ./central-store --admx-dir ./toolkit-templates
+gpo-lens serve --admx-dir ./central-store --admx-dir ./toolkit-templates
+```
+
+Alternatively set `GPO_LENS_ADMX_DIR` to a platform path list (`:` on Linux/macOS,
+`;` on Windows). Explicit CLI directories replace that environment list; absent
+both, the usual central-store auto-detection applies. Keep each directory's
+ADML resources beside its ADMX files (typically `en-US`). The first matching
+policy in directory order supplies its display name. Missing/corrupt templates
+are reported; they do not prevent other directories from loading.
+
+Get MSS-legacy and SecGuide templates from Microsoft's
+[Security Compliance Toolkit](https://www.microsoft.com/en-us/download/details.aspx?id=55319)
+security baseline packages; see the [SCT guide](https://learn.microsoft.com/windows/security/operating-system-security/device-management/windows-security-configuration-framework/security-compliance-toolkit-10).
+Microsoft's templates are not bundled. An unresolved registry setting is a
+coverage gap in the loaded template catalogue, not proof of a bad configuration.
+
+On the next completed ingest, superseded UNC and value-level ADMX findings
+resolve as no longer observed, retaining observations and triage history. New
+GPO-level ADMX findings require fresh review; old per-value acknowledgements do
+not silently approve a broader finding. Partial coverage prevents resolution
+claims for uncollected GPOs. Machine consumers should migrate to JSON contract
+version 2; see [the contract](docs/spec/json-contract.md).
 
 ## Design principles
 

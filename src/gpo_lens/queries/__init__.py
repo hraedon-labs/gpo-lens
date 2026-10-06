@@ -20,6 +20,7 @@ listed before the split is still listed now, from the same source modules.
 from __future__ import annotations
 
 from gpo_lens.danger import DangerFinding, danger_findings  # noqa: F401
+from gpo_lens.dependencies import external_dependencies as external_dependencies
 from gpo_lens.detection import (  # noqa: F401, I001
     AdmxGap,
     BrokenRef,
@@ -132,6 +133,7 @@ from gpo_lens.topology import (  # noqa: F401
 )
 
 __all__ = [
+    "external_dependencies",
     "AdmxCoverageEntry",
     "AdmxCoverageReport",
     "AdmxCoverageSummary",

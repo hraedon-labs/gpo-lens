@@ -712,7 +712,7 @@ class TestCLI:
         )
         assert r.returncode == 0
         env = _json.loads(r.stdout)
-        assert env["schema_version"] == 1
+        assert env["schema_version"] == 2
         assert env["kind"] == "gpp-tasks"
         assert isinstance(env["data"], list)
         # The fixture ships two scheduled tasks on GPO A.

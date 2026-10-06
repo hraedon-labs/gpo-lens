@@ -176,7 +176,7 @@ class TestSummaryCommand:
         )
         assert r.returncode == 0
         env = json.loads(r.stdout)
-        assert env["schema_version"] == 1
+        assert env["schema_version"] == 2
         assert env["kind"] == "summary"
         data = env["data"]
         assert data["domain"] == "test.local"
@@ -330,7 +330,7 @@ class TestIngestDiffLatestJson:
         )
         assert r.returncode == 0
         env = json.loads(r.stdout)
-        assert env["schema_version"] == 1
+        assert env["schema_version"] == 2
         assert env["kind"] == "ingest"
         data = env["data"]
         assert data["domain"] == "fakefixture.local"
