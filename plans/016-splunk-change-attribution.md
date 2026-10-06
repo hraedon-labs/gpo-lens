@@ -1,6 +1,10 @@
 # Plan 016 — Splunk-sourced GPO change attribution
 
-**Status:** proposed 2026-06-17
+**Status:** Not pursued for v1.3.0; verified 2026-10-06. Evidence: [src/gpo_lens/events.py](../src/gpo_lens/events.py), [tests/test_sinks.py](../tests/test_sinks.py).
+
+The branch has outbound snapshot-change events and Splunk HEC delivery from Plan 012, not Splunk-sourced actor attribution. No `gpo_change_event` model/table, Splunk export ingestor, `gpo_change_history`/`changes_in_window` queries, Activity route or live connector exists in `src/` or tests. Plan 027's earlier claim that attribution was implemented was incorrect. Discovery and this attribution program remain deferred; no live-Splunk validation is claimed.
+
+The design below is the historical specification; this status records the verified release scope.
 **Author:** Opus 4.8
 **Strategic role:** Add the *who/when/which-event* attribution layer the
 Changelog has always implied — sourced from an external audit trail (Splunk),

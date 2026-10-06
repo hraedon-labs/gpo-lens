@@ -1,9 +1,19 @@
 # Deploying gpo-lens
 
-Choose [IIS](iis/README.md), [Linux containers](container/README.md), or a
+For **v1.3.0**, choose [IIS](iis/README.md),
+[Linux containers](container/README.md), or a
 [Linux systemd service](systemd/README.md). Run one instance against each
-database. Keep the collector on a Windows DC/RSAT host; the analysis server
+database and one estate per database. Keep the collector on a Windows DC/RSAT
+host; the analysis server
 receives file copies and never connects to Active Directory.
+
+| Path | Guide | Operator-owned state |
+|------|-------|----------------------|
+| Windows IIS | [Install and upgrade](iis/README.md) | Database/audit directory, `web.config`, IIS access rules and TLS bindings |
+| Linux container | [Compose and optional TLS proxy](container/README.md) | Data volume, Compose environment, proxy login and certificates |
+| Linux systemd | [Dedicated user and hardened unit](systemd/README.md) | `/var/lib/gpo-lens`, unit drop-ins, proxy configuration and certificates |
+
+For an inherited installation, use the [operator handover](../docs/handover.md).
 
 ## Access boundary
 
@@ -81,6 +91,12 @@ replacement. Never combine a restored main file with unrelated sidecars. For
 a complete offline directory backup, restore that directory as a unit instead.
 Verify integrity, fix ownership, restart and check health, snapshot count and a
 known GPO. Do not run two instances against the restored file.
+
+Upgrades to v1.3.0 from releases since v0.5.0 are covered by
+[released-database tests](../tests/test_released_db_upgrades.py), using actual
+v0.5.0, v0.7.0, v0.7.1, v1.0.0, v1.1.0 and v1.2.0 schema fixtures. Online
+backup/restore with committed WAL changes is tested too. This complements an
+operator's test restore; it does not replace it.
 
 **Back up before every upgrade**, record the running release/image and retain
 its source/image and matching database backup. Install/build the chosen release

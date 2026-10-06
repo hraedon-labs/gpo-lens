@@ -1,6 +1,10 @@
 # Plan 011 — Remediation & Scope Honesty (post-Plan-010)
 
-**Status:** proposed 2026-06-10
+**Status:** Partially shipped across v0.2.2–v0.6.1; verified 2026-10-06. Evidence: [src/gpo_lens/topology.py](../src/gpo_lens/topology.py), [tests/test_fixtures.py](../tests/test_fixtures.py).
+
+Publication review, version checks, generated BOM fixtures, scope honesty and narration dispatch/explain-setting shipped; Plans 013/014 and the v0.6.1 loopback fix refine the implementation. PyPI distribution is not pursued for v1.3.0. The requested sample ADMX resolution-rate threshold and manual print-to-PDF acceptance have no evidence in the branch tests; they are not claimed complete.
+
+The design below is the historical specification; this status records the verified release scope.
 **Author:** Fable 5 (full repo evaluation: code, tests, gates, plans 007–010,
 reflections, breadcrumbs, public-repo state)
 **Strategic role:** Plan 010 shipped in its entirety — Phase 0, Workstreams

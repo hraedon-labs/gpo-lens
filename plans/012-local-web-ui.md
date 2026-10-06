@@ -1,6 +1,10 @@
 # Plan 012 — Local Web UI (and the server eventuality)
 
-**Status:** proposed 2026-06-10
+**Status:** Partially shipped by v0.3.0, with hosting in v0.6.0; verified 2026-10-06. Evidence: [src/gpo_lens/events.py](../src/gpo_lens/events.py), [tests/test_web_auth.py](../tests/test_web_auth.py).
+
+The web views, uploads, permission seam, snapshot event store, NDJSON and HEC sinks shipped. The proposed unified web `audit.*` event-table stream did not: web audit uses the separate `audit.log`. Trusted-header group-to-role server mode did not ship; the actual loopback/token boundary is documented in `deploy/README.md`. Navigation is now governed by Plan 025.
+
+The design below is the historical specification; this status records the verified release scope.
 **Author:** Fable 5 (with cert-watch as the lessons-learned reference)
 **Strategic role:** The target audience — Microsoft-environment administrators —
 is often CLI-averse. This plan adds a browser surface over the existing query

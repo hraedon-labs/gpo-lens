@@ -1,17 +1,22 @@
 # Plan 025 — Question-oriented information architecture, briefing, and exports
 
-**Status:** In Progress — WI-1/2/3 **merged to `main` 2026-08-07**; WI-4, WI-5,
-and WI-6 remain open and are the bulk of what is left.
+**Status:** Shipped in v1.3.0; verified 2026-10-06 on the release candidate (release date set by coordinator). Evidence: [src/gpo_lens/web/templates/base.html](../src/gpo_lens/web/templates/base.html), [tests/test_exports.py](../tests/test_exports.py).
 
-WI-1 (findings inbox + occurrence view) and WI-2
-(deterministic briefing) implemented 2026-07-30 on
-`plan/025-wi1-findings-inbox-core`. WI-3 implemented 2026-07-30: `/explore` and
-`/tools` organize every specialist destination from a resolved-at-request
-registry (dead links fail tests), shipped as opt-in destinations per
-sequencing gate 3 — primary navigation is untouched until WI-4. The
-"primary pages link to filtered workbenches" half of WI-3 is partially
-satisfied (briefing vitals → filtered inbox, occurrence → dossier); the
-category→workbench deep links ride with WI-4's route inventory.
+WI-1/2/3 supply the inbox, briefing and directories; WI-4/5 landed as `5549855` and WI-6 as `20ecaa3`/`f5d30fb`, integrated by `d271cf7`. The shipped scope uses configured-settings search and retained handlers, rather than broad entity omnisearch or permanent redirects. Production rollout and tracker acceptance remain coordinator actions; see Plan 027.
+
+The design below is the historical specification; this status records the verified release scope.
+
+All six work items are implemented on the candidate. WI-1/2/3 introduced
+persisted findings, deterministic briefing and Explore/Tools directories;
+WI-4/5 changed navigation and added signed, bounded web explanations; WI-6
+added Markdown/CSV exports. See the [route inventory](../docs/web-route-inventory.json)
+and [release reconciliation](027-road-to-generous-1x.md).
+
+The final implementation retains every old handler instead of retiring routes.
+The primary search is configured-settings search. It does not provide the
+broader Plan 023 entity omnisearch/global snapshot axis. Persisted contextual
+comparison runs and exact category-to-workbench deep links remain follow-on
+work; current baseline/golden upload workbenches are retained under Tools.
 
 **Depends on:** Plan 023 reading primitives and Plan 024 durable finding queries
 
@@ -25,14 +30,14 @@ information architecture while retaining deep analytical workbenches, stable
 bookmarks, deterministic exports, and the project's distinction between facts
 and narration.
 
-## 2. Target information architecture
+## 2. Shipped information architecture
 
 | Primary destination | Operator question | Principal views |
 |---|---|---|
 | **Briefing** | Do I need to care today? | Change delta, finding delta, estate vitals |
 | **Findings** | Is anything wrong? | Inbox, occurrence history, accepted-risk register |
 | **Explore** | Why is this setting what it is here? | Dossiers, OUs, settings, resultant, search |
-| **History** | What changed? | Changelog, snapshot/entity diffs, evaluation history |
+| **History** | What changed? | Snapshot changelog/diffs; occurrence evaluation history is under Findings |
 | **Tools** | What specialist operation do I need? | Ingest, baselines, golden comparisons, delegation, ADMX coverage, narration, export |
 
 The top navigation becomes smaller; the product does not pretend every useful
@@ -251,13 +256,15 @@ Natural checkpoints:
 - Exports can be attached to change tickets without manual cleanup or secret
   inspection.
 
-## 12. Acceptance criteria
+## 12. Final acceptance evidence (2026-10-06)
 
-- [ ] Primary IA is Briefing, Findings, Explore, History, Tools, and omnisearch.
-- [ ] Findings and Briefing use Plan 024 persisted/provenance-aware queries.
-- [ ] Specialist analytical workbenches remain available.
-- [ ] Redirects preserve semantics, snapshot, and filters or are not used.
-- [ ] Narration is demoted and consumes only safe deterministic facts.
-- [ ] Exports are deterministic, provenance-bearing, authorized, and redacted.
-- [ ] Lab and work rollout are staged and reversible.
-- [ ] Tests, accessibility review, Ruff, mypy, identifier gate, and coverage gate pass.
+- [x] Primary IA is Briefing, Findings, Explore, History, Tools, plus configured-settings search — `tests/test_plan025_navigation.py`.
+- [x] Findings and Briefing use persisted/provenance-aware queries — `tests/test_findings_inbox.py`, `tests/test_briefing.py`.
+- [x] Specialist workbenches remain discoverable — `tests/test_explore_tools.py`, route-reference coverage in the navigation tests.
+- [x] Old handlers retain snapshot/filter semantics; no route retirement or permanent redirect is required — `docs/web-route-inventory.json`, bookmark tests.
+- [x] Web narration is demoted and consumes signed safe counts/caveats/provenance — `tests/test_page_narration.py`, `tests/test_ask_routes.py`.
+- [x] Exports are deterministic, provenance-bearing, authorized and redacted — `tests/test_export_rendering.py`, `tests/test_exports.py`.
+- [x] Rollout is reversible in code with `GPO_LENS_LEGACY_NAV` — `test_reversible_nav`.
+- [ ] Coordinator: record the actual v1.3.0 lab/work rollout and bookmark smoke results; branch tests do not prove production deployment.
+- [x] Automated accessibility/navigation checks and the local release gates are recorded in [verification evidence](../docs/release-v1.3.0-verification.md).
+- [ ] Coordinator: final independent acceptance and any manual accessibility/browser review; no such review is invented by this docs pass.

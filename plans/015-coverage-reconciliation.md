@@ -1,6 +1,10 @@
 # Plan 015 — Coverage reconciliation (accept + name the access limitation)
 
-**Status:** proposed 2026-06-14
+**Status:** Shipped in v0.4.0; verified 2026-10-06. Evidence: [src/gpo_lens/ingest.py](../src/gpo_lens/ingest.py), [tests/test_coverage.py](../tests/test_coverage.py).
+
+Inventory/error reconciliation populates `Estate.coverage_gaps`, persistence, doctor findings and summary counts. Both sidecars remain optional for older exports; absence is not proof of full collection.
+
+The design below is the historical specification; this status records the verified release scope.
 **Author:** Opus 4.8 (from live testing against WORK-DOMAIN.local)
 **Strategic role:** Make gpo-lens honest about a limit it cannot engineer away.
 

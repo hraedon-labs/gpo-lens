@@ -1,6 +1,10 @@
 # Plan 010 — Capability Roadmap (post-Tier-2)
 
-**Status:** proposed 2026-06-09
+**Status:** Partially shipped across v0.1.0–v0.3.0; verified 2026-10-06. Evidence: [src/gpo_lens/snapshot_diff.py](../src/gpo_lens/snapshot_diff.py), [tests/test_narration_integration.py](../tests/test_narration_integration.py).
+
+CI, release history, reports, ingest diffs, delegation, ADMX and narration shipped (see CHANGELOG). Publication rules are in `docs/publication-review.md`. PyPI distribution remains unshipped and is not pursued for v1.3.0; installation is from a trusted checkout.
+
+The design below is the historical specification; this status records the verified release scope.
 **Author:** Fable 5 (repo scan + portfolio review)
 **Strategic role:** gpo-lens has built features faster than it has built project
 infrastructure. This plan sequences (a) the infrastructure a 4-day-old project

@@ -1,6 +1,10 @@
 # Plan 018 — ADMX policy names in the UI + dangerous-configuration detectors
 
-**Status:** shipped (v0.6.1) 2026-06-18
+**Status:** Shipped in v0.6.1; verified 2026-10-06. Evidence: [src/gpo_lens/danger.py](../src/gpo_lens/danger.py), [tests/test_danger.py](../tests/test_danger.py).
+
+ADMX naming and the bounded, cited Bucket 1/2 danger set shipped; see also `tests/test_calibration.py` and CHANGELOG v0.6.1/v0.6.4. The examples below are candidate designs, not a promise that every suggested rule ships.
+
+The design below is the historical specification; this status records the verified release scope.
 **Author:** GLM 5.2 (from live IIS-deployment feedback)
 **Strategic role:** Two related gaps, one plan with a hard prerequisite.
 Today the GPO detail "Registry" section shows a column called **Identity** whose

@@ -1,5 +1,11 @@
 # Plan 007 — Tier 2.5 Topology & Hygiene Queries
 
+**Status:** Shipped in v0.1.0; verified 2026-10-06. Evidence: [src/gpo_lens/topology.py](../src/gpo_lens/topology.py), [tests/test_topology.py](../tests/test_topology.py).
+
+SOM conflicts, precedence conflicts and offline broken-reference scans are implemented; the current topology model preserves the collector-resolved chain, including blocked inheritance.
+
+The design below is the historical specification; this status records the verified release scope.
+
 ## Context
 
 Tier 1 is complete (ingest, store, core queries, CLI). Prior session landing added:

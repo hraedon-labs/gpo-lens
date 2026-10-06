@@ -2,174 +2,214 @@
 
 Local-first, read-only Group Policy analysis. Ingests copies of a GPO estate
 (never touches live AD) and answers questions about it. The deterministic core
-has no AI in the truth path — the LLM layer only narrates facts the core
-already computed.
+has no AI in the truth path — the optional LLM layer explains computed facts.
 
-## Quick start
+## Install and quick start
+
+From a trusted release checkout, install the locked CLI and optional web UI:
+
+```bash
+uv sync --locked --extra web
+```
+
+On a Windows DC or RSAT box, export the estate:
 
 ```powershell
-# On a DC or RSAT box, export the estate (read-only, no changes):
-scripts/Export-GpoEstate.ps1 -OutputRoot C:\GpoExport
+.\scripts\Export-GpoEstate.ps1 -OutputRoot C:\GpoExport
 ```
+
+Copy the complete export directory to `./GpoExport` on the analysis machine.
+From the checkout, ingest it and start a local browser session:
 
 ```bash
-# Copy the export to your analysis machine, then:
-gpo-lens ingest C:\GpoExport
-gpo-lens doctor
-# Optional: set GPO_LENS_API_KEY for AI narration (ask, doctor --explain). Without it, narration silently degrades to raw deterministic output.
+uv run gpo-lens --db ./gpo-lens.sqlite3 ingest ./GpoExport
+uv run gpo-lens --db ./gpo-lens.sqlite3 doctor
+uv run gpo-lens --db ./gpo-lens.sqlite3 serve --open
 ```
 
-## What it does
+The local server listens on `127.0.0.1:8000`. Browser upload through
+**Tools → Ingest** accepts the collector ZIP instead of a directory. Keep
+original exports in restricted storage for later re-ingestion. Use one estate
+and one app instance per database; multiple snapshots describe that same estate.
 
-- **Tier 1 — Hygiene scans.** cpassword detection, MS16-072 traps, version
-  skew, broken references, unlinked and empty GPOs, disabled-but-populated
-  sides.
-- **Tier 2 — Baseline comparison.** Diff your estate against a Microsoft
-  Security Baseline (shipped as GPO backups). ADMX crosswalk resolves registry
-  paths back to policy names.
-- **Tier 2.5 — OU-level topology.** Per-OU settings-at-SOM, precedence
-  ordering, conflict surface (same setting, different values). Flags loopback
-  but does not simulate per-user RSoP.
-- **Tier 3 — AI narration (optional).** `doctor --explain` and natural-language
-  `ask` command. Narrates verified facts only; never the source of truth.
-  Requires `GPO_LENS_API_KEY`; degrades gracefully without it.
+## Feature tour
 
-## Install
+The primary navigation is **Briefing / Findings / Explore / History / Tools**.
+The wordmark opens Briefing; existing bookmarks, including the original `/`
+dashboard, retain their handlers and filters.
+
+| Destination | What you can do |
+|-------------|-----------------|
+| **Briefing** | Read deterministic change and finding deltas, linked estate vitals, expiring accepted risks, and coverage/provenance warnings. Select a historical snapshot; a first snapshot or incomplete evaluation is labeled honestly. |
+| **Findings** | Work the default new-or-regressed, open inbox; filter and page results, inspect occurrence observations and evaluation provenance, acknowledge findings, and record or revoke risk acceptance. Resolved and accepted findings remain accessible. |
+| **Explore** | Browse GPO dossiers and their uniform settings ledgers, compare two GPOs, inspect exact settings across the estate, search configured settings, browse scopes, and open resultant, conflict, danger and delegation workbenches. |
+| **History** | Compare stored snapshots with version-counter and per-setting changes. Trends remain available through Tools. Snapshot deltas describe what changed between captures; they do not identify the AD actor who made a change. |
+| **Tools** | Upload exports, manage snapshots, compare Microsoft baselines or golden backups, inspect ADMX coverage, open the legacy dashboard and route reference, and use optional Ask narration. |
+
+Hygiene checks include cpassword exposure, MS16-072, version skew, broken
+references, unlinked/empty GPOs, disabled but populated sides, coverage gaps
+and cited dangerous configurations. Baseline ZIP comparison uses an optional
+ADMX/ADML crosswalk to turn registry identities into policy names.
+
+For a staged rollout, set `GPO_LENS_LEGACY_NAV=1` before starting the server to
+restore the earlier primary links. Ask stays under Tools. Unset the variable
+and restart to return to the new navigation. This changes presentation;
+[deployment access control](deploy/README.md#access-boundary) still applies.
+
+The compact header search searches **configured settings**. It is not a general
+GPO/GUID/OU/trustee search. Historical selection is supported by specific views
+(such as Briefing and dossiers), rather than a global snapshot selector.
+
+## Exports for change tickets and auditors
+
+Major views offer deterministic **Markdown and CSV** downloads: dossiers and
+settings ledgers, filtered findings, occurrence histories, accepted risks,
+briefings, exact settings, and snapshot/GPO/comparison differences. Upload-based
+comparisons have an output selector. Downloads retain the selected filters,
+snapshot/evaluation provenance and scope caveats; secrets and raw source
+fragments are redacted, and spreadsheet formula cells are neutralized. Triage
+attribution is included only for authorized callers.
+
+CLI equivalents read a stored database. For example:
 
 ```bash
-uv pip install -e .
-# or
-pip install -e .
+uv run gpo-lens --db ./gpo-lens.sqlite3 export findings --format csv --lifecycle all --triage all > findings.csv
+uv run gpo-lens --db ./gpo-lens.sqlite3 export briefing --format md --as-of 2026-10-06T00:00:00Z > briefing.md
+uv run gpo-lens --db ./gpo-lens.sqlite3 report --output report.html --format html
 ```
 
-## Key commands
+Exports omit volatile generation timestamps. Supply `--as-of` for repeatable
+time-sensitive briefing/risk classification. The findings export defaults to
+the same actionable view as the inbox; `--lifecycle all --triage all` widens it.
+Use `export --help` for supported views and their required selectors. The older
+HTML/Markdown estate report remains available separately.
 
-| Command | What it does |
-|---------|-------------|
-| `doctor` | Prioritized health findings |
-| `doctor --explain` | AI-powered explanation of findings |
-| `ask "..."` | Natural-language GPO question |
-| `summary` | Estate overview |
-| `ingest <path>` | Parse collector output into DB |
-| `baseline-diff` | Compare against MS baseline |
-| `diff` | Full snapshot diff |
-| `diff-settings` | Per-setting snapshot diff |
-| `changelog` | Version-aware change log |
-| `report --output report.html --format html` | Export audit-ready HTML report |
-| `repl` | Interactive Python REPL with the estate loaded |
-| `settings-at <som>` | Effective settings at a SOM path |
-| `loopback` | GPOs that configure loopback processing |
-| `wmi` | GPOs with WMI filters attached |
-| `wmi-filters` | List WMI filters with query text |
-| `sites` | AD sites and their GPO links (lowest precedence; not resolved per-machine) |
-| `broken-refs` | Detect broken references in settings |
-| `admx-gaps` | Settings with raw key paths (no ADMX policy name) |
-| `gpp-tasks` | Inventory of scheduled tasks deployed by GPO |
-| `gpp-groups` | Local-group membership changes deployed by GPO |
-| `topology-check` | Cross-check OU tree against inheritance |
-| `delegation` | Delegation deep-dive audit |
-| `danger` | Dangerous-configuration detectors |
-| `resultant` | Per-principal resultant view |
+## CLI reference
+
+Global `--db` and `--json` go **before** the subcommand. These are common entry
+points; the help lists the full command set and required arguments:
+
+```bash
+uv run gpo-lens --help
+uv run gpo-lens ingest --help
+uv run gpo-lens export --help
+```
+
+| Command and required arguments | What it does |
+|--------------------------------|-------------|
+| `ingest <directory> --diff-latest` | Save a snapshot and emit differences/events against the previous one |
+| `doctor` / `summary` | Prioritized configured-state findings / estate overview |
+| `snapshots` | List stored snapshot IDs |
+| `diff <a> <b>` / `diff-settings <a> <b>` / `changelog <a> <b>` | Compare snapshots |
+| `settings-at <som>` / `scope <gpo>` | OU-level winning settings / GPO scoping gates and caveats |
+| `baseline-diff <backup>` / `golden-diff <backup>` | Compare baseline or known-good GPO backups |
+| `settings-dump` / `who-sets <query>` | Inventory settings / search configured settings |
+| `delegation` / `danger` | Trustee rights / cited dangerous-configuration findings |
+| `sites` / `loopback` / `wmi` / `wmi-filters` | Site links and scoping mechanisms |
+| `broken-refs` / `admx-gaps` / `topology-check` | References, unresolved names and topology consistency |
+| `gpp-tasks` / `gpp-groups` | Scheduled-task configuration / local-group membership changes |
+| `resultant <principal_sid>` | Supported snapshot principal merge model, with explicit unevaluated gates |
+| `events` / `events-export` | Read snapshot change events / send NDJSON or optional Splunk HEC output |
+| `serve --open` | Start the local web UI |
 
 ## Machine-readable output
 
 Add the global `--json` flag to emit a stable, versioned envelope on stdout:
 
 ```bash
-gpo-lens --json doctor | jq '.data.findings[] | select(.severity=="critical")'
+uv run gpo-lens --db ./gpo-lens.sqlite3 --json doctor | jq '.data.findings[] | select(.severity=="critical")'
 ```
 
 Every `--json` payload is wrapped as `{schema_version, kind, tool_version,
-generated_at, data}`, so downstream tools can depend on the shape and detect
-contract evolution. Errors go to stderr with a nonzero exit (stdout stays clean
-JSON); `report` is human-format only and refuses `--json` (use `summary --json`
-for the machine-readable snapshot). The frozen shapes — and which sibling tools
-consume them — are documented in
-[`docs/spec/json-contract.md`](docs/spec/json-contract.md) and pinned by
-`tests/test_json_contract.py`.
+generated_at, data}`. Errors go to stderr with a nonzero exit; `report` and
+`export` support human formats and reject `--json`. Use `--json summary` for a
+machine-readable overview. The frozen shapes are documented in
+[the JSON contract](docs/spec/json-contract.md) and pinned by
+[contract tests](tests/test_json_contract.py).
+
+## Optional narration under Tools
+
+With `GPO_LENS_API_KEY` configured, **Tools → Ask** routes a question to a
+deterministic query. Dossiers, OU details, finding histories and comparisons
+also offer **Explain these facts** in a separate tab. Web explanations receive
+only bounded counts, fixed caveats and snapshot/analysis provenance; names,
+values, raw evidence and HTML are excluded. The model selects supplied fact
+IDs, and the server rejects additional claims. Without a key, explain actions
+are absent and Ask reports that configuration is needed. Pages never wait for
+narration. Signed forms expire after an hour or a server restart; reload the
+source page if necessary.
+
+The CLI also offers `doctor --explain`, `ask <question>` and
+`explain-setting <identity>`. CLI narration has a different data boundary:
+it can send configured names and values to the selected provider. CLI Ask
+requires a key to route a question; it cannot silently answer without one.
+Review provider/data-egress policy before enabling narration. Core analysis
+and every deterministic export run without a model or API key.
+
+## Deployment and handover
+
+Use the [deployment index](deploy/README.md) to choose:
+
+- [Windows IIS](deploy/iis/README.md): same-host reverse proxy, TLS and IIS access control.
+- [Linux container](deploy/container/README.md): non-root image, persistent data volume, loopback Compose default and optional TLS/basic-auth proxy.
+- [Linux systemd](deploy/systemd/README.md): dedicated service user, hardened unit, root-owned code and optional same-host proxy.
+
+All paths consume copied exports. For remote browser access, the proxy must
+restrict who can reach the app; accepted users can replace the estate.
+Inherited a running installation? Start with the [v1.3.0 operator
+handover](docs/handover.md), including backup and upgrade rules.
 
 ## Design principles
 
 - **Deterministic core.** No AI in the truth path. Parse, normalize, query —
-  all pure and verifiable.
-- **Read-only.** Never touches live AD. Input is file copies only.
+  all verifiable.
+- **Read-only.** Never connects to or changes live AD. Input is file copies.
 - **Minimal runtime dependencies.** The core CLI depends only on `defusedxml`
-  (XML bomb protection) beyond the standard library — portable and
-  air-gappable. The web UI is an optional extra (`pip install -e ".[web]"`).
-- **Air-gappable.** No network required for core features.
-- **Flag, don't simulate.** Topology resolution is OU-level; never claims
-  object-level RSoP (no per-user security/WMI/loopback evaluation). Scoping
-  mechanisms (loopback, security filtering, WMI filters, item-level targeting)
-  are flagged with caveats, not simulated.
-
-## Web navigation and optional explanations
-
-The web UI starts with Briefing / Findings / Explore / History / Tools.
-Explore and Tools retain the specialist workbenches; existing URLs and their
-filters keep their meaning. The compact search box searches configured settings
-through `/search`. Tools includes a complete route reference.
-
-For a staged rollout, set `GPO_LENS_LEGACY_NAV=1` before starting the server to
-restore the old primary links (Ask remains under Tools). Unset it and restart to
-return to the new default. This controls presentation only; see the
-[IIS deployment guide](deploy/iis/README.md) for the unchanged access model.
-
-With `GPO_LENS_API_KEY` configured, dossiers, OU details, finding histories and
-comparison results offer **Explain these facts** in a separate tab. Only bounded
-page counts, fixed scope caveats, and snapshot/analysis provenance are sent.
-Names, values, raw evidence and HTML are excluded. The model selects computed
-fact IDs; the server rejects additional claims and renders the corresponding
-facts. Without a key, these actions are absent. Explanations never run during
-page loading. Signed forms expire after an hour or a server restart; reload the
-original page if needed. Ask remains a separate Tools workbench: it routes the user question to a
-deterministic query and offers the same checked explain action over result
-counts. Query results and raw evidence are never sent to narration.
+  beyond the standard library. The web UI is an optional extra.
+- **Air-gappable.** No network is required for core analysis; prepare the
+  dependency artifacts before moving an installation into an isolated network.
+- **Flag, don't simulate.** OU-level topology flags security filtering, WMI,
+  loopback, item-level targeting and sites. The supported snapshot principal
+  model evaluates only documented collected inputs; it never claims live RSoP.
 
 ## Requirements
 
-- Python 3.12+
-- The collector (`scripts/Export-GpoEstate.ps1`) requires Windows with the
-  `GroupPolicy` and `ActiveDirectory` RSAT modules (a DC or RSAT-equipped host).
+- Python 3.12+; `uv` for the locked installation commands above.
+- The collector requires Windows with the `GroupPolicy` and `ActiveDirectory`
+  RSAT modules (a DC or RSAT-equipped host).
+- `jq` only for the JSON filtering example.
 
 ## Limits
 
-- **Single-domain estates.** The `Estate` model holds one domain's GPOs, SOMs,
-  and WMI filters. Multi-domain or multi-forest estates are not supported.
-- **Site-level GPO links.** Captured and surfaced (`sites` command) and flagged
-  as a caveat on OU views, but **not resolved per-machine**: which computers a
-  site-linked GPO reaches depends on IP subnet → site membership, which is
-  runtime/RSoP state the deterministic core does not evaluate (flag, don't
-  simulate).
-- **Per-user/object RSoP simulation.** The tool resolves settings at the OU
-  level and flags scoping mechanisms (loopback, security filtering, WMI, ILT)
-  with caveats. It does not simulate per-user effective policy.
-- **`<Blocked/>` extensions.** When the GPO report renders an extension as
-  `<Blocked/>` (the CSE was unreadable in-report — common with some third-party
-  extensions), gpo-lens records the setting with `source_state="blocked"` and
-  surfaces it in `admx-gaps`. For the Registry CSE specifically, the binary
-  `Registry.pol` (collected in SYSVOL) is parsed to **resolve** blocked
-  settings into real key/value/type triples (`source_state="registry_pol"`).
-  Other blocked CSEs remain opaque.
-- **Collection coverage is bounded by the collector account's access.** A GPO
-  with *Authenticated Users Read* fully stripped is invisible to a
-  least-privilege account — not just unreadable. Rather than chase full read by
-  granting per-GPO permissions, gpo-lens **reconciles**: run the collector once
-  as a privileged account to produce an authoritative `gpo-inventory.json`, run
-  it routinely as a least-privilege account for the export, and any GPO in the
-  inventory but missing from the export (or named in `collection-errors.json`)
-  is surfaced as a **coverage gap** in `doctor`/`summary` — named, never
-  silently dropped.
+- **One estate per store.** Each database holds snapshots of one domain.
+  Use separate databases/instances for unrelated estates. Multi-domain,
+  multi-forest and cross-estate comparison are not supported.
+- **Site links.** Captured and flagged, but subnet/site membership is not
+  resolved per machine and site GPOs are excluded from OU precedence views.
+- **Live per-user/object RSoP.** Snapshot principal/token/CSE analysis is
+  bounded by collected inputs. WMI truth, ILT and loopback runtime behavior
+  remain caveats; it does not observe what a Windows client applied.
+- **`<Blocked/>` extensions.** Unreadable report extensions remain opaque.
+  For the Registry CSE, a collected `Registry.pol` can resolve them into
+  key/value/type/data (`source_state="registry_pol"`). Other blocked CSEs
+  remain flagged (`source_state="blocked"`).
+- **Collection coverage.** A GPO with Authenticated Users Read stripped can
+  be invisible to a routine collector. Reconciliation uses the inventory
+  and errors supplied with **that export**. Periodically obtain an
+  authoritative `gpo-inventory.json` with a privileged run and include it
+  with routine exports; missing/error GPOs become `coverage_gap` findings.
+  A prior privileged snapshot does not automatically supply the inventory
+  for later exports. No sidecar means no evidence of complete collection.
 
 ## Development
 
 ```bash
-uv venv && uv pip install -e ".[dev]"
-pytest -q
-ruff check .
-mypy src
+uv sync --locked --extra dev --extra web
+.venv/bin/pytest -q --cov=src --cov-report=term-missing --cov-fail-under=85
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+.venv/bin/mypy src
 ```
 
-Inherited a running installation? Start with [`docs/handover.md`](docs/handover.md).
-
-See [`AGENTS.md`](AGENTS.md) for conventions, module map, and build details.
-See [`docs/`](docs/) for the normalized model spec and per-work-item specs.
+See [AGENTS.md](AGENTS.md) for conventions, module map and build details, and
+[docs](docs/) for the normalized model and behavior specifications.

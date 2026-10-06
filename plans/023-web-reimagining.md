@@ -1,6 +1,10 @@
 # Plan 023 — Web frontend reimagining: question-oriented IA, GPO dossier, finding lifecycle
 
-**Status:** Proposed 2026-07-11 (for external model review before work begins)
+**Status:** Superseded by Plans 024 and 025; foundations shipped in v1.1.0 and completion scope in v1.3.0; verified 2026-10-06. Evidence: [src/gpo_lens/queries/_settings.py](../src/gpo_lens/queries/_settings.py), [tests/test_ledger.py](../tests/test_ledger.py).
+
+Ledger, dossier/GPO comparison, setting page and snapshot-aware dossier shipped. Plan 024 replaces the original identity/triage model; Plan 025 supplies briefing, inbox, navigation, bounded narration and exports. Broad entity omnisearch, a global snapshot axis (including historical OU selection), attributed events and persisted comparison-to-workbench deep links remain unshipped; the header search is configured-settings search. No mandatory 301 retirement was needed: original handlers remain.
+
+The design below is the historical specification; this status records the verified release scope.
 **Author:** Claude (Fable 5), from the 2026-07-11 design conversation
 **Strategic role:** gpo-lens is deployed and load-bearing at work, and the web UI
 grew page-by-page: today it is ~17 noun-organized templates (inventory, conflicts,

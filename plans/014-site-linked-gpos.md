@@ -1,6 +1,10 @@
 # Plan 014 — Site-linked GPO support
 
-**Status:** proposed 2026-06-14
+**Status:** Shipped in v0.4.0; verified 2026-10-06. Evidence: [src/gpo_lens/ingest.py](../src/gpo_lens/ingest.py), [tests/test_sites.py](../tests/test_sites.py).
+
+Site SOM ingest, links, persistence and OU caveats are implemented. `scripts/Export-GpoEstate.ps1` exports `sites.json`; per-machine site membership remains unresolved.
+
+The design below is the historical specification; this status records the verified release scope.
 **Author:** Opus 4.8 (post-v0.3.0 feature-completeness review)
 **Strategic role:** Close the one remaining *in-charter* feature gap. gpo-lens
 models Domain and OU scopes-of-management but is entirely blind to AD **site**

@@ -1,6 +1,10 @@
 # Plan 020 — Principal resolution (SIDs → names, membership, population)
 
-**Status:** shipped (v0.6.3) 2026-06-18
+**Status:** Partially shipped in v0.6.3; verified 2026-10-06. Evidence: [src/gpo_lens/authz.py](../src/gpo_lens/authz.py), [tests/test_principal_resultant.py](../tests/test_principal_resultant.py).
+
+SID/name resolution, optional `principals.json` and `group-members.json`, membership persistence and Plan 021 token use shipped. Collection is provided by `scripts/Export-Principals.ps1`. Phase C `ou-population.json`/blast-radius counts and the dedicated Phase B empty-filter-group finding did not ship and are not pursued for v1.3.0.
+
+The design below is the historical specification; this status records the verified release scope.
 **Author:** Claude (Opus 4.8), from a "what would live AD buy us" review
 **Strategic role:** gpo-lens's differentiator is its SDDL/delegation analysis —
 the attack-path view (who can write a GPO, who gets Apply, deny ACEs). But that

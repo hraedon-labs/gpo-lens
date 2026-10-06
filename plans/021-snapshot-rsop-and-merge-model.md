@@ -1,6 +1,10 @@
 # Plan 021 — Snapshot RSoP for a principal (with an explicit merge-resolution model)
 
-**Status:** shipped (v0.6.3) 2026-06-18
+**Status:** Shipped in v0.6.3; verified 2026-10-06. Evidence: [src/gpo_lens/merge.py](../src/gpo_lens/merge.py), [tests/test_principal_resultant_boundary.py](../tests/test_principal_resultant_boundary.py).
+
+The supported snapshot principal/token/security-gate/CSE merge model shipped; `docs/spec/wi_merge.md` and `tests/test_merge.py` define the exact contract. WMI, ILT, loopback and unsupported CSE behavior retain explicit limits; this is not live Windows RSoP.
+
+The design below is the historical specification; this status records the verified release scope.
 **Author:** Claude (Opus 4.8), from the "snapshot RSoP / merge-semantics" thread
 **Strategic role:** The end state people actually want: **take a principal and
 see its Resultant Set of Policy** — computed offline from a snapshot, at scale,
