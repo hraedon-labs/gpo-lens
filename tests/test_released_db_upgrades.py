@@ -27,10 +27,18 @@ TAGS = ("v0.5.0", "v0.7.0", "v0.7.1", "v1.0.0", "v1.1.0", "v1.2.0", "v1.3.1")
 
 def test_previous_release_refuses_schema_10_without_writes(tmp_path: Path) -> None:
     # Exercise the actual released version guard, not a simulated old constant.
+    # Frozen copy of v1.3.1's store.py: CI checkouts are shallow and carry no tags.
+    old_source = (FIXTURES.parent / "released_code" / "v1.3.1-store.py.txt").read_text()
     root = Path(__file__).resolve().parent.parent
-    old_source = subprocess.check_output(
-        ["git", "show", "v1.3.1:src/gpo_lens/store.py"], cwd=root, text=True
+    tagged = subprocess.run(
+        ["git", "show", "v1.3.1:src/gpo_lens/store.py"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
     )
+    if tagged.returncode == 0:
+        assert old_source == tagged.stdout, "frozen v1.3.1 store.py drifted from the tag"
     namespace = {"__name__": "gpo_lens._released_store"}
     exec(compile(old_source, "<v1.3.1-store>", "exec"), namespace)  # noqa: S102
     db = tmp_path / "upgraded.sqlite3"
