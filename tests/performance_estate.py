@@ -44,6 +44,35 @@ def report_xml(index: int, settings: int = 31, *, drift: bool = False) -> bytes:
                 extension, "Registry", KeyName=r"HKLM\Software\Lab", ValueName=name
             )
             setting.text = LAB_SECRET if name == "DefaultPassword" else str((j + int(drift)) % 3)
+    # Every scale includes the 1.4 parsers and dependency inventory, so export
+    # budgets exercise the integrated release rather than registry-only data.
+    computer = root.find("Computer")
+    assert computer is not None
+    audit = ET.SubElement(computer, "ExtensionData")
+    ET.SubElement(audit, "Name").text = "Advanced Audit Configuration"
+    item = ET.SubElement(ET.SubElement(audit, "Extension"), "AuditSetting")
+    for name, value in (
+        ("PolicyTarget", "System"),
+        ("SubcategoryGuid", "{0CCE923F-69AE-11D9-BED3-505054503030}"),
+        ("SubcategoryName", "Audit Credential Validation"),
+        ("SettingValue", str(1 if drift else 3)),
+    ):
+        ET.SubElement(item, name).text = value
+    pki = ET.SubElement(computer, "ExtensionData")
+    ET.SubElement(pki, "Name").text = "Public Key"
+    extension = ET.SubElement(pki, "Extension")
+    ET.SubElement(ET.SubElement(extension, "EFSSettings"), "KeyLen").text = (
+        "4096" if drift else "2048"
+    )
+    ET.SubElement(ET.SubElement(extension, "AutoEnrollmentSettings"), "Enabled").text = "true"
+    user = root.find("User")
+    assert user is not None
+    for cse, tag, share in (("Drives", "Drive", "share"), ("Printers", "SharedPrinter", "queue")):
+        data = ET.SubElement(user, "ExtensionData")
+        ET.SubElement(data, "Name").text = cse
+        item = ET.SubElement(ET.SubElement(ET.SubElement(data, "Extension"), cse), tag)
+        item.set("name", f"Lab {cse} {index:03}")
+        ET.SubElement(item, "Properties", path=rf"\\lab-fs{index % 4:02}\{share}\Lab{index:03}")
     return ET.tostring(root, encoding="utf-16")
 
 
@@ -83,7 +112,8 @@ def collector_zip(estate: Estate) -> bytes:
     """The same generated estate in the collector's file-only input format."""
     root = ET.Element("GPOs")
     for i, gpo in enumerate(estate.gpos):
-        node = ET.fromstring(report_xml(i, len(gpo.settings)))
+        registry_count = sum(s.cse == "Registry" for s in gpo.settings)
+        node = ET.fromstring(report_xml(i, registry_count))
         for link in gpo.links:
             item = ET.SubElement(node, "LinksTo")
             for key, value in (

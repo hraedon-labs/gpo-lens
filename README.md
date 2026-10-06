@@ -4,6 +4,13 @@ Local-first, read-only Group Policy analysis. Ingests copies of a GPO estate
 (never touches live AD) and answers questions about it. The deterministic core
 has no AI in the truth path — the optional LLM layer explains computed facts.
 
+This checkout is the **v1.4.0 release candidate**; the coordinator will date
+and tag the release. The latest published release is **v1.3.1**, which fixes
+v1.3.0's over-redacted broken-reference details. Commands below describe 1.4;
+on 1.3.1, ingest an export directory with the CLI or upload its ZIP through the
+browser. The dependency inventory, scheduled collection helper and freshness
+warning require 1.4.
+
 ## Install and quick start
 
 From a trusted release checkout, install the locked CLI and optional web UI:
@@ -193,13 +200,26 @@ must set `GPO_LENS_ALLOWED_HOSTS` to the browser authority (IIS merges a missing
 value, Compose/systemd provide it). Unset accepts only loopback Host authorities;
 a disallowed Host returns 400 naming the variable. See the deployment guides
 for firewall scope, locked installs and WAL-safe backup/restore commands.
-Inherited a running installation? Start with the [v1.3.1 operator
+Inherited a running installation? Start with the [operator
 handover](docs/handover.md), including backup and upgrade rules.
+
+## Advanced audit and Public Key settings
+
+Advanced Audit Configuration uses subcategory GUID identities and readable
+No Auditing / Success / Failure / Success and Failure values. Copied SYSVOL
+`audit.csv` entries are reconciled with the report; disagreements and unsupported
+shapes are flagged rather than silently interpreted. The override caveat cites
+Microsoft and describes only what that GPO authors, not effective device policy.
+
+Public Key settings include EFS, root trust, autoenrollment, certificate path
+validation and certificate entries with stable identities. Search, GPO ledgers,
+exports, baseline and golden comparisons consume these settings. Legacy Internet
+Explorer Maintenance is marked deprecated. Re-ingest copied exports to obtain
+the new normalization; stored historical settings are retained.
 
 ## External dependencies and ADMX templates
 
-Run **v1.3.1** as the current released version; it fixes v1.3.0's over-redacted
-broken-reference details. The following dependency inventory is Unreleased.
+In **v1.4**, external dependencies and ADMX coverage have separate views.
 
 Before decommissioning or migrating a file or print server, ask “which GPOs
 reference `\\old-fs01`?” Open **Explore → External dependencies**, filter by
@@ -235,7 +255,7 @@ security baseline packages; see the [SCT guide](https://learn.microsoft.com/wind
 Microsoft's templates are not bundled. An unresolved registry setting is a
 coverage gap in the loaded template catalogue, not proof of a bad configuration.
 
-On the next completed ingest, superseded UNC and value-level ADMX findings
+After upgrading to 1.4, on the next completed ingest, superseded UNC and value-level ADMX findings
 resolve as no longer observed, retaining observations and triage history. New
 GPO-level ADMX findings require fresh review; old per-value acknowledgements do
 not silently approve a broader finding. Partial coverage prevents resolution

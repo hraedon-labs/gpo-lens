@@ -3,6 +3,7 @@
 import json
 import os
 import sqlite3
+from contextlib import closing
 
 import pytest
 from fastapi.testclient import TestClient
@@ -144,7 +145,7 @@ def test_admx_one_finding_per_gpo_and_stable_as_gap_list_changes():
 
 def test_upgrade_resolves_old_noise_and_preserves_triage_history(tmp_path):
     estate = Estate(gpos=[gpo([setting("Registry", "1", r"SYSTEM\Lab:Value")])])
-    with sqlite3.connect(tmp_path / "history.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "history.db")) as conn, conn:
         store.init_db(conn)
         sid = store.save_estate(conn, estate)
         old = [
@@ -196,7 +197,7 @@ def test_multi_admx_dirs_cli_env_web_and_doctor(tmp_path, monkeypatch, capsys):
     )
     assert not [f for f in queries.estate_doctor(estate, admx=pd) if f.category == "admx_gap"]
     db = tmp_path / "lab.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         store.init_db(conn)
         store.save_estate(conn, estate)
     monkeypatch.setenv("GPO_LENS_ADMX_DIR", os.pathsep.join(map(str, dirs)))
@@ -224,7 +225,7 @@ def test_multi_admx_dirs_cli_env_web_and_doctor(tmp_path, monkeypatch, capsys):
 def test_inventory_cli_web_exports_navigation_and_host_boundary(tmp_path, capsys):
     estate = Estate(gpos=[gpo([setting("Drives", r"\\old-fs01\share")])])
     db = tmp_path / "lab.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         store.init_db(conn)
         store.save_estate(conn, estate)
     assert main(["--db", str(db), "dependencies", "--json"]) == 0
@@ -256,7 +257,7 @@ def test_noisy_estate_keeps_high_dangers_first_in_inbox_and_briefing(tmp_path):
         ]
     )
     estate.gpos[0].sddl = "O:S-1-5-21-100-200-300-1001D:(A;;GA;;;S-1-5-21-100-200-300-1001)"
-    with sqlite3.connect(tmp_path / "noise.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "noise.db")) as conn, conn:
         store.init_db(conn)
         sid = store.save_estate(conn, estate)
         evaluate_finding_lifecycle_v2(conn, sid, estate)
@@ -272,7 +273,7 @@ def test_noisy_estate_keeps_high_dangers_first_in_inbox_and_briefing(tmp_path):
 
 def test_coverage_gap_does_not_resolve_old_noise(tmp_path):
     estate = Estate(gpos=[gpo()])
-    with sqlite3.connect(tmp_path / "partial.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "partial.db")) as conn, conn:
         store.init_db(conn)
         sid = store.save_estate(conn, estate)
         run = create_evaluation_run(conn, sid)
@@ -350,7 +351,7 @@ def test_parser_script_command_is_used_instead_of_logon_label(tmp_path):
 
 def test_inventory_empty_estate_and_exports(tmp_path):
     db = tmp_path / "empty.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         store.init_db(conn)
     client = TestClient(create_app(str(db)), client=("127.0.0.1", 50000))
     for suffix in ("", "?format=md", "?format=csv"):
@@ -361,7 +362,7 @@ def test_inventory_empty_estate_and_exports(tmp_path):
 def test_admx_evidence_keeps_setting_lists_per_observation(tmp_path):
     settings = [setting("Registry", "1", rf"SYSTEM\Lab:Value{i}") for i in range(3)]
     estate = Estate(gpos=[gpo(settings)])
-    with sqlite3.connect(tmp_path / "evidence.db") as conn:
+    with closing(sqlite3.connect(tmp_path / "evidence.db")) as conn, conn:
         store.init_db(conn)
         sid = store.save_estate(conn, estate)
         evaluate_finding_lifecycle_v2(conn, sid, estate)
@@ -387,7 +388,7 @@ def test_admx_evidence_keeps_setting_lists_per_observation(tmp_path):
 def test_dependency_view_and_exports_require_authentication(tmp_path, monkeypatch, suffix):
     monkeypatch.setenv("GPO_LENS_AUTH_TOKEN", "lab-only-token")
     db = tmp_path / "auth.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         store.init_db(conn)
     client = TestClient(create_app(str(db)))
     assert client.get("/dependencies" + suffix).status_code == 401

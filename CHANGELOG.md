@@ -2,91 +2,99 @@
 
 ## Unreleased
 
-Draft **v1.4.0** — release date and package version bump by coordinator.
-
-### Fixed
-
-- **Trend counts (WI-101).** Preserve numeric aggregates and presentation
-  headers during credential masking, including text trends. Numeric password
-  strings and copied credentials remain masked.
-- **Calibration metrics.** Count resolved and unresolved principals from each
-  persisted snapshot. Report interpreter resource and deprecation warnings
-  separately from product warning templates and unclassified warnings.
+Draft **v1.4.0** — release date to be assigned by the coordinator.
 
 ### Added
 
-- **Calibration harness.** Measure explicitly supplied copied-estate archives
-  across CLI, web routes and exports, with determinism and credential-leak
-  checks. Sanitized reports fail closed; optional private detail output refuses
-  destinations inside Git worktrees. The harness stays outside the package.
+- Advanced Audit Configuration parsing with stable subcategory GUID identities,
+  named audit values and copied `audit.csv` reconciliation. Disagreements and
+  unsupported evidence remain visible. A Microsoft-cited authoring caveat flags
+  subcategories without the force-subcategory option in the same GPO; it does
+  not claim device-level auditing is ineffective.
+- Public Key parsing for EFS, root certificate trust, autoenrollment, path
+  validation and certificate entries, using stable identities in search,
+  ledgers, exports and baseline/golden comparisons.
+- External dependency inventory in **Explore** and `gpo-lens dependencies`
+  (`--server`, `--json`), grouped by server/share with GPO links, dependency
+  types, counts, and deterministic redacted Markdown/CSV downloads. It records
+  configured paths without contacting servers or inferring actual use.
+- Multiple ADMX directories through repeatable `--admx-dir` and the platform
+  path list in `GPO_LENS_ADMX_DIR`, including toolkit templates beside the
+  central store.
+- Scheduled read-only collection with gMSA or service-account credentials,
+  a hard two-hour task limit, retention, rotating logs, optional atomic ZIP
+  delivery, privileged inventory overlay, preview and unregister support.
+- Briefing snapshot age and stale-collection warning, including evidence
+  downloads. `GPO_LENS_STALE_SNAPSHOT_DAYS` defaults to eight days.
+- Safe CLI collector ZIP ingest using the same bounded extraction helper as
+  web uploads, including Windows backslash entries and a single enclosing
+  export folder. Traversal, symlinks, duplicate paths and excessive expansion
+  or compression ratios are rejected; temporary files are cleaned up.
+- Standalone calibration harness for explicitly supplied copied-estate archives,
+  with determinism and credential-leak checks. Sanitized reports fail closed;
+  private detail output refuses destinations inside Git worktrees.
+
+### Changed
+
+- **JSON contract version 2.** Broken references retain their row shape but
+  mean malformed paths or missing files within a GPO's own collected SYSVOL.
+  Ordinary external UNC dependencies and machine-local paths are unverifiable
+  offline and no longer create findings. Summary and trend counts follow this
+  meaning.
+- Doctor and inbox ADMX gaps aggregate once per GPO, with the setting count and
+  full identity list in detail and observation evidence. The raw gap query
+  continues to return individual settings. Audit/PKI settings are not registry
+  policies and do not create ADMX gaps.
+- Briefings surface observed critical/high dangers before routine hygiene
+  counts while retaining collection freshness and coverage warnings.
+- Legacy Internet Explorer Maintenance is explicitly classified as deprecated
+  with an informational source note.
+
+### Fixed
+
+- Trend numeric aggregates and presentation headers survive redaction (WI-101);
+  numeric password strings, SYSVOL-only credentials and copied secrets stay masked.
+- Printer connections have their own dependency type rather than drive mappings.
+- Doctor uses the supplied ADMX resolver.
+- CLI changelog and failed web connection setup close their SQLite connections;
+  fixture builders, benchmarks and tests close connections explicitly. Resource
+  and unraisable-warning guards remain enabled.
+- Calibration counts resolved/unresolved principals per persisted snapshot and
+  distinguishes interpreter warnings from product warning templates. Its full
+  route/format probe uses the actual in-process limiter budget so new routes
+  cannot silently fall behind rate-limit responses.
+- Historical briefing danger labels use selected-run observation names as well
+  as severity and summary, preserving evidence after later GPO renames.
+- Dedicated Administrative Templates `EditTextBox` configured-value coverage
+  completes the WI-080 per-shape regression suite.
 
 ### Performance
 
-- **Large-estate exports and connection hygiene (F3).** Batch finding provenance
-  reads, stream HTTP exports in bounded UTF-8 chunks, and prepare credential
-  masking once per projection. Shared topology evidence is inspected once per
-  credential-discovery pass. Markdown/CSV bytes, provenance, redaction and
-  authorization remain unchanged. Close CLI changelog connections on errors,
-  close failed web connection setup, and explicitly close fixture-builder and
-  benchmark connections. Add seeded synthetic calibration, CI operation budgets,
-  opt-in large-estate benchmarks and explicit connection-lifetime regressions.
+- Batch finding provenance reads, stream HTTP exports in bounded UTF-8 chunks,
+  and prepare credential masking once per projection. Shared topology evidence
+  is inspected once per discovery pass. Finding exports improve from roughly
+  41 seconds to 4.5 seconds in the stream's calibration, with byte-identical
+  Markdown/CSV output and preserved authorization/redaction.
+- Baseline/golden comparison speedups, seeded large-estate generation and
+  operation budgets cover audit/PKI data and dependency inventory exports.
 
+### Upgrade notes
 
-### Added
-
-- **Advanced Audit Configuration and Public Key parsers (F1).** Audit
-  subcategories use stable GUID identities and named 0–3 values; copied
-  `audit.csv` evidence is reconciled with reports, with disagreements flagged.
-  EFS, root certificate trust, autoenrollment and certificate entries become
-  readable settings in existing search, ledgers, exports and comparisons.
-  A Microsoft-cited authoring caveat flags audit subcategories without the
-  force-subcategory option in the same GPO. Legacy Internet Explorer Maintenance
-  is explicitly classified as deprecated, with an informational note. Existing
-  databases remain compatible; no schema migration or dependency is added.
-
-
-### Added
-
-- Scheduled read-only collection under gMSA or service-account credentials, with
-  an explicit two-hour task limit, retention, rotating logs, optional atomic ZIP
-  delivery, privileged inventory overlay, dry-run and unregister support.
-- Briefing snapshot age and stale-collection warning after a configurable number
-  of days (`GPO_LENS_STALE_SNAPSHOT_DAYS`, default 8), including in evidence exports.
-
-### Fixed
-
-- CLI ingest accepts collector ZIPs using the same bounded extraction helper as
-  web uploads. Windows backslash paths and wrapped export folders are supported;
-  traversal, symlinks, duplicate paths, excessive expansion/ratios are rejected,
-  and temporary files are cleaned up on success or failure.
-
-
-### Added
-
-- External dependency inventory under Explore and `gpo-lens dependencies`
-  (`--server`, `--json`), grouped by server/share with GPO links, dependency
-  types, counts, and deterministic redacted Markdown/CSV exports.
-- Multiple ADMX directories via repeatable `--admx-dir` and the platform path
-  list in `GPO_LENS_ADMX_DIR`; load toolkit templates alongside the central store.
-
-### Changed / Breaking
-
-- **JSON contract version 2.** `broken-refs` keeps its row shape but now reports
-  only malformed paths and files missing from a GPO own collected SYSVOL. UNC
-  dependencies and machine-local task paths no longer create findings. Summary
-  and trend broken-reference counts follow the new meaning.
-- ADMX gaps produce one doctor/inbox finding per GPO with the setting count
-  and full setting list in detail. Old noise occurrences resolve on a completed
-  evaluation with meaningful coverage; historical evidence and triage remain.
-  Aggregated ADMX findings start a new series requiring their own review.
-
-### Fixed
-
-- Printer connections have their own dependency type instead of drive mappings.
-- Doctor uses the supplied ADMX resolver; briefings surface high-severity dangers
-  before routine hygiene counts, while the inbox retains severity-first ordering.
-
-
+- Back up the database and separate `audit.log` before upgrading. Released-DB
+  preservation and WAL backup/restore tests cover v0.5.0–v1.2.0 schema generations
+  and a fixture produced through v1.3.1's public CLI/web/triage APIs.
+- No new schema migration or runtime dependency is required. Re-ingest copied
+  inputs to obtain audit/PKI identities; historical snapshots keep their original
+  parser output.
+- On a completed evaluation with meaningful coverage, superseded UNC and
+  value-level ADMX noise resolves while history and triage remain. Aggregated
+  ADMX findings start a new series requiring fresh review; old acknowledgements
+  do not approve the broader finding. Partial coverage prevents resolution
+  claims for uncollected GPOs.
+- Consumers must account for JSON contract version 2. Operators remaining on
+  v1.3.1 keep its corrected broken-reference details and directory-only CLI ingest;
+  the new inventory, scheduled collector, ZIP CLI ingest and freshness warning
+  are v1.4 capabilities.
 
 ## v1.3.1 — 2026-10-06
 

@@ -297,7 +297,7 @@ def build_briefing(
     # dominates the estate. Use selected-run observations, never mutable current
     # occurrence prose, so historical briefings keep their original evidence.
     top_dangers = conn.execute(
-        "SELECT o.severity, o.summary, f.gpo_name FROM finding f "
+        "SELECT o.severity, o.summary, o.gpo_name FROM finding f "
         "JOIN finding_observation o ON o.occurrence_id = f.id "
         "WHERE o.run_id = ? AND f.rule_id LIKE 'danger:%' "
         "AND o.severity IN ('critical', 'high') "

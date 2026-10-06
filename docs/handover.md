@@ -1,10 +1,10 @@
 # Taking over a gpo-lens installation
 
 Start here if you've inherited a running gpo-lens and the person who set it up
-isn't around to ask. **Run v1.3.1 and upgrade older installations to v1.3.1.**
-v1.3.1 fixes the v1.3.0 regression that over-redacted broken-reference details.
-gpo-lens has two halves that are easy to forget about
-separately:
+isn't around to ask. This page describes the **v1.4.0 release candidate**.
+The latest published release is **v1.3.1**, fixing v1.3.0's over-redacted
+broken-reference details. Keep running 1.3.1 until the coordinator publishes 1.4;
+the new capabilities below require 1.4. gpo-lens has two halves:
 
 - **Collection.** A PowerShell script, run on a DC or RSAT box, exports the
   Group Policy estate to files. It is read-only and never writes to AD.
@@ -12,8 +12,26 @@ separately:
   and answers questions about them.
 
 The app only knows what the last export told it. If collection stops, the app
-keeps showing an increasingly old estate and doesn't complain about it. Most of
-this page is about keeping collection alive.
+keeps showing an increasingly old estate. In 1.4, Briefing warns when the newest
+import is stale; 1.3.1 operators must check snapshot age manually. Import age does
+not establish source collection age. Most of this page is about keeping collection alive.
+
+## What's new in 1.4
+
+- Advanced Audit Configuration and Public Key settings appear in search,
+  ledgers, exports and baseline/golden comparisons. Audit CSV disagreements
+  are flagged; override caveats make no device-level claim. Re-ingest copied
+  inputs to obtain the new identities. Legacy IEM is marked deprecated.
+- **Explore → External dependencies** inventories configured server/share
+  references with redacted downloads. Broken-reference findings now cover only
+  what can be verified offline; ADMX findings aggregate per GPO. See the
+  dependency and ADMX guidance below for JSON contract version 2 and triage.
+- The scheduled collector supports gMSA/service accounts, retention and ZIP
+  delivery; delivery still needs a separate ingest. CLI ingest accepts bounded
+  collector ZIPs as well as directories. Section 3 covers operations.
+- Briefing warns after eight days without a new import by default and retains
+  high-severity danger ordering. Exports and comparisons have large-estate
+  performance budgets with deterministic output and preserved redaction.
 
 ## What's new for an operator in 1.3
 
@@ -115,7 +133,7 @@ what *it* could enumerate. To keep that check honest:
 - Treat any coverage gap as a real finding: a GPO someone has hidden from
   routine readers is exactly what this tool exists to surface.
 
-**Schedule it.** On the DC/RSAT collector host, from an elevated PowerShell
+**Schedule it (1.4).** On the DC/RSAT collector host, from an elevated PowerShell
 session, choose one mode:
 
 ```powershell
@@ -173,7 +191,8 @@ or wire the task result/newest-export age into your site's monitoring.
 .\scripts\Export-GpoEstate.ps1 -OutputRoot C:\GpoExport
 ```
 
-Then upload the ZIP through **Tools > Ingest**, or use CLI `ingest <file.zip>`.
+Then upload the ZIP through **Tools > Ingest**, or in 1.4 use CLI `ingest <file.zip>`.
+On 1.3.1, CLI ingest takes the complete export directory.
 Both safely handle Windows PowerShell 5.1 backslash ZIP entries; no manual
 repacking is needed. Real exports are often 50-100 MB+; the site's
 `web.config` allows up to 500 MB.
@@ -206,9 +225,9 @@ produces deterministic findings or exports.
 
 ## 6. Upgrading
 
-**Target v1.3.1. Back up first.** The upgrade suite covers releases since
+**Target v1.4.0 once published. Back up first.** The upgrade suite covers releases since
 v0.5.0 with actual databases created by v0.5.0, v0.7.0, v0.7.1, v1.0.0,
-v1.1.0 and v1.2.0 (the released schema generations). This is the tested upgrade
+v1.1.0, v1.2.0 and v1.3.1 (including the latest released schema). This is the tested upgrade
 path from any release since v0.5.0; it is not a separate fixture for every patch
 tag. [Upgrade tests](../tests/test_released_db_upgrades.py) preserve snapshots,
 entities, events, audit logs and supported finding/risk history; they also test
@@ -240,14 +259,14 @@ The steps below are for IIS. Alternatives:
 and [systemd upgrade/rollback](../deploy/systemd/README.md#upgrade-and-rollback).
 
 1. Read the [CHANGELOG](../CHANGELOG.md) entries between your version and the
-   target **v1.3.1**. Releases are annotated git tags (`vX.Y.Z`).
+   target **v1.4.0** once published. Releases are annotated git tags (`vX.Y.Z`).
 2. Back up the database and `audit.log` (rule 3).
-3. In the server's checkout: `git fetch --tags` then `git checkout v1.3.1`.
+3. In the server's checkout: `git fetch --tags` then `git checkout v1.4.0` once the coordinator publishes the tag.
 4. From an elevated PowerShell in that checkout:
    `.\scripts\install-windows.ps1 -ConfigureIIS`. It stops the pool, refreshes
    the venv using the committed hash-pinned requirements and the checkout
    with `--no-deps`, adds the host policy if missing, and restarts it.
-5. Confirm the header and `/api/version` show **1.3.1**, then run one ingest. Schema
+5. Confirm the header and `/api/version` show **1.4.0**, then run one ingest. Schema
    changes are additive and applied automatically when the database is opened.
 
 **To roll back**, stop the pool, restore the previous code/venv and the
@@ -275,10 +294,9 @@ with it; see [AGENTS.md](../AGENTS.md) for the module map and conventions.
 | The JSON output contract | [docs/spec/json-contract.md](spec/json-contract.md) |
 | The data model | [docs/tier1-normalized-model.md](tier1-normalized-model.md) |
 
-## Unreleased dependency and ADMX guidance
+## Dependency and ADMX guidance for 1.4
 
-The current release to run is **v1.3.1**, fixing the v1.3.0 regression that
-over-redacted broken-reference diagnostics. F2 adds **Explore → External
+Version 1.4 adds **Explore → External
 dependencies** and `gpo-lens dependencies --server old-fs01 --json` for file/print
 server migration planning. Counts and targets describe configured paths, not
 reachability or application. The view has deterministic, authorized, redacted

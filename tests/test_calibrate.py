@@ -11,6 +11,7 @@ import sqlite3
 import sys
 import warnings
 import zipfile
+from contextlib import closing
 from pathlib import Path
 from types import ModuleType
 
@@ -70,7 +71,7 @@ def test_fixture_report_shape_order_and_diff(fixture_run) -> None:
     assert "gpo-cpassword" in denylist
     assert (scratch / "estate.sqlite3").exists()
     assert report["scale"]["db_bytes"] == (scratch / "estate.sqlite3").stat().st_size
-    with sqlite3.connect(scratch / "estate.sqlite3") as conn:
+    with closing(sqlite3.connect(scratch / "estate.sqlite3")) as conn, conn:
         assert conn.execute("SELECT COUNT(*) FROM snapshot").fetchone()[0] == 2
 
 
@@ -91,6 +92,31 @@ def test_routes_are_enumerated_and_exports_render(fixture_run) -> None:
     assert all(r["response_bytes"] > 0 and r["row_count"] >= 0 for r in successful_exports)
     assert all(r["wall_seconds"] >= 0 for r in report["web"])
     assert not any(r["status_code"] in {401, 403, 429} for r in report["web"])
+    dependencies = [r for r in report["web"] if r["route_template"] == "/dependencies"]
+    assert {r["format"] for r in dependencies} == {"", "md", "csv"}
+    assert all(r["status_code"] == 200 for r in dependencies)
+    assert all(count == 0 for count in report["redaction"]["leaks_by_route_template"].values())
+
+
+def test_calibration_connection_closes_when_initialization_fails(tmp_path, monkeypatch):
+    connections = []
+    connect = sqlite3.connect
+
+    def tracked(*args, **kwargs):
+        conn = connect(*args, **kwargs)
+        connections.append(conn)
+        return conn
+
+    def failed_init(_):
+        raise RuntimeError("Synthetic initialization failure")
+
+    monkeypatch.setattr(calibrate.sqlite3, "connect", tracked)
+    monkeypatch.setattr(calibrate.store, "init_db", failed_init)
+    with pytest.raises(RuntimeError, match="Synthetic initialization failure"):
+        calibrate.calibrate([], tmp_path)
+    assert len(connections) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connections[0].execute("SELECT 1")
 
 
 def homelab_style_zip(tmp_path: Path) -> Path:
@@ -167,7 +193,7 @@ def test_self_check_blocks_planted_leak(planted) -> None:
 
 
 def test_self_check_uses_nested_database_text_and_export_paths(tmp_path: Path) -> None:
-    with sqlite3.connect(":memory:") as conn:
+    with closing(sqlite3.connect(":memory:")) as conn, conn:
         conn.execute("CREATE TABLE data (number INTEGER, text TEXT, blob TEXT)")
         conn.execute(
             "INSERT INTO data VALUES (?, ?, ?)",
@@ -303,7 +329,7 @@ def test_principal_metrics_use_each_persisted_snapshot(tmp_path, fixture_zip, mo
     scratch.mkdir()
     with calibrate.private_output(calibrate.Capture(calibrate.source_formats())):
         report, denylist = calibrate.calibrate(archives, scratch)
-    with sqlite3.connect(scratch / "estate.sqlite3") as conn:
+    with closing(sqlite3.connect(scratch / "estate.sqlite3")) as conn, conn:
         for row, expected in zip(report["ingest"], ((2, 1), (1, 2)), strict=True):
             actual = conn.execute(
                 "SELECT SUM(resolved), SUM(1 - resolved) FROM principal WHERE snapshot_id=?",
@@ -435,7 +461,7 @@ def test_report_projection_does_not_contain_fixture_identifiers(fixture_run) -> 
     report, _, _ = fixture_run
     # Independently check identifiers as well as the mechanically exempted gate.
     serialized = json.dumps(report).casefold()
-    with sqlite3.connect(fixture_run[2] / "estate.sqlite3") as conn:
+    with closing(sqlite3.connect(fixture_run[2] / "estate.sqlite3")) as conn, conn:
         for query in (
             "SELECT name FROM gpo",
             "SELECT path FROM som",
@@ -492,7 +518,7 @@ def test_web_probe_counts_planted_response_leak_and_crash(fixture_run, monkeypat
         return app
 
     monkeypatch.setattr(web_app, "create_app", instrumented)
-    with sqlite3.connect(scratch / "estate.sqlite3") as conn:
+    with closing(sqlite3.connect(scratch / "estate.sqlite3")) as conn, conn:
         estate = load_estate(conn)
     detail = calibrate.Detail()
     token = calibrate.DETAIL.set(detail)

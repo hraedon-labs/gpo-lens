@@ -194,12 +194,13 @@ def test_broken_refs_shape(capsys, contract_db):
     # The fixture's external UNC is inventory now. Add an offline-verifiable
     # malformed UNC to exercise the unchanged broken-reference row shape.
     import sqlite3
+    from contextlib import closing
 
     from gpo_lens import store
     from gpo_lens.model import Setting
 
     assert _payload(capsys, contract_db, "broken-refs") == []
-    with sqlite3.connect(contract_db) as conn:
+    with closing(sqlite3.connect(contract_db)) as conn, conn:
         estate = store.load_estate(conn)
         gpo = estate.gpos[0]
         gpo.settings.append(

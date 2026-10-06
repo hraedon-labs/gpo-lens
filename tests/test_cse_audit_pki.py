@@ -6,6 +6,7 @@ import json
 import shutil
 import sqlite3
 import zipfile
+from contextlib import closing
 from dataclasses import asdict
 from pathlib import Path
 
@@ -118,7 +119,7 @@ def test_csv_agrees_without_duplicate_and_round_trips(tmp_path, encoding):
     assert s.identity == GUID
     assert s.raw["audit_csv"]["Setting Value"] == "3"
     assert not [f for f in queries.estate_doctor(e) if f.category == "audit_source_disagreement"]
-    with sqlite3.connect(":memory:") as conn:
+    with closing(sqlite3.connect(":memory:")) as conn, conn:
         store.init_db(conn)
         sid = store.save_estate(conn, e)
         assert sorted(
@@ -228,7 +229,7 @@ def test_audit_baseline_zip_golden_snapshot_and_search(tmp_path):
     assert len(diff) == 1 and diff[0].status == "drift"
     golden = [d for d in queries.golden_diff(after, before) if d.identity == GUID]
     assert len(golden) == 1 and golden[0].status == "changed"
-    with sqlite3.connect(":memory:") as conn:
+    with closing(sqlite3.connect(":memory:")) as conn, conn:
         store.init_db(conn)
         a, b = store.save_estate(conn, before), store.save_estate(conn, after)
         changes = snapshot_settings_diff(conn, a, b)
@@ -273,7 +274,7 @@ def test_audit_and_pki_ou_precedence():
 def test_old_database_opens_and_accepts_new_cses(tmp_path):
     path = tmp_path / "old.sqlite3"
     shutil.copyfile(Path(__file__).parent / "fixtures/released_databases/v1.2.0.sqlite3", path)
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         store.init_db(conn)
         assert store.load_estate(conn).gpos
         sid = store.save_estate(conn, estate())

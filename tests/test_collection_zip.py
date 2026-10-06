@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import zipfile
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -43,7 +44,7 @@ def test_cli_ingests_zip_and_removes_temporary_files(
     main(["--db", str(database), "ingest", str(archive), "--json", "--diff-latest"])
     result = json.loads(capsys.readouterr().out)["data"]
     assert result["gpo_count"] == 14
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn, conn:
         assert conn.execute("SELECT COUNT(*) FROM snapshot").fetchone()[0] == 1
         assert (
             conn.execute("SELECT COUNT(*) FROM evaluation_run WHERE status='completed'").fetchone()[
@@ -202,7 +203,7 @@ def test_web_upload_accepts_wrapped_windows_zip(tmp_path, monkeypatch):
             follow_redirects=False,
         )
         assert response.status_code == 303
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn, conn:
         assert conn.execute("SELECT COUNT(*) FROM gpo").fetchone()[0] == 14
 
 
@@ -248,7 +249,7 @@ def test_cli_second_zip_ingest_emits_diff_events(tmp_path, capsys):
     result = json.loads(capsys.readouterr().out)["data"]
     assert result["snapshot_id"] == 2
     assert result["changelog"] == []
-    with sqlite3.connect(database) as conn:
+    with closing(sqlite3.connect(database)) as conn, conn:
         assert (
             conn.execute(
                 "SELECT COUNT(*) FROM events WHERE event_type='ingest.summary'"

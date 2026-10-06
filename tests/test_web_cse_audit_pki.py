@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -41,7 +42,7 @@ def client(tmp_path, monkeypatch):
         (FIXTURE / "audit.csv").read_bytes().replace(b",,3", b",,1")
     )
     db = tmp_path / "lab.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         init_db(conn)
         save_estate(conn, load_estate(source))
     with TestClient(

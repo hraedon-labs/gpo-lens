@@ -25,7 +25,7 @@ from xml.etree import ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "tests/fixtures/released_databases"
-TAGS = ("v0.5.0", "v0.7.0", "v0.7.1", "v1.0.0", "v1.1.0", "v1.2.0")
+TAGS = ("v0.5.0", "v0.7.0", "v0.7.1", "v1.0.0", "v1.1.0", "v1.2.0", "v1.3.1")
 GPO_IDS = {"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "cccccccc-cccc-cccc-cccc-cccccccccccc"}
 
 
@@ -165,6 +165,7 @@ def worker(tag: str, export: Path, destination: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--tags", nargs="+", choices=TAGS, default=TAGS)
     parser.add_argument("--worker", choices=TAGS)
     parser.add_argument("--export", type=Path)
     parser.add_argument("--output", type=Path, default=OUTPUT)
@@ -173,7 +174,7 @@ def main() -> None:
         worker(args.worker, args.export, args.output)
         return
     args.output.mkdir(parents=True, exist_ok=True)
-    for tag in TAGS:
+    for tag in args.tags:
         with tempfile.TemporaryDirectory(prefix="gpo-release-") as temporary:
             scratch = Path(temporary)
             checkout = scratch / "code"

@@ -52,6 +52,20 @@ def export_client(tmp_path, monkeypatch, secret_corpus):
             raw = {"@attr": {"cpassword": secret}}
             cse = "Synthetic"
         gpo.settings.append(Setting(gpo.id, "Computer", cse, identity, name, value, raw, False))
+        # All corpus values also occur in F2 targets, including escaped copies.
+        target = rf"\\lab-user:{secret}@files.lab.example.com\share\LabEntry{i}"
+        gpo.settings.append(
+            Setting(
+                gpo.id,
+                "User",
+                "Drives",
+                f"Dependency{i}",
+                f"Lab dependency {i}",
+                target,
+                {"@attr": {"path": target, "cpassword": secret}},
+                False,
+            )
+        )
     gpo.settings.append(
         Setting(
             gpo.id,
@@ -129,6 +143,8 @@ def export_client(tmp_path, monkeypatch, secret_corpus):
         "/setting?identity=Carrier0&cse=Synthetic",
         "/search?q=Carrier",
         "/changelog?snap_a=1&snap_b=1",
+        "/dependencies",
+        "/dependencies?server=files.lab.example.com",
     ],
 )
 @pytest.mark.parametrize("format", ["md", "csv"])
@@ -176,6 +192,7 @@ def test_cli_export_available(export_client, capsys):
         "/api/v1/query/settings_at_som?ou_path=dc=fakefixture,dc=local",
         "/api/v1/query/cpassword_scan",
         "/export/gpo/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?format=json",
+        "/dependencies",
     ],
 )
 def test_shared_secret_corpus_html_api(export_client, secret_corpus, url):
@@ -865,7 +882,9 @@ def test_filtered_historical_dossier_explain_and_export_use_same_rows(export_cli
 
 
 @pytest.mark.parametrize("as_json", [False, True])
-@pytest.mark.parametrize("command", ["who-sets", "search", "show", "diff-settings"])
+@pytest.mark.parametrize(
+    "command", ["who-sets", "search", "show", "diff-settings", "dependencies", "trends"]
+)
 def test_ordinary_cli_commands_share_credential_projection(
     export_client, capsys, secret_corpus, command, as_json
 ):
@@ -887,9 +906,11 @@ def test_ordinary_cli_commands_share_credential_projection(
         "search": ["search", "DefaultPassword"],
         "show": ["show", gid],
         "diff-settings": ["diff-settings", "1", "2"],
+        "dependencies": ["dependencies"],
+        "trends": ["trends"],
     }[command]
     # Show reads the newest snapshot, so use a source populated with secrets.
-    if command == "show":
+    if command in {"show", "dependencies", "trends"}:
         with closing(sqlite3.connect(export_client.db_path)) as conn, conn:
             save_estate(conn, load_estate(conn, 1))
     assert main(argv) == 0

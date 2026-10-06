@@ -21,7 +21,7 @@ from gpo_lens.findings import accepted_risk_register, finding_history, load_tria
 from gpo_lens.store import CURRENT_SCHEMA_VERSION, init_db, list_snapshots, load_estate, save_estate
 
 FIXTURES = Path(__file__).parent / "fixtures/released_databases"
-TAGS = ("v0.5.0", "v0.7.0", "v0.7.1", "v1.0.0", "v1.1.0", "v1.2.0")
+TAGS = ("v0.5.0", "v0.7.0", "v0.7.1", "v1.0.0", "v1.1.0", "v1.2.0", "v1.3.1")
 
 
 def _contents(conn: sqlite3.Connection) -> dict[str, tuple[list[str], list[tuple]]]:

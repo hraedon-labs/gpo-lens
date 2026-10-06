@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import sqlite3
 import xml.etree.ElementTree as ET
+from contextlib import closing
 
 import pytest
 from fastapi.testclient import TestClient
@@ -69,7 +71,7 @@ def build_preference_estate(tmp_path, credentials):
     assert {r.detail for r in refs} == set(DETAILS)
     assert {r.dependency_type for r in refs} == {"drive_mapping", "printer_connection"}
     db = tmp_path / "lab.sqlite3"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         init_db(conn)
         snapshot = save_estate(conn, estate)
         evaluate_finding_lifecycle_v2(conn, snapshot, estate)
@@ -176,17 +178,22 @@ def test_raw_fragments_still_omitted(fragment):
 @pytest.mark.parametrize("as_json", [False, True])
 def test_no_secret_cli_read_commands_do_not_redact(tmp_path, capsys, monkeypatch, as_json):
     from gpo_lens.cli._core import _COMMANDS
+    from gpo_lens.cli._export import EXPORT_VIEWS
+    from gpo_lens.events import append_event
     from gpo_lens.model import ResolvedPrincipal
     from gpo_lens.store import load_estate as load_snapshot
 
     source, db, _ = build_preference_estate(tmp_path, False)
     sid = "s-1-5-21-100-200-300-1001"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         estate = load_snapshot(conn)
         estate.principals[sid] = ResolvedPrincipal(
             sid, "LABDOMAIN\\reader", "reader", "User", "LABDOMAIN", True
         )
         save_estate(conn, estate)
+        append_event(conn, "lab.read_guard", {"description": "Ordinary lab evidence", "count": 7})
+        occurrence = conn.execute("SELECT id FROM finding ORDER BY id LIMIT 1").fetchone()[0]
+    assert secret_values(estate) == ()
     conn.close()
     dump = tmp_path / "settings.json"
     dump.write_text("[]", encoding="utf-8")
@@ -223,16 +230,70 @@ def test_no_secret_cli_read_commands_do_not_redact(tmp_path, capsys, monkeypatch
             "explain-setting": ["explain-setting", "Lab"],
         }
     )
-    # Exports intentionally mark omitted raw/audit fields even without secrets;
-    # their credential behavior is covered by the export tests above.
-    excluded = {"ingest", "events-export", "export", "serve", "repl"}
-    assert set(commands) == {c.name for c in _COMMANDS} - excluded
-    failures = []
-    for name, argv in commands.items():
-        json_args = ["--json"] if as_json and name != "report" else []
+    events_file = tmp_path / "events.ndjson"
+    commands["events-export"] = ["events-export", "--ndjson", str(events_file)]
+    exports = {
+        "dossier": ["--gpo-id", GID],
+        "ledger": ["--gpo-id", GID],
+        "findings": ["--lifecycle", "all", "--triage", "all"],
+        "occurrence": ["--occurrence-id", str(occurrence)],
+        "accepted-risks": [],
+        "briefing": [],
+        "setting": ["--identity", "Lab"],
+        "diff": ["--snapshot-a", "1", "--snapshot-b", "2"],
+        "diff-settings": ["--snapshot-a", "1", "--snapshot-b", "2"],
+        "changelog": ["--snapshot-a", "1", "--snapshot-b", "2"],
+        "baseline-diff": ["--comparator", str(source)],
+        "golden-diff": ["--comparator", str(source)],
+        "settings-dump": [],
+        "settings-diff": ["--file-a", str(dump), "--file-b", str(dump)],
+        "who-sets": ["--q", "Lab"],
+    }
+    assert set(exports) == set(EXPORT_VIEWS)
+    for view, extra in exports.items():
+        for format in ("md", "csv"):
+            commands[f"export:{view}:{format}"] = [
+                "export",
+                view,
+                "--format",
+                format,
+                "--as-of",
+                "2026-10-06T12:00:00Z",
+                *extra,
+            ]
+    # Every read command is covered, including every export view. Only actions
+    # that import data, start a server or open an interactive REPL are outside
+    # the inventory. Omitted raw fields must stay identical in both passes.
+    assert {argv[0] for argv in commands.values()} == {
+        c.name for c in _COMMANDS if c.name not in {"ingest", "serve", "repl"}
+    }
+
+    def stable(text):
+        # CLI envelopes/report prose carry informational generation clocks.
+        return re.sub(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|\+00:00)", "<clock>", text)
+
+    def run(argv):
+        if argv[0] == "events-export":
+            # NDJSON sinks append by contract; compare independent artifacts.
+            events_file.unlink(missing_ok=True)
+        json_args = ["--json"] if as_json and argv[0] not in {"report", "export"} else []
         status = main(["--db", str(db), *json_args, *argv])
         captured = capsys.readouterr()
-        assert status == 0, (name, captured.err)
-        if REDACTED in captured.out or REDACTED in captured.err:
+        assert status == 0, (argv, captured.err)
+        artifact = events_file.read_text() if argv[0] == "events-export" else ""
+        return stable(captured.out), stable(captured.err), artifact
+
+    failures = []
+    for name, argv in commands.items():
+        projected = run(argv)
+        if not name.startswith("export:") and any(REDACTED in part for part in projected):
             failures.append(name)
+        from gpo_lens import safe_output
+
+        with monkeypatch.context() as control:
+            control.setattr(safe_output, "secret_values", lambda _: ())
+            control.setattr(safe_output, "_credential_material", lambda _: False)
+            control.setattr(safe_output, "_sensitive", lambda _: False)
+            control.setattr(safe_output, "_mask_text", lambda value, _: value)
+            assert projected == run(argv), name
     assert not failures, failures

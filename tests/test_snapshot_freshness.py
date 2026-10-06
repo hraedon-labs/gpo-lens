@@ -1,6 +1,7 @@
 """Freshness describes the newest import, even when viewing history."""
 
 import sqlite3
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -19,7 +20,7 @@ NOW = datetime(2026, 10, 6, 12, tzinfo=UTC)
     [(timedelta(days=8), False), (timedelta(days=8, seconds=1), True), (timedelta(days=9), True)],
 )
 def test_default_threshold_exact_boundary(age, stale):
-    with sqlite3.connect(":memory:") as conn:
+    with closing(sqlite3.connect(":memory:")) as conn, conn:
         init_db(conn)
         save_estate(conn, Estate(domain="lab.example.com"), taken_at=NOW - age)
         briefing = build_briefing(conn, now=NOW)
@@ -30,7 +31,7 @@ def test_default_threshold_exact_boundary(age, stale):
 
 
 def test_historical_selection_uses_newest_snapshot_age():
-    with sqlite3.connect(":memory:") as conn:
+    with closing(sqlite3.connect(":memory:")) as conn, conn:
         init_db(conn)
         old = save_estate(conn, Estate(domain="lab.example.com"), taken_at=NOW - timedelta(days=30))
         newest = save_estate(
@@ -47,7 +48,7 @@ def test_historical_selection_uses_newest_snapshot_age():
     "timestamp", ["unparseable", "2026-10-05T12:00:00", (NOW + timedelta(days=1)).isoformat()]
 )
 def test_unreliable_timestamp_warns(timestamp):
-    with sqlite3.connect(":memory:") as conn:
+    with closing(sqlite3.connect(":memory:")) as conn, conn:
         init_db(conn)
         save_estate(conn, Estate(domain="lab.example.com"), taken_at=NOW)
         conn.execute("UPDATE snapshot SET taken_at=?", (timestamp,))
@@ -58,7 +59,7 @@ def test_unreliable_timestamp_warns(timestamp):
 
 def test_web_threshold_and_deterministic_exports(tmp_path, monkeypatch):
     db = tmp_path / "estate.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         init_db(conn)
         save_estate(conn, Estate(domain="lab.example.com"), taken_at=NOW - timedelta(days=3))
     monkeypatch.setenv("GPO_LENS_STALE_SNAPSHOT_DAYS", "2")
@@ -94,7 +95,7 @@ def test_briefing_export_clock_is_pinned_in_url_and_metadata(tmp_path, monkeypat
 
     monkeypatch.setenv("GPO_LENS_AUTH_TOKEN", "synthetic-test-token")
     db = tmp_path / "estate.db"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         init_db(conn)
         save_estate(conn, Estate(domain="lab.example.com"), taken_at=NOW)
     with TestClient(

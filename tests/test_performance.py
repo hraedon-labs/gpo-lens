@@ -242,10 +242,20 @@ def test_prepared_redaction_matches_legacy_text():
     }
 
 
-@pytest.mark.parametrize("route", ["/golden-diff", "/baseline", "/api/v1/query/enforced_links"])
+@pytest.mark.parametrize(
+    "route",
+    [
+        "/golden-diff",
+        "/baseline",
+        "/api/v1/query/enforced_links",
+        "/dependencies?format=md",
+        "/dependencies?format=csv",
+    ],
+)
 def test_secondary_paths_budget(performance_db, monkeypatch, route):
     import gpo_lens.web.routes.api as api
     import gpo_lens.web.routes.baseline as baseline
+    import gpo_lens.web.routes.dependencies as dependencies
     import gpo_lens.web.routes.golden as golden
     from gpo_lens.web import _helpers
 
@@ -257,7 +267,7 @@ def test_secondary_paths_budget(performance_db, monkeypatch, route):
         conn.set_trace_callback(statements.append)
         return conn
 
-    for module in (api, baseline, golden):
+    for module in (api, baseline, golden, dependencies):
         monkeypatch.setattr(module, "get_ro_conn", counted)
     monkeypatch.setenv("GPO_LENS_AUTH_TOKEN", "lab-token")
     with TestClient(
@@ -270,7 +280,7 @@ def test_secondary_paths_budget(performance_db, monkeypatch, route):
         start = time.perf_counter()
         result = (
             client.get(route)
-            if route.startswith("/api")
+            if route.startswith(("/api", "/dependencies"))
             else client.post(
                 route, files={"file": ("lab.zip", comparator_zip(12, 12), "application/zip")}
             )
@@ -278,6 +288,10 @@ def test_secondary_paths_budget(performance_db, monkeypatch, route):
         assert result.status_code == 200
         assert "Invalid" not in result.text
         assert LAB_SECRET not in result.text
+        if route.startswith("/dependencies"):
+            assert "lab-fs00" in result.text
+            assert "printer_connection" in result.text.replace(r"\_", "_")
+            assert result.content == client.get(route).content
         assert len(statements) < 50, f"N+1 estate queries: {len(statements)}"
         assert time.perf_counter() - start < 10
 
@@ -293,7 +307,7 @@ def test_large_estate_benchmark(tmp_path, monkeypatch):
         for table, expected in (
             ("gpo", 390),
             ("som", 4500),
-            ("setting", 12090),
+            ("setting", 14040),
             ("som_link", 99000),
             ("finding", 4680),
             ("finding_observation", 14040),
@@ -314,6 +328,16 @@ def test_large_estate_benchmark(tmp_path, monkeypatch):
             print(f"findings {format}: {elapsed:.3f}s, {len(result.content)} bytes")
             assert result.status_code == 200
             assert elapsed < 15
+            assert LAB_SECRET not in result.text
+            start = time.perf_counter()
+            result = client.get(f"/dependencies?format={format}")
+            elapsed = time.perf_counter() - start
+            print(f"dependencies {format}: {elapsed:.3f}s, {len(result.content)} bytes")
+            assert result.status_code == 200
+            assert elapsed < 15
+            assert LAB_SECRET not in result.text
+            assert "lab-fs00" in result.text
+            assert result.content == client.get(f"/dependencies?format={format}").content
         upload = comparator_zip()
         for route in ("/golden-diff", "/baseline"):
             start = time.perf_counter()

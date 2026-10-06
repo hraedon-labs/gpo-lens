@@ -1656,6 +1656,18 @@ class TestRegistryIdentities:
         _i, _n, val = ingest._parse_admin_template_policy(block)
         assert val == "Enabled — Application locale: en-US"
 
+    def test_admx_edittextbox_configured_value(self):
+        block = ET.fromstring(
+            self._admx(
+                "<EditTextBox><Name>Lab cipher suite order</Name>"
+                "<State>Enabled</State><Value>LAB_SUITE_ONE,LAB_SUITE_TWO</Value></EditTextBox>"
+            )
+        )
+        identity, name, value = ingest._parse_admin_template_policy(block)
+        assert identity == "Cat/P"
+        assert name == "P"
+        assert value == "Enabled — Lab cipher suite order: LAB_SUITE_ONE,LAB_SUITE_TWO"
+
     def test_admx_dropdownlist_value_text(self):
         block = ET.fromstring(
             self._admx(

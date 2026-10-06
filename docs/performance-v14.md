@@ -1,9 +1,10 @@
 # F3 synthetic performance calibration
 
 The fixture in `tests/performance_estate.py` uses a local seeded PRNG, canonical
-lab GUIDs, synthetic Registry settings and fixed persisted evaluation times.
+lab GUIDs, synthetic Registry, audit, Public Key, drive and printer settings,
+and fixed persisted evaluation times.
 No sample estate or external export is required. Defaults produce about 130
-GPOs, 1,500 SOMs and 4,000 settings per snapshot, thousands of finding
+GPOs, 1,500 SOMs and roughly 4,700 settings per snapshot, thousands of finding
 occurrences, about 14,000 observations and 100,000 SOM links across three
 snapshots. The comparator changes non-secret setting values so comparisons
 exercise the drift tables. A collector-format upload exercises ingest too.
@@ -17,7 +18,8 @@ GPO_LENS_BENCHMARK=1 .venv/bin/pytest -n0 -s tests/test_performance.py -m slow
 Ordinary CI runs the small estate with the same relationships. Its budgets
 count SQL statements, credential-discovery passes and threadpool handoffs;
 loose time limits additionally catch gross regressions. The slow benchmark
-checks the generated population, exports, comparison uploads, enforced-links
+checks the generated population, findings and dependency inventory exports,
+comparison uploads, enforced-links
 API, collector upload, and danger/doctor CLI commands. It skips unless explicitly
 enabled, so the full calibration does not burden ordinary CI.
 
@@ -69,8 +71,9 @@ reference implementation of per-string masking cover rendering/redaction.
 - All SQLite owners in `src/` and `scripts/` were audited. Changelog errors and
   failed web connection setup now close their connections. The benchmark and
   released-fixture builders use `contextlib.closing`; their transaction contexts
-  remain where previously present. The builders were not rerun and the immutable
-  released databases were not regenerated.
+  remain where previously present. The original stream did not regenerate released databases. The 1.4
+  integration adds a v1.3.1-created fixture through the same public-API generator;
+  older released artifacts remain unchanged.
   Existing test contexts now also close explicitly, including the upgrade/backup
   fixtures; event/store tests release their previously unowned connections.
 

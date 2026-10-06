@@ -914,7 +914,7 @@ def own_vocabulary() -> frozenset[str]:
     )
     # Table names are initialized from the application's schema, never read
     # from the data-bearing calibration DB for the purposes of exemptions.
-    with sqlite3.connect(":memory:") as conn:
+    with contextlib.closing(sqlite3.connect(":memory:")) as conn, conn:
         store.init_db(conn)
         allowed.update(
             row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -1018,7 +1018,7 @@ def analysis(
                 "unattributed_count": len(rows) - attributed,
             }
         results[name] = counts
-    with sqlite3.connect(db) as conn:
+    with contextlib.closing(sqlite3.connect(db)) as conn, conn:
         briefing, record = measured(lambda: build_briefing(conn, as_of_snapshot=sid), formats)
     record["name"] = "export"
     commands.append(record)
@@ -1134,8 +1134,10 @@ def web_probe(
         app.state.rate_limit_ingest,
         app.state.rate_limit_general,
     ):
-        limiter.max_requests = 1000000
-    with sqlite3.connect(db) as conn:
+        # The measurement client must reach the full route × format inventory.
+        # Change its actual budget; production defaults remain intact.
+        limiter._max_requests = 1000000
+    with contextlib.closing(sqlite3.connect(db)) as conn, conn:
         finding = conn.execute("SELECT id FROM finding ORDER BY id LIMIT 1").fetchone()
         snapshot_id = conn.execute("SELECT MAX(id) FROM snapshot").fetchone()[0]
     ids = {
@@ -1278,8 +1280,10 @@ def web_probe(
                 if method == "POST":
                     sandbox.unlink(missing_ok=True)
                     with (
-                        sqlite3.connect(db) as original_conn,
-                        sqlite3.connect(sandbox) as probe_conn,
+                        contextlib.closing(sqlite3.connect(db)) as original_conn,
+                        original_conn,
+                        contextlib.closing(sqlite3.connect(sandbox)) as probe_conn,
+                        probe_conn,
                     ):
                         original_conn.backup(probe_conn)
                     app.state.db_path = str(sandbox)
@@ -1287,7 +1291,7 @@ def web_probe(
                     failure: list[dict[str, Any]] = []
                     response, record = measured(request, formats, private_exceptions=failure)
                     if method == "POST" and denylist is not None:
-                        with sqlite3.connect(sandbox) as probe_conn:
+                        with contextlib.closing(sqlite3.connect(sandbox)) as probe_conn, probe_conn:
                             denylist.update(database_strings(probe_conn))
                 finally:
                     app.state.db_path = str(db)
@@ -1343,25 +1347,25 @@ def calibrate(archives: list[Path], scratch: Path) -> tuple[dict[str, Any], set[
     formats = source_formats()
     db = scratch / "estate.sqlite3"
     conn = sqlite3.connect(db)
-    store.init_db(conn)
-    report: dict[str, Any] = {
-        "schema_version": 1,
-        "ingest": [],
-        "analysis": [],
-        "commands": [],
-        "web": [],
-        "redaction": {},
-    }
-    denylist: set[str] = set()
-    secrets_by_class: dict[str, set[str]] = {}
-    snapshots = []
-    last_estate = None
-    last_source = None
-    last_archive = None
-    empty_admx = scratch / "PolicyDefinitions"
-    empty_admx.mkdir()
-    last_admx_dir = empty_admx
     try:
+        store.init_db(conn)
+        report: dict[str, Any] = {
+            "schema_version": 1,
+            "ingest": [],
+            "analysis": [],
+            "commands": [],
+            "web": [],
+            "redaction": {},
+        }
+        denylist: set[str] = set()
+        secrets_by_class: dict[str, set[str]] = {}
+        snapshots = []
+        last_estate = None
+        last_source = None
+        last_archive = None
+        empty_admx = scratch / "PolicyDefinitions"
+        empty_admx.mkdir()
+        last_admx_dir = empty_admx
         for index, archive in enumerate(archives):
             facts = InputFacts()
             dest = scratch / f"input-{index}"
@@ -1513,7 +1517,7 @@ def calibrate(archives: list[Path], scratch: Path) -> tuple[dict[str, Any], set[
                 for repeat_index in range(2):
                     estate = ingest.load_estate(last_source)
                     repeat_db = scratch / f"repeat-{repeat_index}.sqlite3"
-                    with sqlite3.connect(repeat_db) as repeat_conn:
+                    with contextlib.closing(sqlite3.connect(repeat_db)) as repeat_conn, repeat_conn:
                         store.init_db(repeat_conn)
                         repeat_sid = store.save_estate(
                             repeat_conn, estate, taken_at=datetime(2026, 1, 1, tzinfo=UTC)

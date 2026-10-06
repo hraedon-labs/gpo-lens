@@ -88,7 +88,7 @@ def test_sysvol_only_cpassword_stays_masked(
     estate = load_estate(source)
     assert secret_values(estate) == ()  # No credential in report settings.
     db = tmp_path / "lab.sqlite3"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         init_db(conn)
         save_estate(conn, estate)
     conn.close()

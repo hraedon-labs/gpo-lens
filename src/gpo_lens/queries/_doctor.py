@@ -241,13 +241,13 @@ def estate_doctor(
     for gap in admx_gaps(estate, admx):
         gaps_by_gpo.setdefault(gap.gpo_id, []).append(f"{gap.side}/{gap.identity}")
     for gpo_id, settings in sorted(gaps_by_gpo.items()):
-        gpo = estate.gpo_by_id(gpo_id)
+        gap_gpo = estate.gpo_by_id(gpo_id)
         findings.append(
             DoctorFinding(
                 severity="low",
                 category="admx_gap",
                 gpo_id=gpo_id,
-                gpo_name=gpo.name if gpo else "",
+                gpo_name=gap_gpo.name if gap_gpo else "",
                 summary=f"{len(settings)} registry settings without a loaded ADMX template",
                 detail="\n".join(sorted(settings)),
                 dimensions=(("aggregation", "gpo"),),

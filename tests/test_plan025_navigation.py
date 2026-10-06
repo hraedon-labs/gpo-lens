@@ -55,6 +55,7 @@ def test_inventory_documents_all_deterministic_export_interfaces(client):
         "export_gpo",
         "accepted_risks",
         "setting_detail",
+        "dependencies",
     ):
         row = rows[name]
         query = row.get("representative_export_query", row["representative_query"])
