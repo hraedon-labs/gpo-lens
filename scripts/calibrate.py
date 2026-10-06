@@ -80,7 +80,7 @@ CSE_NAMES = {
     "software installation": "c6dc5466-785a-11d2-84d0-00c04fb169f7",
     "public key": "b1be8d72-6eac-11d2-a4ea-00c04f79f83a",
 }
-STATES = ("normal", "blocked", "registry_pol")
+STATES = ("normal", "blocked", "registry_pol", "legacy_deprecated")
 EXPORT_FORMATS = ("md", "csv", "json")
 ADMX_COMMAND = "admx-coverage"
 GAP_KINDS = (
