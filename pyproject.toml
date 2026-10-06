@@ -47,11 +47,14 @@ testpaths = ["tests"]
 # -s / pdb; add --cov=src locally on demand.
 addopts = "-q -n auto"
 filterwarnings = [
+    "error:unclosed database:ResourceWarning",
+    "error:(?s).*unclosed database.*:pytest.PytestUnraisableExceptionWarning",
     "ignore:.*plaintext.*:UserWarning",
     "ignore:Using.*httpx.*starlette.testclient.*deprecated:starlette.exceptions.StarletteDeprecationWarning",
 ]
 markers = [
     "samples: requires real GPO export samples in samples/",
+    "slow: opt-in synthetic large-estate benchmarks (GPO_LENS_BENCHMARK=1)",
 ]
 
 [tool.ruff]

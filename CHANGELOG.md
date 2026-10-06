@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+Draft **v1.4.0** — feature work; package metadata remains v1.3.0 until release.
+
+### Fixed
+
+- **Large-estate exports and connection hygiene (F3).** Batch finding provenance
+  reads, stream HTTP exports in bounded UTF-8 chunks, and prepare credential
+  masking once per projection. Shared topology evidence is inspected once per
+  credential-discovery pass. Markdown/CSV bytes, provenance, redaction and
+  authorization remain unchanged. Close CLI changelog connections on errors,
+  close failed web connection setup, and explicitly close fixture-builder and
+  benchmark connections. Add seeded synthetic calibration, CI operation budgets,
+  opt-in large-estate benchmarks and explicit connection-lifetime regressions.
+
 ## v1.3.0 — 2026-10-06
 
 Draft **v1.3.0** — release date TBD by coordinator. This section remains

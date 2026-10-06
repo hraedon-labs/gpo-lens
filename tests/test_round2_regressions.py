@@ -5,6 +5,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from xml.sax.saxutils import quoteattr
@@ -47,7 +48,7 @@ FIXTURES = ROOT / "tests/fixtures"
 def test_glv1_triage_edges(tmp_path, legacy_time, reopen_time, action):
     db = tmp_path / "upgrade.sqlite3"
     shutil.copyfile(FIXTURES / "released_databases/v1.2.0-with-reopen.sqlite3", db)
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.execute("UPDATE finding_triage SET timestamp=? WHERE finding_id=2", (legacy_time,))
         conn.execute(
             "UPDATE finding_triage_event SET occurred_at=?, action=? "
@@ -124,7 +125,7 @@ def test_task_command_secrets_and_copied_evidence(command, switch, quoted):
             False,
         )
     )
-    with sqlite3.connect(":memory:") as conn:
+    with closing(sqlite3.connect(":memory:")) as conn, conn:
         init_db(conn)
         sid = save_estate(conn, estate)
         secrets = snapshot_secrets(conn, [sid])
@@ -172,7 +173,7 @@ def test_glv1_credential_fixture_cli(tmp_path, command, switch, quoted, db_backe
     cli_args = ["--json"] if json_output else []
     if db_backed:
         db = tmp_path / "estate.sqlite3"
-        with sqlite3.connect(db) as conn:
+        with closing(sqlite3.connect(db)) as conn, conn:
             init_db(conn)
             save_estate(conn, load_estate(source))
         cli_args += ["--db", str(db), "gpp-tasks"]

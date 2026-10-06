@@ -7,6 +7,7 @@ threadpool, preventing synchronous SQLite from blocking the event loop
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from datetime import datetime
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode
@@ -27,6 +28,30 @@ from gpo_lens.web.auth import Permission, Principal, requires
 
 if TYPE_CHECKING:
     from gpo_lens.model import Estate
+
+
+def _export_chunks(lines: Iterable[str], size: int = 64 * 1024) -> Iterator[bytes]:
+    """Bound HTTP buffers and threadpool handoffs while retaining exact UTF-8 bytes.
+
+    The core renderer remains line-lazy. Starlette hands synchronous iterators
+    to a worker for every yield, so sending each field separately is costly.
+    Split oversized lines too; never buffer the complete artifact.
+    """
+    if size < 1:
+        raise ValueError("chunk size must be positive")
+    buffer = bytearray()
+    for line in lines:
+        data = line.encode("utf-8")
+        offset = 0
+        while offset < len(data):
+            end = min(len(data), offset + size - len(buffer))
+            buffer.extend(data[offset:end])
+            offset = end
+            if len(buffer) == size:
+                yield bytes(buffer)
+                buffer.clear()
+    if buffer:
+        yield bytes(buffer)
 
 
 def register(app: FastAPI, templates: Jinja2Templates) -> None:
@@ -324,7 +349,7 @@ def view_export(
     document = ExportDocument(title, metadata, sections, principal.has(Permission.TRIAGE), secrets)
     filename = "gpo-lens-" + title.lower().replace(" ", "-") + "." + format
     return StreamingResponse(
-        render_export(document, format),
+        _export_chunks(render_export(document, format)),
         media_type="text/csv" if format == "csv" else "text/markdown",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',

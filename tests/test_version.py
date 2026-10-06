@@ -20,11 +20,25 @@ def test_version_sync() -> None:
 def test_changelog_top_version_matches() -> None:
     changelog = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
     text = changelog.read_text(encoding="utf-8")
-    # An Unreleased section must declare its target, never fall through to an
-    # older released heading (which masked the v1.3 candidate's stale version).
-    top = re.split(r"^## ", text, flags=re.MULTILINE)[1]
+    # Feature streams declare the next target without bumping released metadata.
+    # Keep checking both the explicit target and the latest released section.
+    sections = re.split(r"^## ", text, flags=re.MULTILINE)[1:]
+    top = sections[0]
     if top.startswith("Unreleased"):
         match = re.search(r"Draft \*\*v(\d+\.\d+\.\d+)\*\*", top)
+        assert match, "Top changelog section must declare a release target"
+        assert tuple(map(int, match.group(1).split("."))) >= tuple(
+            map(int, __version__.split("."))
+        ), "Unreleased target cannot precede package metadata"
+        released = re.match(r"v(\d+\.\d+\.\d+)", sections[1])
+        assert released, "Unreleased work must retain the latest released version"
+        assert tuple(map(int, match.group(1).split("."))) >= tuple(
+            map(int, released.group(1).split("."))
+        ), "Unreleased target cannot precede the latest release"
+        # Once metadata advances to the draft target, the release coordinator
+        # may retain Unreleased until the release is dated/tagged.
+        assert __version__ in {released.group(1), match.group(1)}
+        return
     else:
         match = re.match(r"v(\d+\.\d+\.\d+)", top)
     assert match, "Top changelog section must declare a release target"

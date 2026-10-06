@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from contextlib import closing
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -107,7 +108,7 @@ def worker(tag: str, export: Path, destination: Path) -> None:
                 follow_redirects=False,
             )
         assert response.status_code == 303, response.text
-        with sqlite3.connect(db) as conn:
+        with closing(sqlite3.connect(db)) as conn, conn:
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
             if "finding" in tables:
                 from gpo_lens.findings import append_triage_event, triage_finding
@@ -132,7 +133,7 @@ def worker(tag: str, export: Path, destination: Path) -> None:
                     rationale="Lab compensating control",
                 )
                 conn.commit()
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         names = sorted(
             row[0]
