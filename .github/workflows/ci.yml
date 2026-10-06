@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/plan025-wi4-wi5-nav]
   pull_request:
     branches: [main]
 
