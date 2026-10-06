@@ -1,8 +1,10 @@
 """Reject excessive archive metadata before opening any member."""
 
+import shutil
 import sqlite3
 import zipfile
 from contextlib import closing
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -63,3 +65,20 @@ def test_zip_metadata_preflight(tmp_path, monkeypatch, capsys, limit, members, s
         with closing(sqlite3.connect(db)) as conn:
             assert conn.execute("SELECT count(*) FROM snapshot").fetchone() == (0,)
     assert opened == []
+
+
+def test_rejected_cli_upload_does_not_migrate_a_released_database(tmp_path, monkeypatch):
+    db = tmp_path / "released.db"
+    shutil.copyfile(Path(__file__).parent / "fixtures/released_databases/v1.3.1.sqlite3", db)
+    with closing(sqlite3.connect(db)) as conn:
+        before = list(conn.iterdump())
+        version = conn.execute("PRAGMA user_version").fetchone()
+    monkeypatch.setattr(collection_zip, "MAX_MEMBERS", 1)
+    archive = tmp_path / "rejected.zip"
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("AllGPOs.xml", "<GPOs/>")
+        output.writestr("extra", "")
+    assert main(["--db", str(db), "ingest", str(archive)]) == 1
+    with closing(sqlite3.connect(db)) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone() == version
+        assert list(conn.iterdump()) == before

@@ -42,7 +42,7 @@ def load_baseline_from_estate(estate: Estate) -> list[BaselineSetting]:
     results: list[BaselineSetting] = []
     for g in estate.gpos:
         for s in g.settings:
-            if s.source_state == "blocked":
+            if s.source_state == "blocked" or s.from_disabled_side:
                 continue
             results.append(
                 BaselineSetting(
@@ -61,7 +61,11 @@ def baseline_diff(
     baseline: list[BaselineSetting],
     admx: AdmxResolver | None = None,
 ) -> list[BaselineDiffEntry]:
-    """Compare estate settings against a baseline."""
+    """Compare active settings; blocked and disabled sides cannot supply values.
+
+    An expectation with only inactive sources is missing. Disabled baseline
+    rows are excluded when loading the baseline, just like blocked rows.
+    """
     from gpo_lens.admx_parser import PolicyDefinitions as _PD
 
     if admx is None:
@@ -76,7 +80,7 @@ def baseline_diff(
     estate_settings: dict[tuple[Side, str, str], list[tuple[str, str]]] = {}
     for g in estate.gpos:
         for s in g.settings:
-            if s.source_state == "blocked":
+            if s.source_state == "blocked" or s.from_disabled_side:
                 continue
             key = (s.side, s.cse.lower(), s.identity.lower())
             estate_settings.setdefault(key, []).append((g.id, s.display_value))

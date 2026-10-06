@@ -139,9 +139,23 @@ rejected. Change the schedule with `-At '03:30' -EveryDays 7`, retention with
 `-Retention 30`, or use `-TaskName` for another task. Re-registration replaces
 the named task; review it with `-WhatIf` first.
 
+Registration writes the TaskName to `.gpo-lens-collection-owner` in the output
+root, and passes it to the runner. Every task needs its own root, even when two
+tasks collect the same domain. A different owner blocks registration unless
+`-Force` explicitly transfers ownership with a warning. Stop the previous task
+first: it will refuse subsequent runs, and its existing exports become subject
+to the new owner's retention. Ownership changes share the runner's lock.
+`-WhatIf` writes no marker. Re-register tasks installed before 1.4 to initialize
+their marker. A missing, linked or mismatched marker prevents collection and
+pruning. Manual runner calls must supply the registered `-TaskName`.
+Credentials are checked before ownership changes. Registration holds the
+collection lock through the Scheduler call and restores the prior marker if
+that call fails, keeping the previous task runnable.
+
 The runner keeps the last N successful timestamp-named export folder/ZIP pairs
 (default 14), without pruning unrelated files. It prunes only after successful
-collection, inventory overlay and delivery. Unreadable or incomplete ZIPs are
+collection by the root's owner, retaining the exact domain-prefix check as well.
+Inventory overlay and delivery must also succeed. Unreadable or incomplete ZIPs are
 excluded from retention counts. Failed/unfinished export folders and partial
 archives remain for diagnosis and require manual cleanup; a hard timeout may leave such
 folders and a log ending with `Collection started`. `collection.log` rotates

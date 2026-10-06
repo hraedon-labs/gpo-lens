@@ -62,6 +62,13 @@ Defaults: daily at 02:00 host local time, a hard two-hour runtime limit, last
 `-WhatIf` to preview, or `-Unregister` to remove the task. Delivery requires a
 separate ingest step; dropping a ZIP in an inbox does not import it.
 
+Each task owns its output root through `.gpo-lens-collection-owner`. Use a
+separate root for each `-TaskName`, including tasks collecting the same domain.
+Registration refuses another task's marker; `-Force` transfers ownership with
+a warning. The previous task then refuses to run. Re-register existing tasks
+to create the marker before their next run; manual runner calls must pass the
+registered `-TaskName`.
+
 [The IIS collection guide](deploy/iis/README.md#scheduled-collection) covers
 permissions, privileged inventory overlay, verification and lab validation.
 [The handover checklist](docs/handover.md#3-keeping-collection-alive) explains

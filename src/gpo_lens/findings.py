@@ -64,7 +64,7 @@ from gpo_lens.finding_model import (
 from gpo_lens.normalize import parse_dt as _parse_dt
 
 if TYPE_CHECKING:
-    from gpo_lens.danger import DangerFinding
+    from gpo_lens.danger import DangerFinding, DangerRule
     from gpo_lens.model import AdmxResolver, Estate
     from gpo_lens.queries._doctor import DoctorFinding
 
@@ -580,8 +580,9 @@ def run_evaluation(
                 conn.execute(
                     "INSERT INTO finding_observation "
                     "(run_id, occurrence_id, severity, summary, evidence_json, "
-                    "claim_level, remediation, compliance_json, gpo_id, gpo_name) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "claim_level, remediation, compliance_json, gpo_id, gpo_name, "
+                    "detector_version) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         run_id,
                         occ_id,
@@ -593,6 +594,7 @@ def run_evaluation(
                         compliance_json,
                         gpo_id,
                         cand.gpo_name,
+                        cand.detector_version,
                     ),
                 )
                 persisting_count += 1
@@ -657,8 +659,9 @@ def run_evaluation(
                 conn.execute(
                     "INSERT INTO finding_observation "
                     "(run_id, occurrence_id, severity, summary, evidence_json, "
-                    "claim_level, remediation, compliance_json, gpo_id, gpo_name) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "claim_level, remediation, compliance_json, gpo_id, gpo_name, "
+                    "detector_version) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         run_id,
                         occ_id,
@@ -670,6 +673,7 @@ def run_evaluation(
                         compliance_json,
                         gpo_id,
                         cand.gpo_name,
+                        cand.detector_version,
                     ),
                 )
                 new_count += 1
@@ -1389,7 +1393,7 @@ def finding_history(
 
     obs_rows = conn.execute(
         "SELECT run_id, occurrence_id, severity, summary, evidence_json, "
-        "claim_level, remediation, compliance_json "
+        "claim_level, remediation, compliance_json, detector_version "
         "FROM finding_observation WHERE occurrence_id = ? "
         "ORDER BY id ASC",
         (occurrence_id,),
@@ -1404,6 +1408,7 @@ def finding_history(
             claim_level=r[5],
             remediation=r[6],
             compliance_json=r[7],
+            detector_version=r[8],
         )
         for r in obs_rows
     )
@@ -1438,7 +1443,7 @@ def finding_observation_history(
         "o.claim_level, o.remediation, o.compliance_json, "
         "r.evaluation_kind, r.detector_set_digest, r.comparator_input_id, "
         "r.application_version, r.started_at, r.completed_at, r.status, "
-        "r.error_summary, r.snapshot_id "
+        "r.error_summary, r.snapshot_id, o.detector_version "
         "FROM finding_observation o "
         "JOIN evaluation_run r ON r.id = o.run_id "
         "WHERE o.occurrence_id = ? ORDER BY o.run_id ASC, o.id ASC",
@@ -1464,6 +1469,7 @@ def finding_observation_history(
                 "status": r[13] or "",
                 "error_summary": r[14] or "",
                 "snapshot_id": r[15],
+                "detector_version": r[16],
             }
         )
     return history
@@ -1667,6 +1673,59 @@ def evaluation_runs(
 # Detector adapter — convert existing detectors to FindingCandidate (Plan 024 §10)
 # ---------------------------------------------------------------------------
 
+# This registry covers every executed intrinsic check, including checks that
+# emit no findings. Bump its version whenever a detector's semantics change.
+# Broken-reference subtypes share one implementation/version; setting-value
+# danger rules share an evaluator/version and their full rule content is hashed.
+INTRINSIC_DETECTOR_VERSIONS = {
+    "coverage_gap": "1",
+    "cpassword": "1",
+    "ms16_072": "1",
+    "version_skew": "1",
+    "dangling_link": "1",
+    "topology_discrepancy": "1",
+    "disabled_but_populated": "1",
+    "broken_ref:*": "2",
+    "admx_gap": "2",
+    "unlinked": "1",
+    "empty": "1",
+    "enforced_link": "1",
+    "deny_ace": "1",
+    "excessive_writer": "1",
+    "broken_wmi_ref": "1",
+    "orphaned_wmi_filter": "1",
+    "ilt_gpo": "1",
+    "stale_gpo": "1",
+    "audit_source_disagreement": "1",
+    "audit_parse_warning": "1",
+    "pki_parse_warning": "1",
+    "legacy_extension": "1",
+    "danger:gpo_owner_nonadmin": "1",
+    "danger:gpo_writable_nonadmin": "1",
+    "danger:local_admin_push": "1",
+    "danger:overbroad_apply_gp": "1",
+    "danger:audit_subcategory_override": "1",
+    "danger:setting_rules": "1",
+}
+
+
+def _intrinsic_detector_version(category: str) -> str:
+    if category.startswith("broken_ref:"):
+        return INTRINSIC_DETECTOR_VERSIONS["broken_ref:*"]
+    if category.startswith("danger:"):
+        return INTRINSIC_DETECTOR_VERSIONS.get(
+            category, INTRINSIC_DETECTOR_VERSIONS["danger:setting_rules"]
+        )
+    return INTRINSIC_DETECTOR_VERSIONS.get(category, "1")
+
+
+def _intrinsic_detector_digest(rules: list[DangerRule]) -> str:
+    manifest = {
+        "detectors": sorted(INTRINSIC_DETECTOR_VERSIONS.items()),
+        "rules": [dataclasses.asdict(rule) for rule in sorted(rules, key=lambda r: r.id)],
+    }
+    return hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()[:16]
+
 
 def _doctor_finding_to_candidate(
     f: DoctorFinding,
@@ -1792,9 +1851,7 @@ def _doctor_finding_to_candidate(
 
     return FindingCandidate(
         detector_id=category,
-        detector_version="2"
-        if category == "admx_gap" or category.startswith("broken_ref:")
-        else "1",
+        detector_version=_intrinsic_detector_version(category),
         category=category,
         severity=getattr(f, "severity", "info"),
         subject_type=subject_type,
@@ -1851,7 +1908,7 @@ def _danger_finding_to_candidate(
 
     return FindingCandidate(
         detector_id=category,
-        detector_version="1",
+        detector_version=_intrinsic_detector_version(category),
         category=category,
         severity=getattr(f, "severity", "medium"),
         subject_type=subject_type,
@@ -1872,6 +1929,7 @@ def candidates_from_estate(
     *,
     snapshot_id: int = 0,
     admx: AdmxResolver | None = None,
+    rules: list[DangerRule] | None = None,
 ) -> list[FindingCandidate]:
     """Run intrinsic detectors and convert to FindingCandidate records.
 
@@ -1899,7 +1957,7 @@ def candidates_from_estate(
     from gpo_lens.danger import danger_findings
     from gpo_lens.queries import estate_doctor
 
-    danger = danger_findings(estate, admx=admx)
+    danger = danger_findings(estate, admx=admx, rules=rules)
     doctor_findings = estate_doctor(estate, admx=admx, danger=danger)
 
     candidates: list[FindingCandidate] = []
@@ -1954,15 +2012,17 @@ def evaluate_finding_lifecycle_v2(
     (``update_finding_lifecycle``) now lives in
     :mod:`gpo_lens._legacy_findings` and is test-only.
     """
+    from gpo_lens.danger import load_danger_rules
+
+    # Capture the exact rule bundle once for both evaluation and provenance.
+    rules = load_danger_rules()
+    detector_set_digest = _intrinsic_detector_digest(rules)
     candidates = candidates_from_estate(
         estate,
         snapshot_id=snapshot_id,
         admx=admx,
+        rules=rules,
     )
-
-    detector_set_digest = hashlib.sha256(
-        "|".join(sorted({f"{c.detector_id}@{c.detector_version}" for c in candidates})).encode()
-    ).hexdigest()[:16]
 
     run_id = create_evaluation_run(
         conn,

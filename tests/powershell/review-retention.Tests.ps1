@@ -6,6 +6,7 @@ Describe 'Shared export root ownership' {
     It 'prunes only the exact collected-domain prefix' {
         $root = Join-Path $TestDrive 'shared'
         New-Item -ItemType Directory -Path $root | Out-Null
+        'GpoLensCollection' | Set-Content (Join-Path $root '.gpo-lens-collection-owner')
         foreach ($prefix in @('lab.example.com', 'other.example.com', 'lab.example.com-extra')) {
             $folder = Join-Path $root "$prefix-20261004-120000"
             New-Item -ItemType Directory -Path $folder | Out-Null

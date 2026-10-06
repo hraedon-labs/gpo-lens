@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from gpo_lens import store
 from gpo_lens.cli import main
 from gpo_lens.ingest import load_estate
-from gpo_lens.safe_output import REDACTED, safe_data, secret_values
+from gpo_lens.safe_output import REDACTED, safe_data, safe_text, secret_values
 from gpo_lens.web.app import create_app
 
 FIXTURE = Path(__file__).parent / "fixtures/cse_audit_pki/report.xml"
@@ -102,3 +102,37 @@ def test_numeric_secret_in_raw_drives_sensitive_projection():
     result = safe_data({"raw": {"password": 0}, "display_value": 0, "cpassword_hit_count": 7})
     assert result["display_value"] == REDACTED
     assert result["cpassword_hit_count"] == 7
+
+
+@pytest.mark.parametrize("secret", [0, 1234, "0", "1234", "abc"])
+def test_short_secret_does_not_corrupt_dates_identifiers_or_counts(secret):
+    public = {
+        "date": "2026-10-06",
+        "identifier": "gpo-0000-1234-abc",
+        "gpo_id": "00001234abcd00000000000000001234",
+        "gpo_count": 20,
+        "cpassword_hit_count": 0,
+        "summary": "12340 GPOs on 2026-10-06; gpo-0000-1234-abc",
+    }
+    value = {**public, "password": secret, "nested": [{"private_key": secret}]}
+    projected = safe_data(value)
+    assert projected["password"] == REDACTED
+    assert projected["nested"] == [{"private_key": REDACTED}]
+    assert {k: projected[k] for k in public} == public
+    assert safe_text(public["summary"], secrets=secret_values(value)) == public["summary"]
+    # WI-101 still masks a copied standalone credential, including numeric ones.
+    assert safe_data({"copy": f"Copied {secret}"}, secrets=secret_values(value)) == {
+        "copy": f"Copied {REDACTED}"
+    }
+
+
+@pytest.mark.parametrize("secret,escaped", [("a&", "a&amp;"), ('a"', "a&quot;"), ("a<", "a&lt;")])
+def test_short_secret_keeps_token_policy_after_html_escaping(secret, escaped):
+    public = "public-x" + escaped + "y"
+    assert safe_text(public, secrets=[secret]) == public
+    assert safe_data({"password": secret})["password"] == REDACTED
+    assert safe_text("Copied " + escaped, secrets=[secret]) == "Copied " + REDACTED
+
+
+def test_escaped_variant_collision_keeps_long_secret_substring_masking():
+    assert safe_text("public-xa&amp;y", secrets=["a&", "a&amp;"]) == "public-x[REDACTED]y"

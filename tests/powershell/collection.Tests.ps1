@@ -1,6 +1,7 @@
 # Pester 5 mocks: these tests never contact AD or register a real task.
 Describe 'Collection scheduling' {
     BeforeAll {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
         $script:RegisterPath = "$PSScriptRoot/../../scripts/Register-GpoLensCollection.ps1"
         $script:RunnerPath = "$PSScriptRoot/../../scripts/Run-GpoLensCollection.ps1"
         # ScheduledTasks is Windows-only. Stubs give Pester a command to mock on Linux.
@@ -23,7 +24,7 @@ Describe 'Collection scheduling' {
         Mock Register-ScheduledTask { $InputObject }
         Mock Unregister-ScheduledTask { }
         Mock Get-Credential { throw 'Unexpected credential prompt' }
-        $script:Root = Join-Path $TestDrive 'exports'
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
     }
     It 'registers a gMSA Password principal without supplying a password' {
         & $script:RegisterPath -GmsaAccount 'LABDOMAIN\collector$' -OutputRoot $script:Root
@@ -60,7 +61,7 @@ Describe 'Collection scheduling' {
             $User -eq 'LABDOMAIN\svc-collector' -and $Password -eq 'synthetic-password' -and
             $InputObject.Principal.LogonType -eq 'Password' -and $InputObject.Action.Argument -notmatch 'synthetic-password'
         }
-        Test-Path $script:Root | Should -BeFalse
+        Test-Path (Join-Path $script:Root '.gpo-lens-collection-owner') | Should -BeTrue
     }
     It 'prompts securely when a service account credential is omitted' {
         Mock Get-Credential { [pscredential]::new('LABDOMAIN\svc-collector', (ConvertTo-SecureString 'synthetic-password' -AsPlainText -Force)) }
@@ -91,6 +92,55 @@ Describe 'Collection scheduling' {
         { & $script:RegisterPath -GmsaAccount 'LABDOMAIN\collector$' -OutputRoot $script:Root -At '99:99' } | Should -Throw
         Should -Invoke Register-ScheduledTask -Exactly 0
     }
+    It 'records the task owner and passes its name to the runner' {
+        & $script:RegisterPath -GmsaAccount 'LABDOMAIN\collector$' -OutputRoot $script:Root -TaskName 'Lab owner'
+        Get-Content (Join-Path $script:Root '.gpo-lens-collection-owner') -Raw | Should -Be 'Lab owner'
+        Should -Invoke New-ScheduledTaskAction -Exactly 1 -ParameterFilter { $Argument -match '-TaskName "Lab owner"' }
+    }
+    It 'refuses a second task on the same root, even for the same domain' {
+        New-Item -ItemType Directory -Path $script:Root | Out-Null
+        'FirstTask' | Set-Content (Join-Path $script:Root '.gpo-lens-collection-owner')
+        { & $script:RegisterPath -GmsaAccount 'LABDOMAIN\collector$' -OutputRoot $script:Root -TaskName 'SecondTask' } | Should -Throw '*owner*'
+        Should -Invoke Register-ScheduledTask -Exactly 0
+        (Get-Content (Join-Path $script:Root '.gpo-lens-collection-owner') -Raw).Trim() | Should -Be 'FirstTask'
+    }
+    It 'allows an explicit Force takeover with a warning' {
+        New-Item -ItemType Directory -Path $script:Root | Out-Null
+        'FirstTask' | Set-Content (Join-Path $script:Root '.gpo-lens-collection-owner')
+        $warnings = @()
+        & $script:RegisterPath -GmsaAccount 'LABDOMAIN\collector$' -OutputRoot $script:Root -TaskName 'SecondTask' -Force -WarningVariable warnings
+        Should -Invoke Register-ScheduledTask -Exactly 1
+        ($warnings -join ' ') | Should -Match 'owner'
+        Get-Content (Join-Path $script:Root '.gpo-lens-collection-owner') -Raw | Should -Be 'SecondTask'
+    }
+    It 'permits re-registration by the same owner' {
+        & $script:RegisterPath -GmsaAccount 'LABDOMAIN\collector$' -OutputRoot $script:Root -TaskName 'FirstTask'
+        & $script:RegisterPath -GmsaAccount 'LABDOMAIN\collector$' -OutputRoot $script:Root -TaskName 'FirstTask'
+        Should -Invoke Register-ScheduledTask -Exactly 2
+        Get-Content (Join-Path $script:Root '.gpo-lens-collection-owner') -Raw | Should -Be 'FirstTask'
+    }
+    It 'retains the prior owner when takeover credentials do not match' {
+        New-Item -ItemType Directory -Path $script:Root | Out-Null
+        'FirstTask' | Set-Content (Join-Path $script:Root '.gpo-lens-collection-owner')
+        $credential = [pscredential]::new('LABDOMAIN\wrong', (ConvertTo-SecureString 'synthetic' -AsPlainText -Force))
+        { & $script:RegisterPath -ServiceAccount 'LABDOMAIN\svc-collector' -Credential $credential -OutputRoot $script:Root -TaskName SecondTask -Force } | Should -Throw '*match*'
+        (Get-Content (Join-Path $script:Root '.gpo-lens-collection-owner') -Raw).Trim() | Should -Be FirstTask
+        Should -Invoke Register-ScheduledTask -Exactly 0
+    }
+    It 'restores the prior owner or absence when scheduler registration fails' -ForEach @(
+        @{PriorOwner=$null}, @{PriorOwner='FirstTask'}
+    ) {
+        New-Item -ItemType Directory -Path $script:Root | Out-Null
+        $marker = Join-Path $script:Root '.gpo-lens-collection-owner'
+        if ($PriorOwner) { $PriorOwner | Set-Content $marker }
+        Mock Register-ScheduledTask { throw 'synthetic scheduler failure' }
+        { & $script:RegisterPath -GmsaAccount 'LABDOMAIN\collector$' -OutputRoot $script:Root -TaskName SecondTask -Force } | Should -Throw '*scheduler*'
+        if ($PriorOwner) {
+            Test-Path $marker | Should -BeTrue
+            (Get-Content $marker -Raw).Trim() | Should -Be $PriorOwner
+        }
+        else { Test-Path $marker | Should -BeFalse }
+    }
 }
 
 Describe 'Collection runner' {
@@ -102,6 +152,7 @@ Describe 'Collection runner' {
     BeforeEach {
         $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         New-Item -ItemType Directory -Path $script:Root | Out-Null
+        'GpoLensCollection' | Set-Content (Join-Path $script:Root '.gpo-lens-collection-owner')
         $script:Collector = Join-Path $TestDrive 'synthetic-collector.ps1'
         @'
 param($OutputRoot)
@@ -129,6 +180,38 @@ Write-Output 'synthetic export complete'
         Test-Path (Join-Path $script:Root 'notes.zip') | Should -BeTrue
         Test-Path (Join-Path $drop 'lab.example.com-20261006-120000.zip') | Should -BeTrue
         Get-Content (Join-Path $script:Root 'collection.log') -Raw | Should -Match 'Collection succeeded'
+    }
+    It 'refuses to run or prune without a matching root owner' -ForEach @(
+        @{ Owner = $null }, @{ Owner = 'OtherTask' }
+    ) {
+        Remove-Item (Join-Path $script:Root '.gpo-lens-collection-owner') -Force
+        if ($null -ne $Owner) {
+            $Owner | Set-Content (Join-Path $script:Root '.gpo-lens-collection-owner')
+        }
+        $foreign = Join-Path $script:Root 'lab.example.com-20261005-120000'
+        New-Item -ItemType Directory -Path $foreign | Out-Null
+        '<GPOs/>' | Set-Content (Join-Path $foreign 'AllGPOs.xml')
+        [IO.Compression.ZipFile]::CreateFromDirectory($foreign, "$foreign.zip")
+        { Invoke-GpoLensCollection -OutputRoot $script:Root -CollectorPath $script:Collector -Retention 1 } | Should -Throw '*owner*'
+        Test-Path "$foreign.zip" | Should -BeTrue
+        Test-Path $foreign | Should -BeTrue
+        Test-Path (Join-Path $script:Root 'lab.example.com-20261006-120000.zip') | Should -BeFalse
+        Test-Path (Join-Path $script:Root 'collection.log') | Should -BeFalse
+    }
+    It 'rechecks the owner before pruning if the marker changes during collection' {
+        $foreign = Join-Path $script:Root 'lab.example.com-20261005-120000'
+        New-Item -ItemType Directory -Path $foreign | Out-Null
+        '<GPOs/>' | Set-Content (Join-Path $foreign 'AllGPOs.xml')
+        [IO.Compression.ZipFile]::CreateFromDirectory($foreign, "$foreign.zip")
+        "'OtherTask' | Set-Content (Join-Path `$OutputRoot '.gpo-lens-collection-owner') -Force" | Add-Content $script:Collector
+        { Invoke-GpoLensCollection -OutputRoot $script:Root -CollectorPath $script:Collector -Retention 1 } | Should -Throw '*owner*'
+        Test-Path "$foreign.zip" | Should -BeTrue
+        Test-Path $foreign | Should -BeTrue
+    }
+    It 'runs successfully for a custom registered task name' {
+        'CustomTask' | Set-Content (Join-Path $script:Root '.gpo-lens-collection-owner') -Force
+        Invoke-GpoLensCollection -OutputRoot $script:Root -CollectorPath $script:Collector -TaskName 'CustomTask'
+        Test-Path (Join-Path $script:Root 'lab.example.com-20261006-120000.zip') | Should -BeTrue
     }
     It 'injects the authoritative inventory into both the folder and the delivered ZIP' {
         $inventory = Join-Path $TestDrive 'privileged-inventory.json'
@@ -180,6 +263,7 @@ Describe 'Collection inventory and retention boundaries' {
     BeforeEach {
         $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         New-Item -ItemType Directory -Path $script:Root | Out-Null
+        'GpoLensCollection' | Set-Content (Join-Path $script:Root '.gpo-lens-collection-owner')
         $script:Collector = Join-Path $TestDrive 'inventory-collector.ps1'
         @'
 param($OutputRoot)

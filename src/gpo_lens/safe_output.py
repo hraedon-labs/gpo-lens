@@ -271,27 +271,38 @@ def _sensitive(mapping: Mapping[str, Any]) -> bool:
     return bool(_registry_payload(mapping))
 
 
-def _secret_variants(secrets: Iterable[str]) -> tuple[str, ...]:
+def _secret_variants(secrets: Iterable[str]) -> tuple[tuple[str, bool], ...]:
     # Older report generators escape at their own render boundary. Include
     # those known renderings so output files and stdout cannot reveal an
     # entity-encoded copy of a credential. Structured views mask before render.
-    variants: set[str] = set()
+    variants: dict[str, bool] = {}
     for secret in secrets:
-        variants.update(
-            {
-                secret,
-                html.escape(secret),
-                html.escape(secret, quote=False),
-                secret.replace("`", "&#96;"),
-                html.escape(secret.replace("|", "\\|").replace("\n", " "), quote=False),
-            }
-        )
-    return tuple(sorted((s for s in variants if s and s != REDACTED), key=lambda s: (-len(s), s)))
+        substring_mask = len(secret) >= 6 and not secret.isnumeric()
+        for variant in {
+            secret,
+            html.escape(secret),
+            html.escape(secret, quote=False),
+            secret.replace("`", "&#96;"),
+            html.escape(secret.replace("|", "\\|").replace("\n", " "), quote=False),
+        }:
+            if variant and variant != REDACTED:
+                # Escaping must not turn a short secret into an unbounded one.
+                # A real long credential can equal a short one's escaped form.
+                # In that ambiguous case the long credential must stay masked.
+                variants[variant] = variants.get(variant, False) or substring_mask
+    return tuple(sorted(variants.items(), key=lambda item: (-len(item[0]), item[0])))
 
 
-def _mask_text(value: str, variants: tuple[str, ...]) -> str:
-    for secret in variants:
-        value = value.replace(secret, REDACTED)
+def _mask_text(value: str, variants: tuple[tuple[str, bool], ...]) -> str:
+    for secret, substring_mask in variants:
+        if substring_mask:
+            value = value.replace(secret, REDACTED)
+        else:
+            # Short/numeric credentials still mask standalone copies (WI-101),
+            # but never substrings of dates, GUIDs, counts or policy names.
+            # Treat '-' and '.' as part of a token to preserve identifiers and
+            # decimal values too. Credential keys are redacted independently.
+            value = re.sub(r"(?<![\w.-])" + re.escape(secret) + r"(?![\w.-])", REDACTED, value)
     return _ASSIGNMENT.sub(lambda m: m[1] + "=" + REDACTED, value)
 
 

@@ -10,6 +10,8 @@
 [CmdletBinding()]
 param(
     [string]$OutputRoot,
+    [ValidateScript({ -not [string]::IsNullOrWhiteSpace($_) })]
+    [string]$TaskName = 'GpoLensCollection',
     [string]$CollectorPath = (Join-Path $PSScriptRoot 'Export-GpoEstate.ps1'),
     [ValidateRange(1, 1000)]
     [int]$Retention = 14,
@@ -81,11 +83,28 @@ function Assert-GpoLensRegularTree {
     }
 }
 
+function Assert-GpoLensCollectionOwner {
+    param([string]$OutputRoot, [string]$TaskName)
+    $marker = Join-Path $OutputRoot '.gpo-lens-collection-owner'
+    if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
+        throw 'Collection refuses an output root without an owner marker. Re-register the task.'
+    }
+    if ((Get-Item -LiteralPath $marker -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'Collection refuses a linked owner marker.'
+    }
+    $owner = [IO.File]::ReadAllText($marker).TrimEnd([char[]]"`r`n")
+    if (-not [string]::Equals($owner, $TaskName, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Collection refuses output root owner '$owner' for task '$TaskName'."
+    }
+}
+
 function Invoke-GpoLensCollection {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$OutputRoot,
         [Parameter(Mandatory)][string]$CollectorPath,
+        [ValidateScript({ -not [string]::IsNullOrWhiteSpace($_) })]
+        [string]$TaskName = 'GpoLensCollection',
         [ValidateRange(1, 1000)][int]$Retention = 14,
         [string]$CopyTo,
         [string]$InventoryPath,
@@ -97,12 +116,14 @@ function Invoke-GpoLensCollection {
         ((Get-Item -LiteralPath $OutputRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
         throw 'Collection refuses a linked output root.'
     }
-    New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
+    # Refuse before creating any root, logs or running the collector.
+    Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName
     # Protect retention and log rotation from concurrent manual/task runs.
     $lock = [IO.File]::Open((Join-Path $OutputRoot 'collection.lock'), [IO.FileMode]::OpenOrCreate,
         [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
     $logArgs = @{LogPath=(Join-Path $OutputRoot 'collection.log'); LogMaxBytes=$LogMaxBytes; LogFiles=$LogFiles}
     try {
+        Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName
         Write-GpoLensCollectionLog @logArgs -Message 'Collection started'
         if ($InventoryPath) {
             # Capture once: later file changes cannot diverge from validated bytes.
@@ -159,6 +180,7 @@ function Invoke-GpoLensCollection {
         }
         # Bind retention to the exact prefix of the export just collected.
         # Never treat a similarly named producer as owned by this run.
+        Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName
         $producerPrefix = $newest.BaseName.Substring(0, $newest.BaseName.Length - 16)
         $expired = @(Get-GpoLensCompletedExports -OutputRoot $OutputRoot |
             Where-Object {
@@ -186,6 +208,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     try {
         if (-not $OutputRoot) { throw '-OutputRoot is required.' }
         Invoke-GpoLensCollection -OutputRoot $OutputRoot -CollectorPath $CollectorPath `
+            -TaskName $TaskName `
             -Retention $Retention -CopyTo $CopyTo -InventoryPath $InventoryPath `
             -LogMaxBytes $LogMaxBytes -LogFiles $LogFiles
     } catch {

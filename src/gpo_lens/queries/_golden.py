@@ -62,8 +62,8 @@ def golden_diff(
 
     GPOs are matched by name (case-insensitive).  Settings within matched GPOs
     are compared by ``(side, cse, identity)`` (case-insensitive).  Blocked
-    extensions (``source_state == "blocked"``) are skipped — they are not
-    active settings.
+    extensions and settings from disabled sides are skipped. An active value
+    present on only one side is added/removed; two inactive values yield no row.
 
     Returns entries sorted by severity: GPO-level changes first, then
     setting-level drift/removed/added, then compliant.
@@ -145,7 +145,7 @@ def golden_diff(
         live_cse: dict[tuple[Side, str, str], str] = {}
         live_ident: dict[tuple[Side, str, str], str] = {}
         for s in live_gpo.settings:
-            if s.source_state == "blocked":
+            if s.source_state == "blocked" or s.from_disabled_side:
                 continue
             key = (s.side, s.cse.lower(), s.identity.lower())
             if key not in live_settings:
@@ -160,7 +160,7 @@ def golden_diff(
         golden_cse: dict[tuple[Side, str, str], str] = {}
         golden_ident: dict[tuple[Side, str, str], str] = {}
         for s in golden_gpo.settings:
-            if s.source_state == "blocked":
+            if s.source_state == "blocked" or s.from_disabled_side:
                 continue
             key = (s.side, s.cse.lower(), s.identity.lower())
             if key not in golden_settings:

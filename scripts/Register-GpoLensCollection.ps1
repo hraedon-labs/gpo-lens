@@ -13,6 +13,9 @@
   The runner substitutes it into each routine folder AND ZIP before delivery.
 .PARAMETER ExecutionTimeLimit
   Hard runtime limit, default 02:00:00. Zero/unlimited limits are rejected.
+.PARAMETER Force
+  Explicitly take over an output root owned by another task, with a warning.
+  The previous task will refuse to run after the ownership changes.
 .EXAMPLE
   .\Register-GpoLensCollection.ps1 -GmsaAccount 'LABDOMAIN\collector$' -OutputRoot C:\GpoExport
 .EXAMPLE
@@ -35,6 +38,8 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Gmsa')]
     [Parameter(Mandatory, ParameterSetName = 'Service')]
     [string]$OutputRoot,
+    [switch]$Force,
+    [ValidateScript({ -not [string]::IsNullOrWhiteSpace($_) })]
     [string]$TaskName = 'GpoLensCollection',
     [string]$CollectorPath = (Join-Path $PSScriptRoot 'Export-GpoEstate.ps1'),
     [ValidateRange(1, 365)]
@@ -66,6 +71,42 @@ function ConvertTo-GpoLensAbsolutePath {
     return [IO.Path]::GetFullPath($Value)
 }
 
+function Set-GpoLensCollectionOwner {
+    param([string]$OutputRoot, [string]$TaskName, [switch]$Force, [scriptblock]$RegisterTask)
+    if ((Test-Path -LiteralPath $OutputRoot) -and
+        ((Get-Item -LiteralPath $OutputRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'Registration refuses a linked output root.'
+    }
+    New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
+    # Serialize ownership changes against collection and retention too.
+    $lock = [IO.File]::Open((Join-Path $OutputRoot 'collection.lock'), [IO.FileMode]::OpenOrCreate,
+        [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    try {
+        $marker = Join-Path $OutputRoot '.gpo-lens-collection-owner'
+        $previousBytes = $null
+        if (Test-Path -LiteralPath $marker) {
+            if ((Get-Item -LiteralPath $marker -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw 'Registration refuses a linked owner marker.'
+            }
+            $owner = [IO.File]::ReadAllText($marker).TrimEnd([char[]]"`r`n")
+            $previousBytes = [IO.File]::ReadAllBytes($marker)
+            if (-not [string]::Equals($owner, $TaskName, [StringComparison]::OrdinalIgnoreCase)) {
+                if (-not $Force) { throw "Output root owner is '$owner', not '$TaskName'. Use a separate root or explicit -Force." }
+                Write-Warning "Changing output root owner from '$owner' to '$TaskName'; the previous task will refuse to run. Existing exports become subject to this task's retention."
+            }
+        }
+        try {
+            [IO.File]::WriteAllText($marker, $TaskName, [Text.UTF8Encoding]::new($false))
+            & $RegisterTask
+        } catch {
+            # Keep the prior task runnable if Scheduler rejects the replacement.
+            if ($null -ne $previousBytes) { [IO.File]::WriteAllBytes($marker, $previousBytes) }
+            elseif (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker -Force }
+            throw
+        }
+    } finally { $lock.Dispose() }
+}
+
 if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference = 'Stop'
     if ($Unregister) {
@@ -86,6 +127,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     $taskArgs = '-NoProfile -NonInteractive -File ' + (ConvertTo-GpoLensTaskArgument $runner) +
         ' -CollectorPath ' + (ConvertTo-GpoLensTaskArgument $CollectorPath) +
         ' -OutputRoot ' + (ConvertTo-GpoLensTaskArgument $OutputRoot) +
+        ' -TaskName ' + (ConvertTo-GpoLensTaskArgument $TaskName) +
         " -Retention $Retention -LogMaxBytes $LogMaxBytes -LogFiles $LogFiles"
     if ($CopyTo) { $taskArgs += ' -CopyTo ' + (ConvertTo-GpoLensTaskArgument (ConvertTo-GpoLensAbsolutePath $CopyTo)) }
     if ($InventoryPath) { $taskArgs += ' -InventoryPath ' + (ConvertTo-GpoLensTaskArgument (ConvertTo-GpoLensAbsolutePath $InventoryPath)) }
@@ -104,18 +146,22 @@ if ($MyInvocation.InvocationName -ne '.') {
         -MultipleInstances IgnoreNew -StartWhenAvailable
     $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings `
         -Description 'Read-only GPO export, bounded retention, rotating logs and optional ZIP delivery.'
-    if ($GmsaAccount) {
-        Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
-    } else {
+    if (-not $GmsaAccount) {
         if (-not $Credential) { $Credential = Get-Credential -UserName $ServiceAccount -Message 'Collection task credentials (saved only by Windows Task Scheduler)' }
         if (-not $Credential -or $Credential.UserName -ne $ServiceAccount) { throw 'Credential username must match -ServiceAccount.' }
         $taskPassword = $Credential.GetNetworkCredential().Password
-        try {
-            Register-ScheduledTask -TaskName $TaskName -InputObject $task -User $ServiceAccount -Password $taskPassword -Force | Out-Null
-        } finally {
-            $taskPassword = $null
-            $Credential = $null
+    }
+    try {
+        Set-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName -Force:$Force -RegisterTask {
+            if ($GmsaAccount) {
+                Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
+            } else {
+                Register-ScheduledTask -TaskName $TaskName -InputObject $task -User $ServiceAccount -Password $taskPassword -Force | Out-Null
+            }
         }
+    } finally {
+        $taskPassword = $null
+        $Credential = $null
     }
     Write-Host "Registered task: $TaskName"
     Write-Host "  Account: $account; every $EveryDays day(s) at $At (host local time)"

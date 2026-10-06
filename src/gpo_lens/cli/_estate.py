@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import sqlite3
+from contextlib import ExitStack
 
 from gpo_lens import ingest, queries, snapshot_diff, store
 from gpo_lens.cli._helpers import _get_admx, _get_estate, _render_json
@@ -128,16 +129,31 @@ def _emit_ingest_events(
         )
     )
 
-    _append_events(conn, evs)
+    _append_events(conn, evs, commit=False)
 
 
 def cmd_ingest(args: argparse.Namespace) -> None:
-    with collector_source(args.sample_dir) as source:
+    with ExitStack() as sources:
+        # Reject invalid uploads before opening or migrating any database.
+        source = sources.enter_context(collector_source(args.sample_dir))
         estate = ingest.load_estate(source)
         conn = sqlite3.connect(args.db)
         try:
             store.init_db(conn)
-            sid = store.save_evaluated_estate(conn, estate, admx=_get_admx(args))
+            try:
+                with conn:
+                    sid = store.save_evaluated_estate(
+                        conn, estate, admx=_get_admx(args), commit=False
+                    )
+                    prev = _latest_snapshot_before(conn, sid) if args.diff_latest else None
+                    entries = snapshot_diff.snapshot_changelog(conn, prev, sid) if prev else []
+                    if prev:
+                        _emit_ingest_events(conn, prev, sid, len(estate.gpos))
+                    # Detectors retain extracted SYSVOL through evaluation;
+                    # cleanup failure rolls back before this transaction commits.
+                    sources.close()
+            except Exception as exc:
+                raise RuntimeError("Import failed; nothing was imported.") from exc
             domain = estate.domain or "unknown"
             msg = f"{domain}, {len(estate.gpos)} GPOs, {len(estate.soms)} SOMs, snapshot={sid}"
             if args.json:
@@ -148,9 +164,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
                     "snapshot_id": sid,
                 }
                 if args.diff_latest:
-                    prev = _latest_snapshot_before(conn, sid)
                     if prev:
-                        entries = snapshot_diff.snapshot_changelog(conn, prev, sid)
                         out["changelog"] = [
                             {
                                 "gpo_id": e.gpo_id,
@@ -161,14 +175,11 @@ def cmd_ingest(args: argparse.Namespace) -> None:
                             }
                             for e in entries
                         ]
-                        _emit_ingest_events(conn, prev, sid, len(estate.gpos))
                 _render_json(out)
             else:
                 print(msg)
                 if args.diff_latest:
-                    prev = _latest_snapshot_before(conn, sid)
                     if prev:
-                        entries = snapshot_diff.snapshot_changelog(conn, prev, sid)
                         if entries:
                             print("\nChanges since previous snapshot:")
                             for e in entries:
@@ -180,7 +191,6 @@ def cmd_ingest(args: argparse.Namespace) -> None:
                                     )
                         else:
                             print("\nNo changes since previous snapshot.")
-                        _emit_ingest_events(conn, prev, sid, len(estate.gpos))
                     else:
                         print("\nNo previous snapshot to diff against.")
         finally:

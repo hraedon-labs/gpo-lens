@@ -55,15 +55,36 @@ Draft **v1.4.0** — release date to be assigned by the coordinator.
 - Certificate displays now allowlist public metadata; XML leaf credential tags
   participate in secret discovery. Numeric credentials are redacted under secret
   keys, while exact aggregate count fields and table headers remain visible.
+  Short and numeric copies use token boundaries so they cannot corrupt dates,
+  identifiers or larger counts; longer nonnumeric copies still mask substrings.
+  Escaped copies retain the original secret's boundary policy.
 - Snapshot import and required finding evaluation now commit atomically. On
   failure CLI exits nonzero and web returns an error; nothing is imported and
   no success audit is emitted. This also affected v1.3.1.
+  Required web audit events and CLI diff events now share that transaction;
+  snapshot deletion and its database audit also commit together.
+  Temporary upload cleanup completes before import commits, with extracted
+  SYSVOL available through evaluation; cleanup failures roll back the import.
 - Baseline comparison now keys settings by `(side, cse, identity)` and reports
   mixed applicable GPO values as drift with their sources. Golden comparison
   retains conflicting duplicate values. These defects also affected v1.3.1.
+  Both comparisons exclude blocked and disabled-side settings on both inputs:
+  absent active values are missing (baseline), added/removed (golden), or omitted
+  when both golden inputs are inactive. HTML, Markdown, CSV and JSON agree.
 - Collector ZIPs preflight member/directory counts, filename bytes and path
   depth before extraction, sharing the CLI and web limits and cleanup policy.
 - Collection retention prunes only the exact collected-domain export prefix.
+  Registration reserves a task-owned output root; missing or mismatched owner
+  markers prevent collection and pruning. Explicit `-Force` transfers ownership
+  with a warning, including tasks collecting the same domain.
+  Credentials are validated before ownership changes, and failed scheduler
+  registration restores the previous marker while holding the collection lock.
+- Schema 10 stores the evaluating detector version on each observation. Existing
+  observations retain NULL (pre-1.4, unknown); normal ingest records the application
+  version. Older releases refuse the upgraded database without changing it.
+  Pipeline digests hash the complete versioned detector registry and captured
+  danger-rule content, including checks that emit no findings. Estate changes
+  alone cannot change this digest.
 - Malformed own-SYSVOL policy GUIDs remain malformed-path findings without
   aborting dependency inventory or doctor. Windows extended UNC, WebDAV,
   device and named-pipe namespaces are classified explicitly.

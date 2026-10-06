@@ -149,21 +149,21 @@ def _audit(
     Best-effort: any failure is swallowed and logged via ``_logger`` so
     the audited operation is never affected.
     """
-    db_path = getattr(request.app.state, "db_path", "")
-    if isinstance(db_path, str) and db_path:
-        _ensure_audit_logger(db_path)
-    if _audit_logger is None:
-        return
-    request_id: str | None = getattr(request.state, "request_id", None)
-    entry: dict[str, object] = {
-        "ts": datetime.now(UTC).isoformat(),
-        "action": action,
-        "principal": principal.name if principal else None,
-        "outcome": outcome,
-        "detail": detail,
-        "request_id": request_id,
-    }
     try:
+        db_path = getattr(request.app.state, "db_path", "")
+        if isinstance(db_path, str) and db_path:
+            _ensure_audit_logger(db_path)
+        if _audit_logger is None:
+            return
+        request_id: str | None = getattr(request.state, "request_id", None)
+        entry: dict[str, object] = {
+            "ts": datetime.now(UTC).isoformat(),
+            "action": action,
+            "principal": principal.name if principal else None,
+            "outcome": outcome,
+            "detail": detail,
+            "request_id": request_id,
+        }
         _audit_logger.info(json.dumps(entry, default=str))
     except Exception as exc:
         _logger.warning("Audit log write failed: %s", exc)

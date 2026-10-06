@@ -158,6 +158,10 @@ Delivery is a copy; an operator must still ingest it through **Tools > Ingest**
 or `gpo-lens --db <database> ingest <collector.zip> --diff-latest`. The app does
 not watch an inbox. Use a dedicated output root per task; privileged exports
 and the authoritative inventory belong outside routine retention.
+Registration records `-TaskName` in `.gpo-lens-collection-owner`; missing or
+mismatched markers stop the runner before collection or pruning. Re-register
+older tasks to create the marker. Another task's root requires explicit
+`-Force` takeover with a warning; the previous task then refuses to run.
 [The IIS guide](../deploy/iis/README.md#scheduled-collection) has the full
 permissions, manual privileged-inventory refresh and lab validation steps.
 

@@ -293,6 +293,7 @@ class FindingObservation:
     claim_level: ClaimLevel
     remediation: str
     compliance_json: str
+    detector_version: str | None = None  # NULL: pre-1.4, unknown
 
 
 @dataclass(frozen=True)

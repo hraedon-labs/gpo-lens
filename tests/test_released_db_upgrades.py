@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+import subprocess
 from collections import Counter
 from contextlib import closing
 from dataclasses import asdict
@@ -22,6 +23,24 @@ from gpo_lens.store import CURRENT_SCHEMA_VERSION, init_db, list_snapshots, load
 
 FIXTURES = Path(__file__).parent / "fixtures/released_databases"
 TAGS = ("v0.5.0", "v0.7.0", "v0.7.1", "v1.0.0", "v1.1.0", "v1.2.0", "v1.3.1")
+
+
+def test_previous_release_refuses_schema_10_without_writes(tmp_path: Path) -> None:
+    # Exercise the actual released version guard, not a simulated old constant.
+    root = Path(__file__).resolve().parent.parent
+    old_source = subprocess.check_output(
+        ["git", "show", "v1.3.1:src/gpo_lens/store.py"], cwd=root, text=True
+    )
+    namespace = {"__name__": "gpo_lens._released_store"}
+    exec(compile(old_source, "<v1.3.1-store>", "exec"), namespace)  # noqa: S102
+    db = tmp_path / "upgraded.sqlite3"
+    shutil.copyfile(FIXTURES / "v1.3.1.sqlite3", db)
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        before = list(conn.iterdump())
+        with pytest.raises(RuntimeError, match=r"schema version 10.*supports \(version 9\)"):
+            namespace["init_db"](conn)
+        assert list(conn.iterdump()) == before
 
 
 def _contents(conn: sqlite3.Connection) -> dict[str, tuple[list[str], list[tuple]]]:
@@ -88,6 +107,13 @@ def test_released_database_upgrade_preserves_every_entity(tag: str, tmp_path: Pa
     for _ in range(2):
         with closing(sqlite3.connect(db)) as conn, conn:
             init_db(conn)
+            assert CURRENT_SCHEMA_VERSION == 10
+            assert "detector_version" in {
+                row[1] for row in conn.execute("PRAGMA table_info(finding_observation)")
+            }
+            assert conn.execute(
+                "SELECT count(*) FROM finding_observation WHERE detector_version IS NOT NULL"
+            ).fetchone() == (0,)
             assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
             assert conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
             assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
