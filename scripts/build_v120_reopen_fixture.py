@@ -29,8 +29,9 @@ def main() -> None:
                 "-c",
                 """
 import sqlite3, sys
+from contextlib import closing
 from gpo_lens.findings import append_triage_event, triage_finding
-with sqlite3.connect(sys.argv[1]) as conn:
+with closing(sqlite3.connect(sys.argv[1])) as conn, conn:
     oid = conn.execute(
         "SELECT finding_id FROM finding_triage "
         "WHERE status='accepted_risk' ORDER BY id LIMIT 1"

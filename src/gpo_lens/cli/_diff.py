@@ -116,8 +116,10 @@ def cmd_diff_settings(args: argparse.Namespace) -> None:
 
 def cmd_changelog(args: argparse.Namespace) -> None:
     conn = sqlite3.connect(args.db)
-    entries = snapshot_diff.snapshot_changelog(conn, args.snapshot_a, args.snapshot_b)
-    conn.close()
+    try:
+        entries = snapshot_diff.snapshot_changelog(conn, args.snapshot_a, args.snapshot_b)
+    finally:
+        conn.close()
     if args.gpo_id:
         entries = [e for e in entries if e.gpo_id == args.gpo_id]
     if args.side:

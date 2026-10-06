@@ -10,6 +10,7 @@ import json
 import shutil
 import sqlite3
 from collections import Counter
+from contextlib import closing
 from dataclasses import asdict
 from pathlib import Path
 
@@ -50,7 +51,7 @@ def _preserved(conn: sqlite3.Connection, original: dict) -> None:
 def test_released_database_upgrade_preserves_every_entity(tag: str, tmp_path: Path) -> None:
     manifest = json.loads((FIXTURES / f"{tag}.json").read_text())
     source = FIXTURES / f"{tag}.sqlite3"
-    with sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True) as conn:
+    with closing(sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True)) as conn, conn:
         original = _contents(conn)
         assert conn.execute("PRAGMA user_version").fetchone()[0] == manifest["schema_version"]
         assert {table: len(rows) for table, (_, rows) in original.items()} == manifest["counts"]
@@ -85,7 +86,7 @@ def test_released_database_upgrade_preserves_every_entity(tag: str, tmp_path: Pa
         assert any(entry["action"] == "ingest" for entry in audit_entries)
     first_open = None
     for _ in range(2):
-        with sqlite3.connect(db) as conn:
+        with closing(sqlite3.connect(db)) as conn, conn:
             init_db(conn)
             assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
             assert conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
@@ -155,11 +156,16 @@ def test_iis_online_backup_restores_released_database(tag: str, tmp_path: Path) 
         assert Path(f"{db}-wal").stat().st_size > 0
         before = _contents(app)
         # A distinct backup connection, while the app connection remains open.
-        with sqlite3.connect(db) as src, sqlite3.connect(restored / db.name) as dst:
+        with (
+            closing(sqlite3.connect(db)) as src,
+            src,
+            closing(sqlite3.connect(restored / db.name)) as dst,
+            dst,
+        ):
             src.backup(dst)
         if manifest["audit_file"]:
             shutil.copyfile(live / "audit.log", restored / "audit.log")
-        with sqlite3.connect(restored / db.name) as conn:
+        with closing(sqlite3.connect(restored / db.name)) as conn, conn:
             init_db(conn)
             assert _contents(conn) == before
             assert asdict(load_estate(conn, sid)) == asdict(estate)

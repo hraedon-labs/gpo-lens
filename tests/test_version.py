@@ -37,6 +37,12 @@ def _assert_changelog_version(text: str, package_version: str) -> None:
         assert tuple(map(int, target.split("."))) >= tuple(map(int, package_version.split("."))), (
             "Unreleased target must not precede package metadata"
         )
+        assert len(sections) > 1, "Unreleased work must retain the latest released version"
+        released = re.match(r"v(\d+\.\d+\.\d+)", sections[1])
+        assert released, "Unreleased work must retain the latest released version"
+        assert tuple(map(int, target.split("."))) >= tuple(
+            map(int, released.group(1).split("."))
+        ), "Unreleased target cannot precede the latest release"
         if target != package_version:
             # Feature streams can target the next release before its version
             # bump. Their package metadata must still match the latest release.

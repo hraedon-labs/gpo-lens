@@ -4,6 +4,7 @@ import inspect
 import json
 import re
 import sqlite3
+from contextlib import closing
 
 import pytest
 
@@ -251,7 +252,7 @@ def test_parser_value_record_feeds_snapshot_secret_context():
     estate = load_estate(Path(__file__).parent / "fixtures")
     setting.gpo_id = estate.gpos[0].id
     estate.gpos[0].settings.append(setting)
-    with sqlite3.connect(":memory:") as conn:
+    with closing(sqlite3.connect(":memory:")) as conn, conn:
         init_db(conn)
         sid = save_estate(conn, estate)
         secrets = snapshot_secrets(conn, [sid])

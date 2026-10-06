@@ -279,17 +279,24 @@ def compare_ledgers(a: Iterable[LedgerRow], b: Iterable[LedgerRow]) -> list[dict
 def occurrence_run_ids(conn: sqlite3.Connection, occurrence_ids: Iterable[int]) -> list[int]:
     """Workflow rows may survive newer snapshots; retain their source evaluations."""
     runs: set[int] = set()
-    for occurrence_id in sorted(set(occurrence_ids)):
-        row = conn.execute(
-            "SELECT first_seen_run_id,last_seen_run_id,resolved_run_id FROM finding WHERE id=?",
-            (occurrence_id,),
-        ).fetchone()
-        if row is not None:
+    ids = sorted(set(occurrence_ids))
+    # Stay below SQLite's historical 999-variable limit, even for a full inbox.
+    # Two indexed reads per batch replace two round trips per occurrence.
+    for start in range(0, len(ids), 500):
+        batch = ids[start : start + 500]
+        placeholders = ",".join("?" for _ in batch)
+        for row in conn.execute(
+            "SELECT first_seen_run_id,last_seen_run_id,resolved_run_id FROM finding "
+            f"WHERE id IN ({placeholders})",
+            batch,
+        ):
             runs.update(run for run in row if run is not None)
         runs.update(
             row[0]
             for row in conn.execute(
-                "SELECT run_id FROM finding_observation WHERE occurrence_id=?", (occurrence_id,)
+                "SELECT DISTINCT run_id FROM finding_observation "
+                f"WHERE occurrence_id IN ({placeholders})",
+                batch,
             )
         )
     return sorted(runs)

@@ -20,6 +20,18 @@ Draft **v1.4.0** — release date and package version bump by coordinator.
   checks. Sanitized reports fail closed; optional private detail output refuses
   destinations inside Git worktrees. The harness stays outside the package.
 
+### Performance
+
+- **Large-estate exports and connection hygiene (F3).** Batch finding provenance
+  reads, stream HTTP exports in bounded UTF-8 chunks, and prepare credential
+  masking once per projection. Shared topology evidence is inspected once per
+  credential-discovery pass. Markdown/CSV bytes, provenance, redaction and
+  authorization remain unchanged. Close CLI changelog connections on errors,
+  close failed web connection setup, and explicitly close fixture-builder and
+  benchmark connections. Add seeded synthetic calibration, CI operation budgets,
+  opt-in large-estate benchmarks and explicit connection-lifetime regressions.
+
+
 ## v1.3.1 — 2026-10-06
 
 ### Fixed

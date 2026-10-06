@@ -2,6 +2,7 @@
 
 import shutil
 import sqlite3
+from contextlib import closing
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,7 +31,7 @@ def test_v120_public_api_reopen_survives_upgrade(tmp_path):
     # using both released APIs, as the reviewer's probe does (never current APIs).
     db = tmp_path / "upgrade.sqlite3"
     shutil.copyfile(FIXTURES / "released_databases/v1.2.0-with-reopen.sqlite3", db)
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         oid = conn.execute(
             "SELECT finding_id FROM finding_triage WHERE status='accepted_risk' ORDER BY id LIMIT 1"
         ).fetchone()[0]
@@ -57,7 +58,7 @@ def test_v120_public_api_reopen_survives_upgrade(tmp_path):
 
 
 def test_triage_timestamp_and_id_order_in_every_fold():
-    with sqlite3.connect(":memory:") as conn:
+    with closing(sqlite3.connect(":memory:")) as conn, conn:
         init_db(conn)
         sid = save_estate(conn, load_estate(FIXTURES))
         candidates = candidates_from_estate(load_estate(FIXTURES), snapshot_id=sid)
@@ -87,7 +88,7 @@ def test_triage_timestamp_and_id_order_in_every_fold():
 
 def test_enforced_links_have_complete_identity_and_do_not_inherit_collapsed_triage():
     estate = load_estate(FIXTURES)
-    with sqlite3.connect(":memory:") as conn:
+    with closing(sqlite3.connect(":memory:")) as conn, conn:
         init_db(conn)
         sid = save_estate(conn, estate)
         links = [
@@ -123,7 +124,7 @@ def test_enforced_links_have_complete_identity_and_do_not_inherit_collapsed_tria
 
 def test_duplicate_fingerprint_degrades_analysis_without_resolving_missing_findings():
     estate = load_estate(FIXTURES)
-    with sqlite3.connect(":memory:") as conn:
+    with closing(sqlite3.connect(":memory:")) as conn, conn:
         init_db(conn)
         sid = save_estate(conn, estate)
         candidates = candidates_from_estate(estate, snapshot_id=sid)
@@ -144,7 +145,7 @@ def test_duplicate_fingerprint_degrades_analysis_without_resolving_missing_findi
 
 def test_historical_activity_and_severity_use_selected_run():
     estate = load_estate(FIXTURES)
-    with sqlite3.connect(":memory:") as conn:
+    with closing(sqlite3.connect(":memory:")) as conn, conn:
         init_db(conn)
         totals = [(2, 1), (1, 0), (0, 0), (1, 1)]
         sample = candidates_from_estate(estate, snapshot_id=1)[0]
@@ -172,7 +173,7 @@ def test_future_schema_refusal_is_byte_preserving(tmp_path):
     import pytest
 
     db = tmp_path / "future.sqlite3"
-    with sqlite3.connect(db) as conn:
+    with closing(sqlite3.connect(db)) as conn, conn:
         conn.executescript(
             "CREATE TABLE future_only(payload TEXT); "
             "INSERT INTO future_only VALUES ('lab sentinel'); PRAGMA user_version=99;"

@@ -189,10 +189,17 @@ def _command_secrets(mapping: Mapping[str, Any]) -> tuple[str, ...]:
 def secret_values(value: object) -> tuple[str, ...]:
     """Discover credential values while retaining no raw source fragments."""
     secrets: set[str] = set()
+    visited: set[int] = set()
 
     def discover(obj: object) -> None:
+        # Query results can repeat a SOM (and its entire link chain) for each
+        # matching link. Inspect a shared container once within this call; all
+        # its credential values still join the same masking context.
+        if id(obj) in visited:
+            return
         mapping = _mapping(obj)
         if mapping is not None:
+            visited.add(id(obj))
             sensitive = _sensitive(mapping)
             secrets.update(_registry_payload(mapping))
             secrets.update(_command_secrets(mapping))
@@ -205,6 +212,7 @@ def secret_values(value: object) -> tuple[str, ...]:
                     secrets.add(child)
                 discover(child)
         elif isinstance(obj, (list, tuple, set, frozenset)):
+            visited.add(id(obj))
             for child in obj:
                 discover(child)
         elif isinstance(obj, str):
@@ -242,18 +250,12 @@ def _sensitive(mapping: Mapping[str, Any]) -> bool:
     return bool(_registry_payload(mapping))
 
 
-def safe_text(value: str, *, secrets: Iterable[str] = ()) -> str:
-    """Mask credentials in already-rendered text without destroying its markup.
-
-    Structured projections omit raw fragments before rendering. CLI reports
-    have already rendered their HTML/Markdown and must retain that structure.
-    """
-    values = set(secrets) | set(secret_values(value))
+def _secret_variants(secrets: Iterable[str]) -> tuple[str, ...]:
     # Older report generators escape at their own render boundary. Include
     # those known renderings so output files and stdout cannot reveal an
     # entity-encoded copy of a credential. Structured views mask before render.
     variants: set[str] = set()
-    for secret in values:
+    for secret in secrets:
         variants.update(
             {
                 secret,
@@ -263,10 +265,22 @@ def safe_text(value: str, *, secrets: Iterable[str] = ()) -> str:
                 html.escape(secret.replace("|", "\\|").replace("\n", " "), quote=False),
             }
         )
-    values = variants
-    for secret in sorted((s for s in values if s and s != REDACTED), key=lambda s: (-len(s), s)):
+    return tuple(sorted((s for s in variants if s and s != REDACTED), key=lambda s: (-len(s), s)))
+
+
+def _mask_text(value: str, variants: tuple[str, ...]) -> str:
+    for secret in variants:
         value = value.replace(secret, REDACTED)
     return _ASSIGNMENT.sub(lambda m: m[1] + "=" + REDACTED, value)
+
+
+def safe_text(value: str, *, secrets: Iterable[str] = ()) -> str:
+    """Mask credentials in already-rendered text without destroying its markup.
+
+    Structured projections omit raw fragments before rendering. CLI reports
+    have already rendered their HTML/Markdown and must retain that structure.
+    """
+    return _mask_text(value, _secret_variants(set(secrets) | set(secret_values(value))))
 
 
 def safe_data(value: object, *, include_audit: bool = True, secrets: Iterable[str] = ()) -> Any:
@@ -277,7 +291,9 @@ def safe_data(value: object, *, include_audit: bool = True, secrets: Iterable[st
     whose typed result intentionally omits source subtrees.
     """
     secrets = set(secrets) | set(secret_values(value))
-    ordered_secrets = sorted((s for s in secrets if s != REDACTED), key=lambda s: (-len(s), s))
+    # Discovery already visited every source string. Prepare escaped spellings
+    # once for this projection rather than rediscovering/sorting for each field.
+    variants = _secret_variants(s for s in secrets if s != REDACTED)
 
     def project(obj: object) -> Any:
         mapping = _mapping(obj)
@@ -319,7 +335,7 @@ def safe_data(value: object, *, include_audit: bool = True, secrets: Iterable[st
                 return obj
             if _RAW_FRAGMENT.search(obj):
                 return REDACTED
-            return safe_text(obj, secrets=ordered_secrets)
+            return _mask_text(obj, variants)
         return serialize_result(obj)
 
     return project(value)

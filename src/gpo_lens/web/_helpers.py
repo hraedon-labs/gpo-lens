@@ -109,8 +109,12 @@ def get_ro_conn(db_path: str) -> sqlite3.Connection:
 def get_rw_conn(db_path: str) -> sqlite3.Connection:
     """Open a read-write connection with foreign keys and tightened permissions."""
     conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA foreign_keys = ON")
-    _store.restrict_db_permissions(conn)
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        _store.restrict_db_permissions(conn)
+    except BaseException:
+        conn.close()
+        raise
     return conn
 
 

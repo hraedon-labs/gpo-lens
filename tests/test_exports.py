@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+from contextlib import closing
 
 import pytest
 
@@ -873,7 +874,7 @@ def test_ordinary_cli_commands_share_credential_projection(
     from gpo_lens.cli import main
     from gpo_lens.store import load_estate, save_estate
 
-    with sqlite3.connect(export_client.db_path) as conn:
+    with closing(sqlite3.connect(export_client.db_path)) as conn, conn:
         estate = load_estate(conn)
         gid = estate.gpos[0].id
         estate.gpos[0].settings = []
@@ -889,7 +890,7 @@ def test_ordinary_cli_commands_share_credential_projection(
     }[command]
     # Show reads the newest snapshot, so use a source populated with secrets.
     if command == "show":
-        with sqlite3.connect(export_client.db_path) as conn:
+        with closing(sqlite3.connect(export_client.db_path)) as conn, conn:
             save_estate(conn, load_estate(conn, 1))
     assert main(argv) == 0
     output = capsys.readouterr().out
@@ -909,12 +910,12 @@ def test_cli_event_export_masks_copied_credentials_without_changing_store(
     from gpo_lens.cli import main
     from gpo_lens.events import append_event, query_events
 
-    with sqlite3.connect(export_client.db_path) as conn:
+    with closing(sqlite3.connect(export_client.db_path)) as conn, conn:
         append_event(conn, "lab.test", {"summary": "Copied " + secret_corpus[-1]})
     output = tmp_path / "events.ndjson"
     assert main(["--db", str(export_client.db_path), "events-export", "--ndjson", str(output)]) == 0
     assert secret_corpus[-1] not in output.read_text()
-    with sqlite3.connect(export_client.db_path) as conn:
+    with closing(sqlite3.connect(export_client.db_path)) as conn, conn:
         assert secret_corpus[-1] in str(query_events(conn))
 
 
@@ -955,7 +956,7 @@ def test_occurrence_notes_mask_copied_snapshot_secrets(export_client, secret_cor
 
     from gpo_lens.findings import append_triage_event
 
-    with sqlite3.connect(export_client.db_path) as conn:
+    with closing(sqlite3.connect(export_client.db_path)) as conn, conn:
         append_triage_event(conn, 1, "commented", "lab-reviewer", note="Copy " + secret_corpus[-1])
     response = export_client.get("/findings/1", params={"format": format})
     assert response.status_code == 200

@@ -13,6 +13,7 @@ import statistics
 import tempfile
 import time
 import tracemalloc
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
@@ -63,7 +64,7 @@ def main() -> None:
             )
         )
     with tempfile.TemporaryDirectory(prefix="gpo-inbox-bench-") as temporary:
-        with sqlite3.connect(Path(temporary) / "bench.sqlite3") as conn:
+        with closing(sqlite3.connect(Path(temporary) / "bench.sqlite3")) as conn:
             init_db(conn)
             save_estate(conn, Estate(domain="lab.example.com", gpos=gpos))
 

@@ -11,6 +11,7 @@ import json
 import os
 import sqlite3
 import stat
+from contextlib import closing
 
 import pytest
 from _helpers import _make_gpo
@@ -367,70 +368,70 @@ def test_principals_and_group_members_round_trip(tmp_path):
     from gpo_lens.model import GroupMembership, ResolvedPrincipal
 
     db = tmp_path / "principals.db"
-    conn = sqlite3.connect(str(db))
-    store.init_db(conn)
+    with closing(sqlite3.connect(str(db))) as conn:
+        store.init_db(conn)
 
-    principals = {
-        "s-1-5-21-1-2-3-1000": ResolvedPrincipal(
-            sid="s-1-5-21-1-2-3-1000",
-            name="TEST\\GPO-Admins",
-            sam="GPO-Admins",
-            principal_type="Group",
-            domain="TEST",
-            resolved=True,
-        ),
-        "s-1-5-21-1-2-3-9999": ResolvedPrincipal(
-            sid="s-1-5-21-1-2-3-9999",
-            name="s-1-5-21-1-2-3-9999",
-            sam="",
-            principal_type="Unresolved",
-            domain="",
-            resolved=False,
-        ),
-    }
-    group_members = {
-        "s-1-5-21-1-2-3-1000": GroupMembership(
-            sid="s-1-5-21-1-2-3-1000",
-            name="TEST\\GPO-Admins",
-            members=("s-1-5-21-1-2-3-1001", "s-1-5-21-1-2-3-1002"),
-            member_count=2,
-            implicit="",
-        ),
-    }
-    estate_in = Estate(
-        domain="test.local",
-        gpos=[_make_gpo()],
-        principals=principals,
-        group_members=group_members,
-    )
-    sid = store.save_estate(conn, estate_in)
-    out = store.load_estate(conn, sid)
+        principals = {
+            "s-1-5-21-1-2-3-1000": ResolvedPrincipal(
+                sid="s-1-5-21-1-2-3-1000",
+                name="TEST\\GPO-Admins",
+                sam="GPO-Admins",
+                principal_type="Group",
+                domain="TEST",
+                resolved=True,
+            ),
+            "s-1-5-21-1-2-3-9999": ResolvedPrincipal(
+                sid="s-1-5-21-1-2-3-9999",
+                name="s-1-5-21-1-2-3-9999",
+                sam="",
+                principal_type="Unresolved",
+                domain="",
+                resolved=False,
+            ),
+        }
+        group_members = {
+            "s-1-5-21-1-2-3-1000": GroupMembership(
+                sid="s-1-5-21-1-2-3-1000",
+                name="TEST\\GPO-Admins",
+                members=("s-1-5-21-1-2-3-1001", "s-1-5-21-1-2-3-1002"),
+                member_count=2,
+                implicit="",
+            ),
+        }
+        estate_in = Estate(
+            domain="test.local",
+            gpos=[_make_gpo()],
+            principals=principals,
+            group_members=group_members,
+        )
+        sid = store.save_estate(conn, estate_in)
+        out = store.load_estate(conn, sid)
 
-    assert out.principals == principals
-    assert out.group_members == group_members
-    # the resolved name is what the danger/resultant surfaces depend on
-    assert out.principals["s-1-5-21-1-2-3-1000"].name == "TEST\\GPO-Admins"
-    assert out.group_members["s-1-5-21-1-2-3-1000"].members == (
-        "s-1-5-21-1-2-3-1001",
-        "s-1-5-21-1-2-3-1002",
-    )
+        assert out.principals == principals
+        assert out.group_members == group_members
+        # the resolved name is what the danger/resultant surfaces depend on
+        assert out.principals["s-1-5-21-1-2-3-1000"].name == "TEST\\GPO-Admins"
+        assert out.group_members["s-1-5-21-1-2-3-1000"].members == (
+            "s-1-5-21-1-2-3-1001",
+            "s-1-5-21-1-2-3-1002",
+        )
 
 
 def test_load_estate_tolerates_pre_v3_db_without_principal_tables(tmp_path):
     """A DB written before schema v3 has no principal/group_member tables; the
     read path must return empty maps, not raise."""
     db = tmp_path / "legacy.db"
-    conn = sqlite3.connect(str(db))
-    store.init_db(conn)
-    sid = store.save_estate(conn, Estate(domain="test.local", gpos=[_make_gpo()]))
-    # Simulate a pre-v3 DB by dropping the new tables.
-    conn.execute("DROP TABLE principal")
-    conn.execute("DROP TABLE group_member")
-    conn.commit()
+    with closing(sqlite3.connect(str(db))) as conn:
+        store.init_db(conn)
+        sid = store.save_estate(conn, Estate(domain="test.local", gpos=[_make_gpo()]))
+        # Simulate a pre-v3 DB by dropping the new tables.
+        conn.execute("DROP TABLE principal")
+        conn.execute("DROP TABLE group_member")
+        conn.commit()
 
-    out = store.load_estate(conn, sid)
-    assert out.principals == {}
-    assert out.group_members == {}
+        out = store.load_estate(conn, sid)
+        assert out.principals == {}
+        assert out.group_members == {}
 
 
 def test_load_estate_corrupted_setting_raw_raises(tmp_path):
