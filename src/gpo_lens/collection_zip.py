@@ -18,6 +18,12 @@ from tempfile import TemporaryDirectory
 MAX_ARCHIVE_BYTES = 500 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 1000
+# Allow more than 20 times a measured large export (~5,400 files, depth <= 8).
+# Directories include implicit parents, so empty files cannot exhaust inodes.
+MAX_MEMBERS = 120_000
+MAX_DIRECTORIES = 60_000
+MAX_FILENAME_BYTES = 32 * 1024 * 1024
+MAX_PATH_DEPTH = 24
 _WINDOWS_DEVICES = frozenset(
     {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "CLOCK$"}
     | {f"{prefix}{suffix}" for prefix in ("COM", "LPT") for suffix in "123456789¹²³"}
@@ -62,7 +68,25 @@ def safe_extract(
             dest_root = dest.resolve()
             total_bytes_read = 0
             targets: set[str] = set()
-            for info in zf.infolist():
+            members = zf.infolist()
+            if len(members) > MAX_MEMBERS:
+                raise ValueError("zip member count exceeds limit")
+            if sum(len(info.filename.encode("utf-8")) for info in members) > MAX_FILENAME_BYTES:
+                raise ValueError("zip total filename bytes exceeds limit")
+            directories: set[str] = set()
+            # Preflight the entire directory before creating/opening anything.
+            for info in members:
+                parts = info.filename.replace("\\", "/").rstrip("/").split("/")
+                if len(parts) > MAX_PATH_DEPTH:
+                    raise ValueError("zip path depth exceeds limit")
+                parent_count = (
+                    len(parts) if info.is_dir() or info.filename.endswith("\\") else len(parts) - 1
+                )
+                for depth in range(1, parent_count + 1):
+                    directories.add("/".join(parts[:depth]).casefold())
+                if len(directories) > MAX_DIRECTORIES:
+                    raise ValueError("zip directory count exceeds limit")
+            for info in members:
                 # Normalize before checking paths: Compress-Archive on PS 5.1
                 # emits backslashes. Reject Windows drives, UNC and ADS paths
                 # on every platform, including Linux.

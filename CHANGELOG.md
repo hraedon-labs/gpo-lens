@@ -52,6 +52,30 @@ Draft **v1.4.0** — release date to be assigned by the coordinator.
 
 ### Fixed
 
+- Certificate displays now allowlist public metadata; XML leaf credential tags
+  participate in secret discovery. Numeric credentials are redacted under secret
+  keys, while exact aggregate count fields and table headers remain visible.
+- Snapshot import and required finding evaluation now commit atomically. On
+  failure CLI exits nonzero and web returns an error; nothing is imported and
+  no success audit is emitted. This also affected v1.3.1.
+- Baseline comparison now keys settings by `(side, cse, identity)` and reports
+  mixed applicable GPO values as drift with their sources. Golden comparison
+  retains conflicting duplicate values. These defects also affected v1.3.1.
+- Collector ZIPs preflight member/directory counts, filename bytes and path
+  depth before extraction, sharing the CLI and web limits and cleanup policy.
+- Collection retention prunes only the exact collected-domain export prefix.
+- Malformed own-SYSVOL policy GUIDs remain malformed-path findings without
+  aborting dependency inventory or doctor. Windows extended UNC, WebDAV,
+  device and named-pipe namespaces are classified explicitly.
+- Malformed per-user audit flags and known PKI scalars are blocked evidence,
+  excluded from active comparisons.
+- ADMX resolution respects Computer/User scope throughout setting surfaces;
+  existing per-GPO ADMX-gap fingerprints and triage remain continuous when
+  the uncovered-setting list changes.
+- Evaluation pipeline digests include detector versions; re-observation updates
+  each occurrence's evaluating version while retaining its fingerprint and
+  triage. No schema migration is needed.
+
 - Trend numeric aggregates and presentation headers survive redaction (WI-101);
   numeric password strings, SYSVOL-only credentials and copied secrets stay masked.
 - Printer connections have their own dependency type rather than drive mappings.
@@ -73,8 +97,8 @@ Draft **v1.4.0** — release date to be assigned by the coordinator.
 - Batch finding provenance reads, stream HTTP exports in bounded UTF-8 chunks,
   and prepare credential masking once per projection. Shared topology evidence
   is inspected once per discovery pass. Finding exports improve from roughly
-  41 seconds to 4.5 seconds in the stream's calibration, with byte-identical
-  Markdown/CSV output and preserved authorization/redaction.
+  41 seconds to 4.5 seconds in the stream's calibration, with Markdown/CSV output
+  identical apart from the `application_version` metadata field and preserved authorization/redaction.
 - Baseline/golden comparison speedups, seeded large-estate generation and
   operation budgets cover audit/PKI data and dependency inventory exports.
 

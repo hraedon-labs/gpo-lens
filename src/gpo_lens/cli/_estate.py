@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import sqlite3
-import sys
 
 from gpo_lens import ingest, queries, snapshot_diff, store
 from gpo_lens.cli._helpers import _get_admx, _get_estate, _render_json
@@ -138,17 +137,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
         conn = sqlite3.connect(args.db)
         try:
             store.init_db(conn)
-            sid = store.save_estate(conn, estate)
-            from gpo_lens.findings import evaluate_finding_lifecycle_v2
-
-            try:
-                evaluate_finding_lifecycle_v2(conn, sid, estate, admx=_get_admx(args))
-            except Exception as exc:
-                print(
-                    f"Warning: snapshot {sid} was saved, but finding lifecycle "
-                    f"evaluation failed: {exc}",
-                    file=sys.stderr,
-                )
+            sid = store.save_evaluated_estate(conn, estate, admx=_get_admx(args))
             domain = estate.domain or "unknown"
             msg = f"{domain}, {len(estate.gpos)} GPOs, {len(estate.soms)} SOMs, snapshot={sid}"
             if args.json:

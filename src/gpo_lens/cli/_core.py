@@ -552,6 +552,11 @@ _COMMANDS: list[CliCommand] = [
         ],
         args=[
             CliArg(name="--admx-dir", help="PolicyDefinitions directory for ADMX crosswalk"),
+            CliArg(
+                name="--side",
+                choices=["Computer", "User"],
+                help="Setting side for template class matching",
+            ),
         ],
     ),
     CliCommand(

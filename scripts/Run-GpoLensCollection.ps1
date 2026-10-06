@@ -157,7 +157,14 @@ function Invoke-GpoLensCollection {
             }
             Write-GpoLensCollectionLog @logArgs -Message "ZIP delivered: $delivery"
         }
-        $expired = @(Get-GpoLensCompletedExports -OutputRoot $OutputRoot | Select-Object -Skip $Retention)
+        # Bind retention to the exact prefix of the export just collected.
+        # Never treat a similarly named producer as owned by this run.
+        $producerPrefix = $newest.BaseName.Substring(0, $newest.BaseName.Length - 16)
+        $expired = @(Get-GpoLensCompletedExports -OutputRoot $OutputRoot |
+            Where-Object {
+                [string]::Equals($_.BaseName.Substring(0, $_.BaseName.Length - 16),
+                    $producerPrefix, [StringComparison]::Ordinal)
+            } | Select-Object -Skip $Retention)
         foreach ($archive in $expired) {
             $folder = Join-Path $OutputRoot $archive.BaseName
             Assert-GpoLensRegularTree -Root $folder

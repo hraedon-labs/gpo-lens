@@ -606,6 +606,14 @@ def _audit_fields(guid: str, name: str, target: str, value: str) -> tuple[str, s
                 f"Unknown audit target: {target or '(missing)'}",
                 "Unknown or missing PolicyTarget; target scope is not interpreted.",
             )
+        if not re.fullmatch(r"[0-9]{1,2}", value) or int(value) > 15:
+            return (
+                f"{identity}:{target}",
+                name or identity,
+                f"Unknown per-user audit flags: {value or '(missing)'}",
+                "Invalid or missing per-user audit flags; expected an unsigned mask 0-15; "
+                "not comparable.",
+            )
         # Per-user masks also encode exclusion flags: never apply the system
         # 0–3 vocabulary to them, or collapse them into system subcategories.
         return (
@@ -679,6 +687,55 @@ _PKI_STORES = {
 }
 
 
+# Only public certificate metadata enters display values. Unknown leaves stay
+# in raw evidence, which safe projections omit.
+_PKI_CERTIFICATE_PUBLIC_FIELDS = frozenset(
+    {
+        "Thumbprint",
+        "CertificateHash",
+        "Issuer",
+        "IssuedTo",
+        "IssuedBy",
+        "SerialNumber",
+        "Subject",
+        "ValidFrom",
+        "ValidTo",
+        "NotBefore",
+        "NotAfter",
+        "ExpirationDate",
+        "IntendedPurposes",
+        "EnhancedKeyUsage",
+        "SignatureAlgorithm",
+        "PublicKeyAlgorithm",
+        "PublicKeyLength",
+    }
+)
+
+
+_PKI_UNSIGNED_SCALARS = frozenset(
+    {
+        "EFSSettings:Options",
+        "EFSSettings:CacheTimeout",
+        "EFSSettings:KeyLen",
+        "CertificateTrustSettings:TrustModel",
+    }
+)
+_PKI_BOOLEAN_SCALARS = frozenset(
+    {
+        "EFSSettings:AllowEFS",
+        "RootCertificateSettings:AllowNewCAs",
+        "RootCertificateSettings:TrustThirdPartyCAs",
+        "RootCertificateSettings:RequireUPNNamingConstraints",
+        "CertificateTrustSettings:AllowUserTrust",
+    }
+    | {
+        f"{group}:{name}"
+        for group in ("AutoEnrollmentSettings", "AutoEnrollment")
+        for name in ("Enabled", "RenewExpiredCertificates", "UpdatePendingCertificates")
+    }
+)
+
+
 def _parse_public_key(block: Element) -> list[tuple[str, str, str, dict[str, object]]]:
     """Expand PKI scalar fields and certificate entries without interpreting masks.
 
@@ -702,13 +759,26 @@ def _parse_public_key(block: Element) -> list[tuple[str, str, str, dict[str, obj
                 name = _PKI_LABELS.get(key, f"{_PKI_GROUPS[tag]}: {label[0:1]}{label[1:].lower()}")
                 raw = cast(dict[str, object], element_to_dict(block))
                 raw.update(cse_parser="public_key", property_path=key)
+                invalid = (
+                    key in _PKI_UNSIGNED_SCALARS
+                    and (not re.fullmatch(r"[0-9]{1,10}", value) or int(value) > 0xFFFFFFFF)
+                ) or (key in _PKI_BOOLEAN_SCALARS and value.casefold() not in {"true", "false"})
+                if invalid:
+                    raw.update(
+                        cse_parser="public_key_unclassified",
+                        source_note=f"Invalid or missing PKI scalar {key}; not comparable.",
+                    )
                 out.append((key, name, value, raw))
 
         walk(block, tag)
     elif tag in _PKI_STORES or tag == "Certificate":
         certificates = [e for e in block.iter() if _localname(e.tag) == "Certificate"]
         for cert in certificates:
-            fields = {_localname(c.tag): (c.text or "").strip() for c in cert if not len(c)}
+            fields = {
+                _localname(c.tag): (c.text or "").strip()
+                for c in cert
+                if not len(c) and _localname(c.tag) in _PKI_CERTIFICATE_PUBLIC_FIELDS
+            }
             thumbprint = fields.get("Thumbprint") or fields.get("CertificateHash") or ""
             key = re.sub(r"\s", "", thumbprint).lower()
             if not key and fields.get("SerialNumber") and fields.get("IssuedBy"):

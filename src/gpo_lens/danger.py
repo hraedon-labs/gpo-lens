@@ -45,7 +45,7 @@ from gpo_lens.model import SEVERITY_ORDER
 from gpo_lens.normalize import is_registry_cse
 
 if TYPE_CHECKING:
-    from gpo_lens.model import AdmxResolver, Estate
+    from gpo_lens.model import AdmxResolver, Estate, Side
 
 __all__ = [
     "ComplianceMapping",
@@ -387,13 +387,13 @@ def overbroad_apply_group_policy(estate: Estate) -> list[DangerFinding]:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_display_name(admx: AdmxResolver, identity: str) -> str | None:
+def _resolve_display_name(admx: AdmxResolver, identity: str, side: Side) -> str | None:
     """Resolve a setting identity to an ADMX policy display name.
 
     Returns ``None`` when the resolver has no match, so name-keyed
     rules degrade to identity-keyed only (AC-9 — no crash, no silent all-match).
     """
-    result = admx.resolve_display_name(identity)
+    result = admx.resolve_display_name(identity, side=side)
     return result if isinstance(result, str) else None
 
 
@@ -429,13 +429,14 @@ def _side_matches(rule_applies: str, setting_side: str) -> bool:
 def _identity_matches(
     rule: DangerRule,
     setting_identity: str,
+    setting_side: Side,
     admx: AdmxResolver | None,
 ) -> bool:
     if setting_identity.lower() == rule.identity.lower():
         return True
     if admx is None:
         return False
-    resolved = _resolve_display_name(admx, setting_identity)
+    resolved = _resolve_display_name(admx, setting_identity, setting_side)
     return resolved is not None and resolved.lower() == rule.identity.lower()
 
 
@@ -466,7 +467,7 @@ def evaluate_danger_rules(
                     continue
                 if not _side_matches(rule.applies, s.side):
                     continue
-                if not _identity_matches(rule, s.identity, admx):
+                if not _identity_matches(rule, s.identity, s.side, admx):
                     continue
                 if _predicate_matches(rule, s.display_value):
                     present_findings.append(
@@ -494,7 +495,7 @@ def evaluate_danger_rules(
                     continue
                 if not _side_matches(rule.applies, s.side):
                     continue
-                if _identity_matches(rule, s.identity, admx):
+                if _identity_matches(rule, s.identity, s.side, admx):
                     found_any = True
                     break
             if found_any:

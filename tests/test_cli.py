@@ -283,7 +283,7 @@ class TestCLI:
         )
         assert r.returncode != 0
 
-    def test_ingest_keeps_success_when_finding_evaluation_fails(
+    def test_ingest_rolls_back_when_finding_evaluation_fails(
         self,
         tmp_path,
         monkeypatch,
@@ -302,22 +302,25 @@ class TestCLI:
             fail_evaluation,
         )
         db = tmp_path / "ingest.db"
-        cmd_ingest(
-            Namespace(
-                sample_dir=Path(__file__).resolve().parent / "fixtures",
-                db=str(db),
-                json=True,
-                diff_latest=False,
-                admx_dir=None,
+        with pytest.raises(RuntimeError, match="nothing was imported"):
+            cmd_ingest(
+                Namespace(
+                    sample_dir=Path(__file__).resolve().parent / "fixtures",
+                    db=str(db),
+                    json=True,
+                    diff_latest=False,
+                    admx_dir=None,
+                )
             )
-        )
 
         conn = sqlite3.connect(db)
         try:
-            assert conn.execute("SELECT COUNT(*) FROM snapshot").fetchone()[0] == 1
+            assert conn.execute("SELECT COUNT(*) FROM snapshot").fetchone()[0] == 0
         finally:
             conn.close()
-        assert "snapshot 1 was saved" in capsys.readouterr().err
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "snapshot 1 was saved" not in captured.err
 
     def test_diff(self, db_path):
         # Need at least 2 snapshots to diff

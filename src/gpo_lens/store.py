@@ -11,6 +11,7 @@ from typing import Any
 
 from gpo_lens.events import init_events_table
 from gpo_lens.model import (
+    AdmxResolver,
     CoverageGap,
     DelegationEntry,
     Estate,
@@ -643,7 +644,13 @@ def _dt_to_iso(dt: datetime | None) -> str | None:
     return dt.isoformat()
 
 
-def save_estate(conn: sqlite3.Connection, estate: Estate, taken_at: datetime | None = None) -> int:
+def save_estate(
+    conn: sqlite3.Connection,
+    estate: Estate,
+    taken_at: datetime | None = None,
+    *,
+    commit: bool = True,
+) -> int:
     """Save an estate as a new snapshot; returns the new ``snapshot_id``."""
     if taken_at is None:
         taken_at = datetime.now(UTC)
@@ -839,7 +846,8 @@ def save_estate(conn: sqlite3.Connection, estate: Estate, taken_at: datetime | N
         ],
     )
 
-    conn.commit()
+    if commit:
+        conn.commit()
     restrict_db_permissions(conn)
     return snapshot_id
 
@@ -1095,3 +1103,26 @@ def delete_snapshot(conn: sqlite3.Connection, snapshot_id: int) -> bool:
     cur = conn.execute("DELETE FROM snapshot WHERE id = ?", (snapshot_id,))
     conn.commit()
     return cur.rowcount > 0
+
+
+def save_evaluated_estate(
+    conn: sqlite3.Connection,
+    estate: Estate,
+    *,
+    admx: AdmxResolver | None = None,
+) -> int:
+    """Atomically import a snapshot and its required finding evaluation.
+
+    Failed evaluation also rolls back observations and transitions on earlier
+    occurrences. Deleting just the new snapshot cannot undo those transitions.
+    Call after init_db, with no pending caller writes.
+    """
+    from gpo_lens.findings import evaluate_finding_lifecycle_v2
+
+    try:
+        with conn:
+            sid = save_estate(conn, estate, commit=False)
+            evaluate_finding_lifecycle_v2(conn, sid, estate, admx=admx, commit=False)
+        return sid
+    except Exception as exc:
+        raise RuntimeError("Import failed; nothing was imported.") from exc

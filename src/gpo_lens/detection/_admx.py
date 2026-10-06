@@ -68,7 +68,7 @@ def admx_gaps(
                 continue
             if not _is_raw_registry_path(s.identity, s.display_name):
                 continue
-            if admx is not None and admx.resolve_display_name(s.identity):
+            if admx is not None and admx.resolve_display_name(s.identity, side=s.side):
                 continue
             parts = s.identity.split(":", 1)
             key_path = parts[0] if parts else s.identity

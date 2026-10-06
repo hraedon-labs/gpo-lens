@@ -426,13 +426,15 @@ def json_attachment(payload: object, filename: str) -> Response:
 
 def setting_label(s: object, admx: AdmxResolver | None) -> tuple[str, str]:
     if isinstance(s, Mapping):
+        side = s.get("side")
         identity = s.get("identity", "")
         display_name = s.get("display_name", identity) or identity
     else:
+        side = getattr(s, "side", None)
         identity = getattr(s, "identity", "")
         display_name = getattr(s, "display_name", identity) or identity
     if admx is not None:
-        name = admx.resolve_display_name(identity)
+        name = admx.resolve_display_name(identity, side=side)
         if name:
             return name, identity
     return display_name, identity

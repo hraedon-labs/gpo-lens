@@ -1993,7 +1993,7 @@ class TestAdmxResolverProtocol:
         from gpo_lens.model import AdmxResolver
 
         class Duck:
-            def resolve_display_name(self, identity: str) -> str | None:
+            def resolve_display_name(self, identity: str, *, side=None) -> str | None:
                 return None
 
         assert isinstance(Duck(), AdmxResolver)
@@ -2217,7 +2217,7 @@ class TestAdmxIdentityResolution:
 
         # Duck-typed AdmxResolver: maps the registry path to the policy name.
         class FakeAdmx:
-            def resolve_display_name(self, identity: str) -> str | None:
+            def resolve_display_name(self, identity: str, *, side=None) -> str | None:
                 if identity == r"HKLM\Software\Real:Key":
                     return "Disable WDigest"
                 return None
@@ -2234,7 +2234,7 @@ class TestAdmxIdentityResolution:
         rule = _rule("equals", "1", identity="Nonexistent Policy")
 
         class FakeAdmx:
-            def resolve_display_name(self, identity: str) -> str | None:
+            def resolve_display_name(self, identity: str, *, side=None) -> str | None:
                 return None
 
         findings = evaluate_danger_rules(estate, [rule], admx=FakeAdmx())  # type: ignore[arg-type]

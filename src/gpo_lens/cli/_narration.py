@@ -114,7 +114,7 @@ def cmd_explain_setting(args: argparse.Namespace) -> int:
         parts = identity.split(":", 1)
         key = parts[0] if parts else identity
         value = parts[1] if len(parts) > 1 else ""
-        matches = admx.lookup(key, value)
+        matches = admx.lookup(key, value, side=getattr(args, "side", None))
         if matches:
             policy = matches[0]
             print(policy.display_name)

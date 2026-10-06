@@ -195,6 +195,8 @@ def test_multi_admx_dirs_cli_env_web_and_doctor(tmp_path, monkeypatch, capsys):
     estate = Estate(
         gpos=[gpo([setting("Registry", "1", rf"SYSTEM\Lab:Value{i}") for i in range(2)])]
     )
+    for s in estate.gpos[0].settings:
+        s.side = "Computer"
     assert not [f for f in queries.estate_doctor(estate, admx=pd) if f.category == "admx_gap"]
     db = tmp_path / "lab.db"
     with closing(sqlite3.connect(db)) as conn, conn:

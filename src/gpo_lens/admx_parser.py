@@ -33,6 +33,7 @@ from xml.etree.ElementTree import Element
 
 import defusedxml.ElementTree as ET
 
+from gpo_lens.model import Side
 from gpo_lens.normalize import localname
 
 _ADMX_NS = "http://schemas.microsoft.com/GroupPolicy/2006/07/PolicyDefinitions"
@@ -120,7 +121,7 @@ class PolicyDefinitions:
     )
     skipped_files: list[TemplateFileSkip] = field(default_factory=list)
 
-    def lookup(self, key: str, value_name: str) -> list[AdmxPolicy]:
+    def lookup(self, key: str, value_name: str, *, side: Side | None = None) -> list[AdmxPolicy]:
         """Find policies matching a registry key and value name.
 
         ``key`` is the full hive-relative path (e.g.
@@ -131,18 +132,23 @@ class PolicyDefinitions:
         norm_val = value_name.lower()
         results: list[AdmxPolicy] = []
         for p in self.policies:
+            if side is not None and p.class_scope not in (
+                "Both",
+                "Machine" if side == "Computer" else "User",
+            ):
+                continue
             if p.key.lower().strip("\\") == norm_key:
                 if not p.value_name or p.value_name.lower() == norm_val:
                     results.append(p)
         return results
 
-    def resolve_display_name(self, identity: str) -> str | None:
+    def resolve_display_name(self, identity: str, *, side: Side | None = None) -> str | None:
         """Given a setting identity like ``key:valueName``, return the
         ADMX policy display name or None."""
         parts = identity.split(":", 1)
         key = parts[0] if parts else identity
         val = parts[1] if len(parts) > 1 else ""
-        matches = self.lookup(key, val)
+        matches = self.lookup(key, val, side=side)
         if matches:
             return matches[0].display_name
         return None

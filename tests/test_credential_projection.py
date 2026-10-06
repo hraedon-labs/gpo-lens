@@ -16,6 +16,17 @@ from gpo_lens.store import init_db, save_estate
 
 @pytest.mark.parametrize("key", ["Cpassword", "password", "token", "secret"])
 @pytest.mark.parametrize("count", [0, 7, 129, 2.5])
+def test_numeric_secret_fields_are_credential_material(key, count):
+    value = {key: count, "date": "2026-10-06", "other_count": 10}
+    assert secret_values(value) == (str(count),)
+    assert safe_data(value)[key] == REDACTED
+    assert safe_data(value)["other_count"] == 10
+
+
+@pytest.mark.parametrize(
+    "key", ["cpassword_hit_count", "broken_ref_count", "admx_gap_count", "gpo_count"]
+)
+@pytest.mark.parametrize("count", [0, 7, 129, 2.5])
 def test_numeric_aggregates_are_not_credential_material(key, count):
     value = {key: count, "date": "2026-10-06", "other_count": 10}
     assert secret_values(value) == ()
@@ -107,13 +118,17 @@ def test_sysvol_only_cpassword_stays_masked(
     assert secret not in masked
 
 
-def test_numeric_aggregate_regression_kills_classification_mutant(monkeypatch):
+def test_numeric_secret_regression_kills_classification_mutant(monkeypatch):
     from gpo_lens import safe_output
 
-    # Reintroduce key-only masking of numeric aggregates.
-    monkeypatch.setattr(safe_output, "_credential_material", lambda value: value not in (None, ""))
+    # Restore WI-101's unsafe blanket number exemption.
+    monkeypatch.setattr(
+        safe_output,
+        "_credential_material",
+        lambda value: not isinstance(value, (int, float)) and value not in (None, ""),
+    )
     with pytest.raises(AssertionError):
-        test_numeric_aggregates_are_not_credential_material("Cpassword", 0)
+        test_numeric_secret_fields_are_credential_material("Cpassword", 0)
 
 
 def test_sysvol_cpassword_regression_kills_source_context_mutant(monkeypatch, tmp_path, capsys):

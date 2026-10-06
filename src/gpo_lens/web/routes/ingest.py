@@ -100,7 +100,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                     return templates.TemplateResponse(
                         request,
                         "ingest.html",
-                        {"error": "Malformed zip file. Please check the upload and try again."},
+                        {"error": f"Malformed zip file: {exc}"},
                         status_code=400,
                     )
 
@@ -124,32 +124,26 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                     rw_conn = get_rw_conn(app.state.db_path)
                     try:
                         _store.init_db(rw_conn)
-                        snapshot_id = _store.save_estate(rw_conn, estate)
+                        _store.save_evaluated_estate(rw_conn, estate, admx=app.state.admx)
                         _events.append_event(
                             rw_conn,
                             "audit.ingest",
                             {"principal": principal.name},
                         )
-                        # WI-4: update finding lifecycle after ingest
-                        try:
-                            from gpo_lens.findings import evaluate_finding_lifecycle_v2
-
-                            evaluate_finding_lifecycle_v2(
-                                rw_conn,
-                                snapshot_id,
-                                estate,
-                                admx=app.state.admx,
-                            )
-                        except Exception as exc:
-                            _logger.error(
-                                "Finding lifecycle update failed for snapshot %s: %s",
-                                snapshot_id,
-                                exc,
-                            )
                     finally:
                         rw_conn.close()
 
-                await asyncio.to_thread(_persist)
+                try:
+                    await asyncio.to_thread(_persist)
+                except Exception as exc:
+                    _logger.error("Estate import failed: %s", exc)
+                    _audit("ingest", principal, "failure", type(exc).__name__, request)
+                    return templates.TemplateResponse(
+                        request,
+                        "ingest.html",
+                        {"error": "Import failed; nothing was imported."},
+                        status_code=500,
+                    )
 
             filename = (file.filename or "unknown")[:256]
             _audit(

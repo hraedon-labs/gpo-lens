@@ -137,7 +137,7 @@ class FakeAdmxResolver:
             ),
         ]
 
-    def resolve_display_name(self, identity: str) -> str | None:
+    def resolve_display_name(self, identity: str, *, side=None) -> str | None:
         if "PolicyA" in identity or "value_a" in identity:
             return "Policy A"
         if "PolicyB" in identity or "value_b" in identity:

@@ -11,7 +11,6 @@ import dataclasses
 import html
 import re
 from collections.abc import Iterable, Mapping
-from numbers import Number
 from typing import Any
 from urllib.parse import unquote
 
@@ -94,6 +93,24 @@ _VALUE = {
 }
 
 
+# Exact schema fields for public counts, never a primitive-type exemption for
+# password/token/credential keys. Table headers are projected as positional rows.
+_PUBLIC_AGGREGATE_FIELDS = frozenset(
+    {
+        "cpassword_hit_count",
+        "ms16_072_vulnerable_count",
+        "broken_ref_count",
+        "admx_gap_count",
+        "danger_finding_count",
+        "gpo_count",
+        "som_count",
+        "total_settings",
+        "total_delegation_entries",
+        "coverage_gap_count",
+    }
+)
+
+
 def _mapping(value: object) -> Mapping[str, Any] | None:
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return {f.name: getattr(value, f.name) for f in dataclasses.fields(value)}
@@ -107,8 +124,8 @@ def _credential_name(name: object) -> bool:
 
 
 def _credential_material(value: object) -> bool:
-    """Typed aggregates are not credentials; numeric password strings still are."""
-    return not isinstance(value, Number) and value not in (None, "")
+    """A secret field is sensitive regardless of the stored primitive type."""
+    return value not in (None, "")
 
 
 def _registry_payload(mapping: Mapping[str, Any]) -> tuple[str, ...]:
@@ -201,15 +218,19 @@ def secret_values(value: object) -> tuple[str, ...]:
         if mapping is not None:
             visited.add(id(obj))
             sensitive = _sensitive(mapping)
+            if _credential_name(mapping.get("tag", "")):
+                leaf = mapping.get("text")
+                if _credential_material(leaf):
+                    secrets.add(str(leaf))
             secrets.update(_registry_payload(mapping))
             secrets.update(_command_secrets(mapping))
             for key, child in mapping.items():
                 if (
-                    (_SECRET_KEY.fullmatch(str(key)) or (sensitive and key in _VALUE))
-                    and isinstance(child, str)
-                    and child
+                    key not in _PUBLIC_AGGREGATE_FIELDS
+                    and (_credential_name(key) or (sensitive and key in _VALUE))
+                    and _credential_material(child)
                 ):
-                    secrets.add(child)
+                    secrets.add(str(child))
                 discover(child)
         elif isinstance(obj, (list, tuple, set, frozenset)):
             visited.add(id(obj))
@@ -306,7 +327,7 @@ def safe_data(value: object, *, include_audit: bool = True, secrets: Iterable[st
                     m = _mapping(child)
                     if m is not None:
                         return any(
-                            (_SECRET_KEY.fullmatch(str(k)) and _credential_material(v) and bool(v))
+                            (_SECRET_KEY.fullmatch(str(k)) and _credential_material(v))
                             or contains_secret(v)
                             for k, v in m.items()
                         )
@@ -315,12 +336,16 @@ def safe_data(value: object, *, include_audit: bool = True, secrets: Iterable[st
                     return False
 
                 sensitive = sensitive or contains_secret(raw)
-            result = {}
+            result: dict[str, Any] = {}
             for key, child in mapping.items():
                 if key in _OMIT or (key in _AUDIT and not include_audit):
                     result[key] = REDACTED
+                elif key in _PUBLIC_AGGREGATE_FIELDS and isinstance(child, (int, float)):
+                    result[key] = child
                 elif (
-                    _SECRET_KEY.fullmatch(str(key)) or (sensitive and key in _VALUE)
+                    _credential_name(key)
+                    or (key == "text" and _credential_name(mapping.get("tag", "")))
+                    or (sensitive and key in _VALUE)
                 ) and _credential_material(child):
                     result[key] = REDACTED
                 else:

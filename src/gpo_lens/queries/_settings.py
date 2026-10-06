@@ -287,7 +287,7 @@ def settings_ledger(
         admx_name = ""
         admx_explain = ""
         if admx is not None:
-            resolved = admx.resolve_display_name(s.identity)
+            resolved = admx.resolve_display_name(s.identity, side=s.side)
             if resolved:
                 admx_name = resolved
         rows.append(

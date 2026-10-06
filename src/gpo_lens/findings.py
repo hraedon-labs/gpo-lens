@@ -292,6 +292,7 @@ def create_evaluation_run(
     application_version: str = "",
     status: str = "completed",
     error_summary: str = "",
+    commit: bool = True,
 ) -> int:
     """Create an evaluation run record and return its ``id``.
 
@@ -323,7 +324,8 @@ def create_evaluation_run(
         ),
     )
     assert cursor.lastrowid is not None
-    conn.commit()
+    if commit:
+        conn.commit()
     return cursor.lastrowid
 
 
@@ -333,6 +335,7 @@ def complete_evaluation_run(
     *,
     status: str = "completed",
     error_summary: str = "",
+    commit: bool = True,
 ) -> None:
     """Mark an evaluation run as completed (or failed/partial)."""
     if status not in ("completed", "failed", "partial"):
@@ -341,7 +344,8 @@ def complete_evaluation_run(
         "UPDATE evaluation_run SET completed_at = ?, status = ?, error_summary = ? WHERE id = ?",
         (_now_iso(), status, error_summary, run_id),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def list_evaluation_runs(
@@ -431,6 +435,7 @@ def run_evaluation(
     collected_gpo_ids: set[str] | None = None,
     coverage_complete: bool = True,
     run_status: str = "completed",
+    commit: bool = True,
 ) -> LifecycleResult:
     """Process FindingCandidate records through the Plan 024 lifecycle engine.
 
@@ -559,7 +564,7 @@ def run_evaluation(
                     "UPDATE finding SET last_seen_run_id = ?, "
                     "last_seen_snapshot = (SELECT snapshot_id FROM "
                     "evaluation_run WHERE id = ?), "
-                    "severity = ?, summary = ?, detail = ?, remediation = ? "
+                    "severity = ?, summary = ?, detail = ?, remediation = ?, detector_version = ? "
                     "WHERE id = ?",
                     (
                         run_id,
@@ -568,6 +573,7 @@ def run_evaluation(
                         cand.summary,
                         cand_detail,
                         cand.remediation,
+                        cand.detector_version,
                         occ_id,
                     ),
                 )
@@ -696,7 +702,8 @@ def run_evaluation(
                 "UPDATE evaluation_run SET status = ?, error_summary = ? WHERE id = ?",
                 (run_status, " ".join(warnings), run_id),
             )
-        conn.commit()
+        if commit:
+            conn.commit()
     except Exception:
         conn.rollback()
         raise
@@ -1929,6 +1936,7 @@ def evaluate_finding_lifecycle_v2(
     *,
     admx: AdmxResolver | None = None,
     application_version: str = "",
+    commit: bool = True,
 ) -> LifecycleResult:
     """Run the Plan 024 evaluation pipeline end-to-end.
 
@@ -1953,7 +1961,7 @@ def evaluate_finding_lifecycle_v2(
     )
 
     detector_set_digest = hashlib.sha256(
-        "|".join(sorted({c.detector_id for c in candidates})).encode()
+        "|".join(sorted({f"{c.detector_id}@{c.detector_version}" for c in candidates})).encode()
     ).hexdigest()[:16]
 
     run_id = create_evaluation_run(
@@ -1963,6 +1971,7 @@ def evaluate_finding_lifecycle_v2(
         detector_set_digest=detector_set_digest,
         application_version=application_version,
         status="partial",
+        commit=commit,
     )
 
     try:
@@ -1972,6 +1981,7 @@ def evaluate_finding_lifecycle_v2(
             candidates,
             collected_gpo_ids={g.id for g in estate.gpos},
             coverage_complete=not estate.coverage_gaps,
+            commit=commit,
         )
         warning_row = conn.execute(
             "SELECT error_summary FROM evaluation_run WHERE id = ?", (run_id,)
@@ -1981,6 +1991,7 @@ def evaluate_finding_lifecycle_v2(
             run_id,
             status="partial" if result.duplicate_fingerprint_count else "completed",
             error_summary=warning_row[0] if warning_row else "",
+            commit=commit,
         )
     except Exception:
         complete_evaluation_run(
@@ -1988,6 +1999,7 @@ def evaluate_finding_lifecycle_v2(
             run_id,
             status="failed",
             error_summary="evaluation run failed",
+            commit=commit,
         )
         raise
     return result

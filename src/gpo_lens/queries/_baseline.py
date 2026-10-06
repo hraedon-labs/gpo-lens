@@ -67,26 +67,26 @@ def baseline_diff(
     if admx is None:
         admx = _PD()
 
-    baseline_keys: dict[tuple[str, str], BaselineSetting] = {}
+    baseline_keys: dict[tuple[Side, str, str], BaselineSetting] = {}
     for bs in baseline:
-        key = (bs.cse.lower(), bs.identity.lower())
+        key = (bs.side, bs.cse.lower(), bs.identity.lower())
         if key not in baseline_keys:
             baseline_keys[key] = bs
 
-    estate_settings: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    estate_settings: dict[tuple[Side, str, str], list[tuple[str, str]]] = {}
     for g in estate.gpos:
         for s in g.settings:
             if s.source_state == "blocked":
                 continue
-            key = (s.cse.lower(), s.identity.lower())
+            key = (s.side, s.cse.lower(), s.identity.lower())
             estate_settings.setdefault(key, []).append((g.id, s.display_value))
 
     results: list[BaselineDiffEntry] = []
 
     for bs in baseline:
-        bkey = (bs.cse.lower(), bs.identity.lower())
+        bkey = (bs.side, bs.cse.lower(), bs.identity.lower())
         actuals = estate_settings.get(bkey, [])
-        admx_name = admx.resolve_display_name(bs.identity) or ""
+        admx_name = admx.resolve_display_name(bs.identity, side=bs.side) or ""
 
         if not actuals:
             results.append(
@@ -105,50 +105,38 @@ def baseline_diff(
         else:
             values = {v for _, v in actuals}
             gpo_ids = ",".join(sorted({gid for gid, _ in actuals}))
-            if bs.expected_value in values:
+            compliant = values == {bs.expected_value}
+            # Preserve the old single row for homogeneous values. Mixed
+            # sources all drift, and each value remains tied to its GPO.
+            sources = [(gpo_ids, next(iter(values)))] if len(values) == 1 else sorted(set(actuals))
+            for gid, value in sources:
                 results.append(
                     BaselineDiffEntry(
-                        status="compliant",
+                        status="compliant" if compliant else "drift",
                         side=bs.side,
                         cse=bs.cse,
                         identity=bs.identity,
                         display_name=bs.display_name,
                         expected_value=bs.expected_value,
-                        actual_value=bs.expected_value,
-                        gpo_id=gpo_ids,
-                        admx_name=admx_name,
-                    )
-                )
-            else:
-                results.append(
-                    BaselineDiffEntry(
-                        status="drift",
-                        side=bs.side,
-                        cse=bs.cse,
-                        identity=bs.identity,
-                        display_name=bs.display_name,
-                        expected_value=bs.expected_value,
-                        actual_value=actuals[0][1],
-                        gpo_id=gpo_ids,
+                        actual_value=value,
+                        gpo_id=gid,
                         admx_name=admx_name,
                     )
                 )
 
-    baseline_identity_set = {(bs.cse.lower(), bs.identity.lower()) for bs in baseline}
-    for (cse, ident), entries in estate_settings.items():
-        if (cse, ident) not in baseline_identity_set:
+    baseline_identity_set = {(bs.side, bs.cse.lower(), bs.identity.lower()) for bs in baseline}
+    for (side, cse, ident), entries in estate_settings.items():
+        if (side, cse, ident) not in baseline_identity_set:
             display_name = ""
-            side: Side = "Computer"
             for g in estate.gpos:
                 for s in g.settings:
-                    if s.cse.lower() == cse and s.identity.lower() == ident:
+                    if s.side == side and s.cse.lower() == cse and s.identity.lower() == ident:
                         display_name = s.display_name
-                        side = s.side
                         break
                 if display_name:
                     break
             gpo_ids = ",".join(sorted({gid for gid, _ in entries}))
-            admx_name = admx.resolve_display_name(ident) or ""
+            admx_name = admx.resolve_display_name(ident, side=side) or ""
             results.append(
                 BaselineDiffEntry(
                     status="extra",

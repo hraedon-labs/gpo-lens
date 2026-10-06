@@ -125,7 +125,7 @@ Microsoft ships Security Baselines as nested zips containing GPO backups.
 `load_baseline_from_zip` handles the nesting.  Each GPO's `gpreport.xml`
 is UTF-16 encoded — `parse_report_xml` detects the encoding.
 
-Baseline settings are compared by `(cse, identity)` — the ADMX crosswalk
+Baseline settings are compared by `(side, cse, identity)` — the ADMX crosswalk
 in `admx_parser.py` resolves registry paths back to policy names for display.
 
 ## Work tracking (issues)

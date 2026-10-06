@@ -210,17 +210,56 @@ def path_references(gpo: Gpo) -> Iterator[PathReference]:
                 )
 
 
-def unc_parts(target: str) -> tuple[str, str, tuple[str, ...]] | None:
-    """Parse a UNC without interpreting credentials as a server identifier."""
+@dataclass(frozen=True)
+class WindowsPath:
+    """A Windows namespace classification, without accessing the target."""
+
+    kind: str
+    server: str = ""
+    share: str = ""
+    tail: tuple[str, ...] = ()
+
+
+def classify_windows_path(target: str) -> WindowsPath:
+    """Distinguish file UNC/WebDAV paths from device and pipe namespaces."""
     if not target.startswith("\\\\"):
-        return None
-    parts = target[2:].split("\\")
+        return WindowsPath("local")
+    text = target
+    lower = text.casefold()
+    if lower.startswith("\\\\?\\unc\\"):
+        text = "\\\\" + text[8:]
+    elif lower.startswith(("\\\\.\\", "\\\\?\\")):
+        kind = "named_pipe" if text[4:].casefold().startswith("pipe\\") else "device"
+        return WindowsPath(kind)
+    parts = text[2:].split("\\")
     if len(parts) < 2 or not parts[0] or not parts[1]:
+        return WindowsPath("malformed")
+    server, share = parts[0].casefold(), parts[1].casefold()
+    kind = "unc"
+    if share == "davwwwroot":
+        dav = re.fullmatch(r"([^@]+)(?:@ssl)?(?:@([0-9]+))?", server)
+        if dav is None:
+            return WindowsPath("malformed")
+        server = dav[1]
+        kind = "webdav"
+    # Retain the collector's explicit URI-style user:password@host decoration.
+    # A bare '@' in Windows host tokens is never interpreted as userinfo, and
+    # WebDAV suffixes were classified above.
+    elif re.fullmatch(r"[^:@]+:[^@]+@[^@]+", server):
+        server = server.rsplit("@", 1)[-1]
+    if not server or any(c in server for c in "/:*?<>|") or any(c in share for c in "/:*?<>|"):
+        return WindowsPath("malformed")
+    if share == "pipe":
+        return WindowsPath("named_pipe")
+    return WindowsPath(kind, server, share, tuple(parts[2:]))
+
+
+def unc_parts(target: str) -> tuple[str, str, tuple[str, ...]] | None:
+    """Return file-server coordinates only for UNC and WebDAV paths."""
+    path = classify_windows_path(target)
+    if path.kind not in {"unc", "webdav"}:
         return None
-    server = parts[0].rsplit("@", 1)[-1].casefold()
-    if not server or any(c in server for c in "/:*?<>|") or any(c in parts[1] for c in "/:*?<>|"):
-        return None
-    return server, parts[1].casefold(), tuple(parts[2:])
+    return path.server, path.share, path.tail
 
 
 def own_sysvol_parts(gpo: Gpo, target: str) -> tuple[str, ...] | None:
@@ -235,15 +274,33 @@ def own_sysvol_parts(gpo: Gpo, target: str) -> tuple[str, ...] | None:
         or len(tail) < 4
         or tail[0].casefold() != gpo.domain.casefold()
         or tail[1].casefold() != "policies"
-        or canonical_guid(tail[2]) != canonical_guid(gpo.id)
     ):
+        return None
+    try:
+        if canonical_guid(tail[2]) != canonical_guid(gpo.id):
+            return None
+    except ValueError:
         return None
     return tail[3:]
 
 
-def malformed_path(target: str) -> bool:
-    if target.startswith("\\\\") and unc_parts(target) is None:
+def malformed_path(target: str, gpo: Gpo | None = None) -> bool:
+    if classify_windows_path(target).kind == "malformed":
         return True
+    parsed = unc_parts(target)
+    if parsed is not None and gpo is not None:
+        server, share, tail = parsed
+        if (
+            server == gpo.domain.casefold()
+            and share == "sysvol"
+            and len(tail) >= 3
+            and tail[0].casefold() == gpo.domain.casefold()
+            and tail[1].casefold() == "policies"
+        ):
+            try:
+                canonical_guid(tail[2])
+            except ValueError:
+                return True
     return any(c in target for c in "<>|\x00")
 
 
@@ -267,7 +324,11 @@ def _collected_file_missing(base: Path, parts: tuple[str, ...]) -> bool | None:
 
 
 def missing_own_reference(gpo: Gpo, ref: PathReference) -> bool:
-    if not gpo.sysvol_path or malformed_path(ref.target) or any(c in ref.target for c in "%*?"):
+    if (
+        not gpo.sysvol_path
+        or malformed_path(ref.target, gpo)
+        or any(c in ref.target for c in "%*?")
+    ):
         return False
     base = Path(gpo.sysvol_path)
     parts = own_sysvol_parts(gpo, ref.target)
@@ -308,7 +369,7 @@ def external_dependencies(estate: Estate, *, server: str = "") -> list[ServerDep
             parsed = unc_parts(ref.target)
             if (
                 parsed is None
-                or malformed_path(ref.target)
+                or malformed_path(ref.target, gpo)
                 or own_sysvol_parts(gpo, ref.target) is not None
             ):
                 continue

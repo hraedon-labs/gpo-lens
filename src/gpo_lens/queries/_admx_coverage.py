@@ -91,7 +91,8 @@ def admx_coverage(
     referenced: list[AdmxCoverageEntry] = []
     unreferenced: list[AdmxCoverageEntry] = []
 
-    estate_settings: dict[tuple[str, str], list[str]] = {}
+    estate_settings: dict[tuple[str, str, str], list[str]] = {}
+    estate_keys: dict[tuple[str, str], list[str]] = {}
     for g in estate.gpos:
         for s in g.settings:
             if s.source_state == "blocked":
@@ -103,20 +104,29 @@ def admx_coverage(
                 norm_val = s.identity.split(":", 1)[1].lower()
             else:
                 norm_val = s.display_name.lower()
-            key = (norm_key, norm_val)
+            key = (s.side, norm_key, norm_val)
             estate_settings.setdefault(key, []).append(g.name)
+            estate_keys.setdefault((s.side, norm_key), []).append(g.name)
 
     for policy in policies:
         norm_key = policy.key.lower().strip("\\") if policy.key else ""
         norm_val = policy.value_name.lower() if policy.value_name else ""
-        lookup_key = (norm_key, norm_val)
-
-        refs = estate_settings.get(lookup_key, [])
-        if not refs and not norm_val:
-            for ek, gpos in estate_settings.items():
-                if ek[0] == norm_key:
-                    refs = gpos
-                    break
+        sides = (
+            ("Computer", "User")
+            if policy.class_scope == "Both"
+            else ("Computer",)
+            if policy.class_scope == "Machine"
+            else ("User",)
+        )
+        refs = [
+            name
+            for side in sides
+            for name in (
+                estate_settings.get((side, norm_key, norm_val), [])
+                if norm_val
+                else estate_keys.get((side, norm_key), [])
+            )
+        ]
 
         if refs:
             referenced.append(
@@ -152,7 +162,7 @@ def admx_coverage(
                 continue
             if not _is_raw_registry_path(s.identity, s.display_name):
                 continue
-            if admx.resolve_display_name(s.identity):
+            if admx.resolve_display_name(s.identity, side=s.side):
                 continue
 
             parts = s.identity.split(":", 1)

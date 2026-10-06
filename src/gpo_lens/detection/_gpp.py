@@ -379,7 +379,7 @@ def broken_refs(estate: Estate) -> list[BrokenRef]:
     kinds = {"script": "missing_script", "scheduled_task_action": "scheduled_task_path"}
     for gpo in sorted(estate.gpos, key=lambda g: g.id):
         for ref in path_references(gpo):
-            if malformed_path(ref.target):
+            if malformed_path(ref.target, gpo):
                 kind = "malformed_path"
                 detail = ref.detail + "; malformed path"
             elif missing_own_reference(gpo, ref):

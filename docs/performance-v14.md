@@ -46,7 +46,8 @@ calibration; their algorithms were not rewritten. No before/after speedup is
 claimed for them.
 
 Full Markdown/CSV bodies, golden/baseline HTML, and enforced-links JSON were
-byte-identical to v1.3.0 on the same generated database/comparator inputs.
+identical apart from the `application_version` metadata field across releases
+on the same generated database/comparator inputs.
 Regular tests retain the original provenance lookup and compare both export
 formats with the original line transport; frozen export goldens and a
 reference implementation of per-string masking cover rendering/redaction.

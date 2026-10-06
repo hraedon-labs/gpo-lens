@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from gpo_lens.model import AdmxResolver, Estate, Gpo
+    from gpo_lens.model import AdmxResolver, Estate, Gpo, Side
 
 
 @dataclass(frozen=True)
@@ -140,33 +140,35 @@ def golden_diff(
         golden_gpo = golden_gpos[0]
         matched_names.add(name)
 
-        live_settings: dict[tuple[str, str, str], str] = {}
-        live_display: dict[tuple[str, str, str], str] = {}
-        live_cse: dict[tuple[str, str, str], str] = {}
-        live_ident: dict[tuple[str, str, str], str] = {}
+        live_settings: dict[tuple[Side, str, str], set[str]] = {}
+        live_display: dict[tuple[Side, str, str], str] = {}
+        live_cse: dict[tuple[Side, str, str], str] = {}
+        live_ident: dict[tuple[Side, str, str], str] = {}
         for s in live_gpo.settings:
             if s.source_state == "blocked":
                 continue
             key = (s.side, s.cse.lower(), s.identity.lower())
             if key not in live_settings:
-                live_settings[key] = s.display_value
+                live_settings[key] = set()
                 live_display[key] = s.display_name
                 live_cse[key] = s.cse
                 live_ident[key] = s.identity
+            live_settings[key].add(s.display_value)
 
-        golden_settings: dict[tuple[str, str, str], str] = {}
-        golden_display: dict[tuple[str, str, str], str] = {}
-        golden_cse: dict[tuple[str, str, str], str] = {}
-        golden_ident: dict[tuple[str, str, str], str] = {}
+        golden_settings: dict[tuple[Side, str, str], set[str]] = {}
+        golden_display: dict[tuple[Side, str, str], str] = {}
+        golden_cse: dict[tuple[Side, str, str], str] = {}
+        golden_ident: dict[tuple[Side, str, str], str] = {}
         for s in golden_gpo.settings:
             if s.source_state == "blocked":
                 continue
             key = (s.side, s.cse.lower(), s.identity.lower())
             if key not in golden_settings:
-                golden_settings[key] = s.display_value
+                golden_settings[key] = set()
                 golden_display[key] = s.display_name
                 golden_cse[key] = s.cse
                 golden_ident[key] = s.identity
+            golden_settings[key].add(s.display_value)
 
         all_keys = set(live_settings.keys()) | set(golden_settings.keys())
 
@@ -174,7 +176,7 @@ def golden_diff(
             side = skey[0]
             orig_cse = live_cse.get(skey) or golden_cse.get(skey, "")
             orig_ident = live_ident.get(skey) or golden_ident.get(skey, "")
-            admx_name = admx.resolve_display_name(orig_ident) or ""
+            admx_name = admx.resolve_display_name(orig_ident, side=side) or ""
             disp = golden_display.get(skey) or live_display.get(skey, "")
 
             if skey in golden_settings and skey not in live_settings:
@@ -186,7 +188,7 @@ def golden_diff(
                         cse=orig_cse,
                         identity=orig_ident,
                         display_name=disp,
-                        golden_value=golden_settings[skey],
+                        golden_value="; ".join(sorted(golden_settings[skey])),
                         live_value="",
                         golden_gpo_id=golden_gpo.id,
                         live_gpo_id=live_gpo.id,
@@ -203,13 +205,17 @@ def golden_diff(
                         identity=orig_ident,
                         display_name=disp,
                         golden_value="",
-                        live_value=live_settings[skey],
+                        live_value="; ".join(sorted(live_settings[skey])),
                         golden_gpo_id=golden_gpo.id,
                         live_gpo_id=live_gpo.id,
                         admx_name=admx_name,
                     )
                 )
-            elif live_settings[skey] != golden_settings[skey]:
+            elif (
+                live_settings[skey] != golden_settings[skey]
+                or len(live_settings[skey]) != 1
+                or len(golden_settings[skey]) != 1
+            ):
                 results.append(
                     GoldenDiffEntry(
                         status="changed",
@@ -218,8 +224,8 @@ def golden_diff(
                         cse=orig_cse,
                         identity=orig_ident,
                         display_name=disp,
-                        golden_value=golden_settings[skey],
-                        live_value=live_settings[skey],
+                        golden_value="; ".join(sorted(golden_settings[skey])),
+                        live_value="; ".join(sorted(live_settings[skey])),
                         golden_gpo_id=golden_gpo.id,
                         live_gpo_id=live_gpo.id,
                         admx_name=admx_name,
@@ -234,8 +240,8 @@ def golden_diff(
                         cse=orig_cse,
                         identity=orig_ident,
                         display_name=disp,
-                        golden_value=golden_settings[skey],
-                        live_value=live_settings[skey],
+                        golden_value="; ".join(sorted(golden_settings[skey])),
+                        live_value="; ".join(sorted(live_settings[skey])),
                         golden_gpo_id=golden_gpo.id,
                         live_gpo_id=live_gpo.id,
                         admx_name=admx_name,
