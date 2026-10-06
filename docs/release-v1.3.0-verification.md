@@ -3,7 +3,8 @@
 Verified **2026-10-06** on `release/v1.3.0-candidate`, integrated product base
 `d271cf7`. This pass changes documentation and plan bookkeeping only; no
 product, dependency, CI or test file was changed in that documentation pass.
-Package metadata reports **1.3.0** after the integrated first fix round.
+Package metadata reports **1.3.1** for the broken-reference hotfix; the v1.3.0
+candidate checks below remain historical evidence.
 No tracker write, PR or tag was made.
 
 ## Live IIS validation (2026-10-06)

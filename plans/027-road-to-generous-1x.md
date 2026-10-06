@@ -8,8 +8,8 @@ Reconciled against `release/v1.3.0-candidate` on **2026-10-06**. “Shipped in
 v1.3.0” below means implemented for this release; the coordinator still owns
 the release date/tag, tracker acceptance and deployment.
 This docs pass does not create those artifacts or claim the release is already
-running at work. Package metadata reports **1.3.0**, synchronized in the
-integrated first fix round; the version bump is complete.
+running at work. Package metadata reports **1.3.1** for the broken-reference
+hotfix; the v1.3.0 release scope below remains unchanged.
 
 | Phase / stream | Final state and evidence |
 |----------------|--------------------------|

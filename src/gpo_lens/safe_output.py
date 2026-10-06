@@ -52,7 +52,12 @@ _COMMAND_OPTIONS = {
     "powershell": r"-(?:password|proxypassword)",
     "pwsh": r"-(?:password|proxypassword)",
 }
-_RAW_FRAGMENT = re.compile(r"</?[A-Za-z][^>]*>|^[OGDS]:.*\([A-Z]+;", re.S)
+# GPP locators such as <Drive/Properties @path> contain names, not XML values.
+_RAW_FRAGMENT = re.compile(
+    r"</?(?![A-Za-z][\w:.-]*(?:/[A-Za-z][\w:.-]*)? @[A-Za-z][\w:.-]*>)"
+    r"[A-Za-z][^>]*>|^[OGDS]:.*\([A-Z]+;",
+    re.S,
+)
 _OMIT = {
     "raw",
     "raw_xml",
