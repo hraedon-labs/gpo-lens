@@ -17,5 +17,7 @@ https://{$GPO_LENS_HOSTNAME}:8443 {
 		header_up X-Forwarded-Proto https
 		# Identity forwarding is off. Never pass a caller-supplied audit identity.
 		header_up -X-Forwarded-User
+		# This no-token upstream needs no reusable proxy credential.
+		header_up -Authorization
 	}
 }

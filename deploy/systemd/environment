@@ -1,0 +1,3 @@
+# Direct-loopback access plus the example TLS proxy authority.
+# Replace the example with the real proxy hostname:port before starting it.
+GPO_LENS_ALLOWED_HOSTS=localhost,127.0.0.1,[::1],gpo-lens.lab.example.com:8443
