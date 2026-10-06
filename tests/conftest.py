@@ -98,4 +98,23 @@ def secret_corpus():
             for elem in ET.parse(path).iter():
                 if elem.get("cpassword"):
                     values.add(elem.get("cpassword"))
-    return tuple(sorted(values)) + ("synthetic-credential-027-ONLY-FOR-TESTS",)
+    return tuple(sorted(values)) + (
+        "synthetic-credential-027-ONLY-FOR-TESTS",
+        "SYNTH-REGISTRY-PASSWORD-CORPUS-ONLY",
+        "SYNTH-ALT-PASSWORD-CORPUS-ONLY",
+        "SYNTH-URI-PASSWORD-CORPUS-ONLY",
+        "SYNTH-UNC-PASSWORD-CORPUS-ONLY",
+        "SYNTH-SPECIAL<&|`PASSWORD-CORPUS-ONLY",
+    )
+
+
+@pytest.fixture(autouse=True)
+def synthetic_web_authorities(monkeypatch):
+    """In-process test authorities must be configured like a proxied deployment.
+
+    Host boundary tests explicitly unset/replace this list to exercise defaults.
+    """
+    monkeypatch.setenv(
+        "GPO_LENS_ALLOWED_HOSTS",
+        "testserver,test,localhost,127.0.0.1,[::1],gpo-lens.example.com",
+    )

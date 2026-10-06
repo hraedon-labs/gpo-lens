@@ -5,6 +5,31 @@
 Draft **v1.3.0** — release date TBD by coordinator. This section remains
 Unreleased until the release is dated and tagged.
 
+### Fixed
+
+- **Upgrade triage ordering (F-01).** Merge legacy approvals and Plan 024 events
+  chronologically, with immutable event IDs as the stable tie-breaker. A newer
+  withdrawal stays open after upgrade; inbox and accepted-risk folds agree.
+- **Finding identity and historical evidence (F-02–F-04).** Enforced links include
+  SOM path, order and target; old blanket triage remains in occurrence history
+  while new link findings require review. Duplicate fingerprints visibly degrade
+  analysis and prevent resolution of unseen findings. Historical briefing totals
+  and severity use the selected evaluation. Future-schema refusal precedes all
+  journal, permission and schema changes.
+- **Web authority boundary (WEB-01).** Validate Host before authentication, CSRF
+  and URL generation. `GPO_LENS_ALLOWED_HOSTS` accepts comma-separated hosts
+  (any valid port) or exact host:port entries, case-insensitively, including
+  bracketed IPv6. Unset accepts only localhost, 127.0.0.1 and [::1]. Proxied
+  deployments must configure this variable on installation and upgrade.
+- **Shared credential redaction (WEB-02).** Mask concrete Windows credential
+  registry values and URI/UNC userinfo, including copied values in finding
+  evidence, triage notes and diffs. Preserve benign password-policy settings.
+  HTML, API, comparison/export and ordinary CLI outputs share the projection;
+  legacy report renderings and event export copies also mask credentials.
+- **Evidence navigation (DB-005, DB-007).** The Briefing collection-coverage tile
+  opens coverage-gap-filtered Findings. Explore describes configured-setting
+  search accurately.
+
 ### Added
 
 - **Deterministic Markdown/CSV exports (Plan 025 WI-6).** Download dossiers,

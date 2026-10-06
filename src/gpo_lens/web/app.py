@@ -404,9 +404,8 @@ def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None
         - uvicorn binds loopback and runs with ``proxy_headers=False``, so the
           Host header reflects the proxy/browser rather than a spoofable
           forwarded hop. This trusts the documented TLS+SNI reverse-proxy
-          deployment; plain-HTTP non-SNI hosting is out of scope (see
-          deploy/iis/README.md) — over plain HTTP a DNS-rebinding attacker could
-          align Origin and Host on a name they control.
+          deployment. The outer Host allow-list independently blocks a
+          DNS-rebinding origin from selecting an attacker-controlled authority.
         """
         from urllib.parse import urlparse
 
@@ -547,7 +546,7 @@ def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None
     @app.middleware("http")
     async def _request_id(request: Request, call_next):  # type: ignore[no-untyped-def]
         # Stable per-request id so audit entries correlate with future request
-        # logging if added. Registered last so it is outermost (runs first).
+        # logging if added. The Host allow-list runs before this middleware.
         request.state.request_id = uuid.uuid4().hex[:12]
         return await call_next(request)
 
@@ -602,4 +601,11 @@ def create_app(db_path: str, *, root_path: str = "", admx_dir: str | None = None
     api.register(app, templates)
     page_narration.register(app, templates)
 
+    # Starlette's last registered middleware runs first, including before
+    # request IDs, authentication, CSRF, redirects and request.url/url_for.
+    from gpo_lens.web.allowed_hosts import HostAllowListMiddleware
+
+    app.add_middleware(
+        HostAllowListMiddleware, allowed_hosts=os.environ.get("GPO_LENS_ALLOWED_HOSTS")
+    )
     return app

@@ -7,7 +7,14 @@ import sys
 from collections.abc import Sequence
 
 from gpo_lens import queries
-from gpo_lens.cli._helpers import _get_admx, _get_estate, _print_table, _render_json
+from gpo_lens.cli._helpers import (
+    _add_secret_source,
+    _get_admx,
+    _get_estate,
+    _print_table,
+    _render_json,
+)
+from gpo_lens.cli._helpers import _safe_print as print
 from gpo_lens.display import render_settings_diff
 
 
@@ -286,6 +293,7 @@ def cmd_settings_diff(args: argparse.Namespace) -> None:
         cse=getattr(args, "cse", None),
         gpo_id=getattr(args, "gpo_id", None),
     )
+    _add_secret_source(result)
     skipped = getattr(result, "skipped_count", 0)
     if args.json:
         _render_json(

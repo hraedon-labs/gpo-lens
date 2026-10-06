@@ -10,13 +10,14 @@ import sys
 
 from gpo_lens import queries
 from gpo_lens.cli._helpers import _get_admx, _get_estate, _render_json
+from gpo_lens.cli._helpers import _safe_print as print
 from gpo_lens.detection import mask_cpassword
-from gpo_lens.display import serialize_result
 from gpo_lens.query_dispatch import (
     VALID_QUERIES,
     dispatch_query,
     validate_params,
 )
+from gpo_lens.safe_output import safe_data, secret_values
 
 
 def cmd_ask(args: argparse.Namespace) -> int:
@@ -68,7 +69,7 @@ def cmd_ask(args: argparse.Namespace) -> int:
             dataclasses.replace(hit, cpassword=mask_cpassword(hit.cpassword)) for hit in hits
         ]
 
-    serialized_result = serialize_result(query_result)
+    serialized_result = safe_data(query_result, secrets=secret_values(estate))
 
     if raw_json:
         _render_json(serialized_result)

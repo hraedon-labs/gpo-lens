@@ -9,6 +9,7 @@ those facts correctly from a real store.
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from gpo_lens.briefing import (
@@ -312,7 +313,12 @@ class TestBuildBriefing:
             for snap in (1, 2, 3):
                 _snapshot(conn, snap)
                 run = create_evaluation_run(conn, snap)
-                run_evaluation(conn, run, [_candidate("cpassword", "gpo1")])
+                findings = {
+                    1: [replace(_candidate("cpassword", "gpo1"), severity="critical")],
+                    2: [],
+                    3: [_candidate("cpassword", "gpo2")],
+                }[snap]
+                run_evaluation(conn, run, findings)
 
             latest = build_briefing(conn, now=_NOW)
             assert latest is not None
@@ -321,6 +327,11 @@ class TestBuildBriefing:
             historical = build_briefing(conn, as_of_snapshot=2, now=_NOW)
             assert historical is not None
             assert (historical.snapshot_id, historical.prior_snapshot_id) == (2, 1)
+            assert next(v.value for v in latest.vitals if v.key == "active_findings") == 1
+            assert next(v.value for v in historical.vitals if v.key == "active_findings") == 0
+            first = build_briefing(conn, as_of_snapshot=1, now=_NOW)
+            assert first is not None
+            assert next(v.value for v in first.vitals if v.key == "critical_findings") == 1
 
             assert build_briefing(conn, as_of_snapshot=999, now=_NOW) is None
         finally:

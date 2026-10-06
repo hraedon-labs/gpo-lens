@@ -27,18 +27,42 @@ def export_client(tmp_path, monkeypatch, secret_corpus):
     estate = load_estate(Path(__file__).parent / "fixtures")
     gpo = estate.gpos[0]
     for i, secret in enumerate(secret_corpus):
-        gpo.settings.append(
-            Setting(
-                gpo.id,
-                "Computer",
-                "Synthetic",
-                f"Carrier{i}",
-                f"Carrier{i}",
-                secret,
-                {"@attr": {"cpassword": secret}},
-                False,
+        if secret.startswith(("SYNTH-REGISTRY-", "SYNTH-ALT-")):
+            name = "AltDefaultPassword" if secret.startswith("SYNTH-ALT-") else "DefaultPassword"
+            identity = rf"HKLM\Software\Microsoft\Windows NT\CurrentVersion\Winlogon:{name}"
+            value = secret
+            raw = {
+                "key": r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon",
+                "value_name": name,
+            }
+            cse = "Registry"
+        elif secret.startswith(("SYNTH-URI-", "SYNTH-UNC-")):
+            identity = name = f"Carrier{i}"
+            value = (
+                f"https://lab-user:{secret}@files.lab.example.com/share"
+                if secret.startswith("SYNTH-URI-")
+                else rf"\\lab-user:{secret}@files.lab.example.com\share"
             )
+            raw = {"@attr": {"fromPath": value}}
+            cse = "Files"
+        else:
+            identity = name = f"Carrier{i}"
+            value = secret
+            raw = {"@attr": {"cpassword": secret}}
+            cse = "Synthetic"
+        gpo.settings.append(Setting(gpo.id, "Computer", cse, identity, name, value, raw, False))
+    gpo.settings.append(
+        Setting(
+            gpo.id,
+            "Computer",
+            "Synthetic",
+            f"Carrier{i}",
+            f"Carrier{i}",
+            secret,
+            {"@attr": {"cpassword": secret}},
+            False,
         )
+    )
     gpo.settings.append(
         Setting(
             gpo.id,
@@ -46,7 +70,7 @@ def export_client(tmp_path, monkeypatch, secret_corpus):
             "Registry",
             "Synthetic:Password",
             "Password",
-            secret_corpus[-1],
+            secret_corpus[2],
             {},
             False,
         )
@@ -837,3 +861,147 @@ def test_filtered_historical_dossier_explain_and_export_use_same_rows(export_cli
         metadata = {r["field"]: r["value"] for r in rows if r["section"] == "metadata"}
         assert json.loads(metadata["snapshot_ids"]) == [snapshot]
         assert len({r["record"] for r in rows if r["section"] == "settings_ledger"}) == count
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+@pytest.mark.parametrize("command", ["who-sets", "search", "show", "diff-settings"])
+def test_ordinary_cli_commands_share_credential_projection(
+    export_client, capsys, secret_corpus, command, as_json
+):
+    import sqlite3
+
+    from gpo_lens.cli import main
+    from gpo_lens.store import load_estate, save_estate
+
+    with sqlite3.connect(export_client.db_path) as conn:
+        estate = load_estate(conn)
+        gid = estate.gpos[0].id
+        estate.gpos[0].settings = []
+        save_estate(conn, estate)
+    argv = ["--db", str(export_client.db_path)]
+    if as_json:
+        argv.append("--json")
+    argv += {
+        "who-sets": ["who-sets", "DefaultPassword"],
+        "search": ["search", "DefaultPassword"],
+        "show": ["show", gid],
+        "diff-settings": ["diff-settings", "1", "2"],
+    }[command]
+    # Show reads the newest snapshot, so use a source populated with secrets.
+    if command == "show":
+        with sqlite3.connect(export_client.db_path) as conn:
+            save_estate(conn, load_estate(conn, 1))
+    assert main(argv) == 0
+    output = capsys.readouterr().out
+    for secret in secret_corpus:
+        assert secret not in output
+    if as_json:
+        import json
+
+        assert json.loads(output)["schema_version"] == 1
+
+
+def test_cli_event_export_masks_copied_credentials_without_changing_store(
+    export_client, tmp_path, secret_corpus
+):
+    import sqlite3
+
+    from gpo_lens.cli import main
+    from gpo_lens.events import append_event, query_events
+
+    with sqlite3.connect(export_client.db_path) as conn:
+        append_event(conn, "lab.test", {"summary": "Copied " + secret_corpus[-1]})
+    output = tmp_path / "events.ndjson"
+    assert main(["--db", str(export_client.db_path), "events-export", "--ndjson", str(output)]) == 0
+    assert secret_corpus[-1] not in output.read_text()
+    with sqlite3.connect(export_client.db_path) as conn:
+        assert secret_corpus[-1] in str(query_events(conn))
+
+
+@pytest.mark.parametrize("format", ["html", "md"])
+def test_cli_report_file_masks_credentials_and_retains_markup(
+    export_client, tmp_path, secret_corpus, format
+):
+    from gpo_lens.cli import main
+
+    output = tmp_path / ("report." + format)
+    assert (
+        main(
+            [
+                "--db",
+                str(export_client.db_path),
+                "report",
+                "--format",
+                format,
+                "--max-settings",
+                "10000",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    import html
+
+    text = output.read_text()
+    for secret in secret_corpus:
+        assert secret not in html.unescape(text)
+    assert "<html" in text if format == "html" else "#" in text
+
+
+@pytest.mark.parametrize("format", ["", "md", "csv"])
+def test_occurrence_notes_mask_copied_snapshot_secrets(export_client, secret_corpus, format):
+    import sqlite3
+
+    from gpo_lens.findings import append_triage_event
+
+    with sqlite3.connect(export_client.db_path) as conn:
+        append_triage_event(conn, 1, "commented", "lab-reviewer", note="Copy " + secret_corpus[-1])
+    response = export_client.get("/findings/1", params={"format": format})
+    assert response.status_code == 200
+    import html
+
+    assert secret_corpus[-1] not in html.unescape(response.text)
+
+
+def test_source_cli_does_not_open_unrelated_database(tmp_path, capsys):
+    from pathlib import Path
+
+    from gpo_lens.cli import main
+
+    db = tmp_path / "unrelated.db"
+    db.write_bytes(b"not a database")
+    assert main(["--db", str(db), "summary", str(Path(__file__).parent / "fixtures")]) == 0
+
+
+def test_two_file_cli_diff_projects_credentials_without_database(tmp_path, capsys):
+    import json
+
+    from gpo_lens.cli import main
+
+    secret = "SYNTH-FILE-DIFF-PASSWORD-ONLY"
+    before = tmp_path / "before.json"
+    after = tmp_path / "after.json"
+    db = tmp_path / "unrelated.db"
+    db.write_bytes(b"not a database")
+    before.write_text("[]")
+    after.write_text(
+        json.dumps(
+            [
+                {
+                    "gpo_id": "lab",
+                    "gpo_name": "Lab GPO",
+                    "side": "Computer",
+                    "cse": "Registry",
+                    "identity": (
+                        r"HKLM\Software\Microsoft\Windows NT\CurrentVersion"
+                        r"\Winlogon:DefaultPassword"
+                    ),
+                    "display_name": "DefaultPassword",
+                    "display_value": secret,
+                }
+            ]
+        )
+    )
+    assert main(["--db", str(db), "settings-diff", str(before), str(after)]) == 0
+    assert secret not in capsys.readouterr().out

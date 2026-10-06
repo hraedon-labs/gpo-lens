@@ -70,7 +70,7 @@ EXPLORE_SECTIONS: tuple[DirectorySection, ...] = (
             Destination(
                 "search",
                 "Search",
-                "Estate-wide search across GPOs, OUs, and configured settings.",
+                "Estate-wide search across configured settings.",
             ),
         ),
     ),

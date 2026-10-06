@@ -38,7 +38,10 @@ _VITAL_TARGETS: dict[str, tuple[str, dict[str, str]]] = {
         "findings_inbox",
         {"lifecycle": "all", "triage": "all"},
     ),
-    "coverage_gaps": ("admx_coverage", {}),
+    "coverage_gaps": (
+        "findings_inbox",
+        {"category": "coverage_gap", "lifecycle": "all", "triage": "all"},
+    ),
     "accepted_risks": (
         "findings_inbox",
         {"triage": "accepted_risk", "lifecycle": "all"},

@@ -172,3 +172,48 @@ def test_prefixed_deployment_links_and_search_use_root_path(tmp_path, monkeypatc
     assert 'href="/lens/inventory"' in page
     assert 'action="http://testserver/lens/search"' in page
     assert 'href="http://testserver/lens/briefing"' in page
+
+
+def test_collection_coverage_tile_opens_filtered_findings(client):
+    import sqlite3
+
+    from gpo_lens.findings import evaluate_finding_lifecycle_v2
+    from gpo_lens.ingest import load_estate
+    from gpo_lens.store import save_estate
+
+    with sqlite3.connect(client.app.state.db_path) as conn:
+        estate = load_estate(ROOT / "tests/fixtures")
+        sid = save_estate(conn, estate)
+        evaluate_finding_lifecycle_v2(conn, sid, estate)
+    page = client.get("/briefing")
+    target = next(t["href"] for t in page.context["tiles"] if t["label"] == "Coverage gaps")
+    assert "/findings?" in target
+    assert "category=coverage_gap" in target
+    assert "triage=all" in target
+    response = client.get(target)
+    assert response.status_code == 200
+    assert response.context["f_category"] == "coverage_gap"
+
+
+def test_explore_describes_configured_setting_search(client):
+    page = client.get("/explore").text
+    assert "Estate-wide search across configured settings." in page
+    assert "search across GPOs, OUs" not in page
+
+
+def test_duplicate_analysis_warning_is_visible_and_exported(client):
+    import sqlite3
+
+    from gpo_lens.findings import candidates_from_estate, create_evaluation_run, run_evaluation
+    from gpo_lens.ingest import load_estate
+    from gpo_lens.store import save_estate
+
+    with sqlite3.connect(client.app.state.db_path) as conn:
+        estate = load_estate(ROOT / "tests/fixtures")
+        sid = save_estate(conn, estate)
+        candidate = candidates_from_estate(estate, snapshot_id=sid)[0]
+        run_evaluation(conn, create_evaluation_run(conn, sid), [candidate, candidate])
+    page = client.get("/findings")
+    assert 'role="alert"' in page.text
+    assert "Degraded analysis: 1 duplicate fingerprint" in page.text
+    assert "Degraded analysis: 1 duplicate fingerprint" in client.get("/findings?format=csv").text

@@ -109,6 +109,12 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             conn.execute("BEGIN")
             # One triage fold, shared by the count and the page query, so the
             # two can never disagree about which occurrences are open.
+            latest_analysis = conn.execute(
+                "SELECT error_summary FROM evaluation_run "
+                "WHERE snapshot_id = (SELECT MAX(id) FROM snapshot) "
+                "ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            analysis_warning = latest_analysis[0] if latest_analysis else ""
             status_map = load_triage_status_map(conn)
             filters: dict[str, Any] = {
                 "lifecycle_state": lifecycle_state,
@@ -147,6 +153,10 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                 "Findings",
                 (
                     ExportSection("findings", views),
+                    ExportSection(
+                        "analysis_warnings",
+                        ({"warning": analysis_warning},) if analysis_warning else (),
+                    ),
                     ExportSection(
                         "evidence_refs",
                         (
@@ -224,6 +234,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                 "rows": safe_data(
                     rows, include_audit=principal.has(Permission.TRIAGE), secrets=context.secrets
                 ),
+                "analysis_warning": safe_data(analysis_warning, secrets=context.secrets),
                 "all_count": all_count,
                 "filtered_count": filtered_count,
                 "resolvable_gpo_ids": resolvable_gpo_ids,
@@ -365,7 +376,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                 ),
                 "occ": history.occurrence,
                 "observations": safe_data(observations, secrets=context.secrets),
-                "triage_events": safe_data(history.triage_events)
+                "triage_events": safe_data(history.triage_events, secrets=context.secrets)
                 if principal.has(Permission.TRIAGE)
                 else [],
                 "triage_status": status,
