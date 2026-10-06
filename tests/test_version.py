@@ -20,12 +20,24 @@ def test_version_sync() -> None:
 def test_changelog_top_version_matches() -> None:
     changelog = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
     text = changelog.read_text(encoding="utf-8")
-    match = re.search(r"^## v(\S+)", text, re.MULTILINE)
-    assert match, "No version header found in CHANGELOG.md"
+    # An Unreleased section must declare its target, never fall through to an
+    # older released heading (which masked the v1.3 candidate's stale version).
+    top = re.split(r"^## ", text, flags=re.MULTILINE)[1]
+    if top.startswith("Unreleased"):
+        match = re.search(r"Draft \*\*v(\d+\.\d+\.\d+)\*\*", top)
+    else:
+        match = re.match(r"v(\d+\.\d+\.\d+)", top)
+    assert match, "Top changelog section must declare a release target"
     changelog_version = match.group(1)
     assert __version__ == changelog_version, (
         f"__init__.__version__={__version__!r} != CHANGELOG top version={changelog_version!r}"
     )
+
+
+def test_lock_version_matches_package() -> None:
+    lock = Path(__file__).resolve().parents[1] / "uv.lock"
+    packages = tomllib.loads(lock.read_text())["package"]
+    assert next(p["version"] for p in packages if p["name"] == "gpo-lens") == __version__
 
 
 def test_cli_version_flag() -> None:

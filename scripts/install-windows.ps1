@@ -78,11 +78,20 @@ chain operators (&& / ||). Use if/else and -or/-and instead.
     Web-Windows-Auth role service if it is missing. Requires the server to
     be domain-joined (Kerberos/Negotiate does not work on a workgroup box).
 
-.EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -ConfigureIIS -Port 8443 -HostName host.example.com -TlsCertThumbprint "ABCDEF123456..."
+.PARAMETER AllowAnonymousNetworkAccess
+    Explicit opt-out for a fresh network site without Windows Authentication.
+    Every reachable caller receives full analyst permissions. Existing sites
+    preserve their authentication during upgrades and warn if anonymous.
+
+.PARAMETER FirewallRemoteAddress
+    Remote addresses for a NEW firewall rule. Default LocalSubnet, on Domain
+    and Private profiles only. Existing rules are preserved during upgrades.
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -ConfigureIIS -Port 443 -HostName gpo-lens.example.com -TlsCertThumbprint "ABCDEF..." -Sni
+    powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -ConfigureIIS -Port 8443 -HostName host.example.com -TlsCertThumbprint "ABCDEF123456..." -WindowsAuth
+
+.EXAMPLE
+    powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -ConfigureIIS -Port 443 -HostName gpo-lens.example.com -TlsCertThumbprint "ABCDEF..." -Sni -WindowsAuth
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -ConfigureIIS -Port 8443 -HostName host.example.com -TlsCertThumbprint "ABCDEF..." -WindowsAuth
@@ -102,7 +111,9 @@ param(
     [string]$HostName = "",
     [string]$TlsCertThumbprint = "",
     [switch]$Sni,
-    [switch]$WindowsAuth
+    [switch]$WindowsAuth,
+    [switch]$AllowAnonymousNetworkAccess,
+    [string[]]$FirewallRemoteAddress = @("LocalSubnet")
 )
 
 # --- IIS binding / SNI / cert helper functions (extracted for Pester testing) ---
@@ -337,6 +348,113 @@ function Set-TlsCertBinding {
     }
 }
 
+
+function Test-IisAccessChoice {
+    param(
+        [bool]$ExistingSite,
+        [bool]$WindowsAuth,
+        [bool]$AllowAnonymousNetworkAccess,
+        [string]$SiteName = "gpo-lens",
+        [string]$EnableAuthCommand = ".\scripts\install-windows.ps1 -ConfigureIIS -WindowsAuth"
+    )
+    if (-not $ExistingSite -and -not $WindowsAuth -and -not $AllowAnonymousNetworkAccess) {
+        throw "Fresh -ConfigureIIS requires -WindowsAuth or the explicit -AllowAnonymousNetworkAccess opt-out."
+    }
+    if ($WindowsAuth) { return }
+    if ($ExistingSite) {
+        try {
+            $anonymous = Get-WebConfigurationProperty -Filter system.webServer/security/authentication/anonymousAuthentication `
+                -PSPath "IIS:\" -Location $SiteName -Name enabled -ErrorAction Stop
+            if (-not [bool]$anonymous.Value) { return }
+        } catch {
+            Write-Warning "ACCESS CONTROL: Could not inspect existing IIS authentication; preserving access. Verify it in IIS Manager. To enable Windows Authentication deliberately: $EnableAuthCommand"
+            return
+        }
+        Write-Warning "ANONYMOUS NETWORK ACCESS: Existing site access is preserved for this upgrade. Every reachable caller can view, ingest, delete, triage and narrate. To enable Windows Authentication deliberately: $EnableAuthCommand"
+    } else {
+        Write-Warning "ANONYMOUS NETWORK ACCESS explicitly allowed: Every reachable caller can view, ingest, delete, triage and narrate. Restrict the network/IIS IP rules before use."
+    }
+}
+
+function Set-IisFirewallRule {
+    param([string]$Port, [string[]]$RemoteAddress = @("LocalSubnet"))
+    $rule = "gpo-lens HTTPS $Port"
+    if (-not (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName $rule -Direction Inbound -Action Allow `
+            -Protocol TCP -LocalPort $Port -Profile Domain,Private -RemoteAddress $RemoteAddress | Out-Null
+    } else {
+        Write-Host "  Existing firewall rule preserved: $rule. Review its remote-address/profile scope separately."
+    }
+}
+
+function Get-IisAllowedHosts {
+    param(
+        [string]$SiteName,
+        [string]$MachineFqdn,
+        [string]$MachineName = $env:COMPUTERNAME
+    )
+    if (-not $MachineName) { $MachineName = [System.Net.Dns]::GetHostName() }
+    if (-not $MachineFqdn) {
+        try { $MachineFqdn = [System.Net.Dns]::GetHostEntry($MachineName).HostName } catch { }
+        if (-not $MachineFqdn -or $MachineFqdn -notmatch "\.") {
+            # Resolve the machine domain, not the interactive operator's domain.
+            try {
+                $computer = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+                if ($computer.PartOfDomain) { $MachineFqdn = "$MachineName.$($computer.Domain)" }
+            } catch { }
+        }
+        if (-not $MachineFqdn) { $MachineFqdn = $MachineName }
+    }
+    $authorities = @($MachineFqdn, $MachineName)
+    foreach ($binding in (Get-WebBinding -Name $SiteName -ErrorAction Stop)) {
+        if ($binding.protocol -ne "https") { continue }
+        $parsed = Parse-BindingInformation -BindingInformation "$($binding.bindingInformation)"
+        if (-not $parsed.Port) { continue }
+        $names = @($MachineFqdn, $MachineName)
+        if ($parsed.Host) { $names += $parsed.Host }
+        foreach ($name in $names) {
+            $authorities += $name
+            $authorities += "$name`:$($parsed.Port)"
+        }
+    }
+    (($authorities | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique) -join ",")
+}
+
+function Set-IisAllowedHosts {
+    param([string]$WebConfigPath, [string]$AllowedHosts)
+    $doc = New-Object System.Xml.XmlDocument
+    $doc.PreserveWhitespace = $true
+    $doc.Load($WebConfigPath)
+    $platform = $doc.SelectSingleNode("/configuration/system.webServer/httpPlatform")
+    if (-not $platform) {
+        throw "Missing httpPlatform in $WebConfigPath; configure GPO_LENS_ALLOWED_HOSTS in the actual application environment."
+    }
+    $variables = $platform.SelectSingleNode("environmentVariables")
+    if (-not $variables) {
+        $variables = $doc.CreateElement("environmentVariables")
+        $null = $platform.AppendChild($variables)
+    }
+    foreach ($variable in $variables.SelectNodes("environmentVariable")) {
+        if ($variable.GetAttribute("name") -eq "GPO_LENS_ALLOWED_HOSTS") { return }
+    }
+    $variable = $doc.CreateElement("environmentVariable")
+    $variable.SetAttribute("name", "GPO_LENS_ALLOWED_HOSTS")
+    $variable.SetAttribute("value", $AllowedHosts)
+    $null = $variables.AppendChild($variable)
+    # Write only after validating, beside the original, then replace atomically.
+    $temporary = "$WebConfigPath.gpo-lens-tmp"
+    try {
+        $settings = New-Object System.Xml.XmlWriterSettings
+        $settings.Encoding = New-Object System.Text.UTF8Encoding $false
+        $writer = [System.Xml.XmlWriter]::Create($temporary, $settings)
+        try { $doc.Save($writer) } finally { $writer.Dispose() }
+        [System.IO.File]::Replace($temporary, $WebConfigPath, [NullString]::Value)
+    } finally {
+        if (Test-Path $temporary) { Remove-Item $temporary -Force }
+    }
+    Write-Host "  Added GPO_LENS_ALLOWED_HOSTS=$AllowedHosts (other web.config settings preserved)."
+}
+
 # Guard: only run the main installation body when executed directly. Dot-sourcing
 # loads the helper functions above so they can be unit-tested without touching
 # IIS, http.sys, or the filesystem.
@@ -351,6 +469,28 @@ if ($MyInvocation.InvocationName -ne ".") {
     }
 
     $repoRoot = (Resolve-Path "$PSScriptRoot\..").Path
+
+# Inspect access before stopping a live pool or changing any installation files.
+$siteName = "gpo-lens"
+$sitePathIIS = "IIS:\Sites\$siteName"
+$existingSite = $null
+$iisModuleAvailable = [bool](Get-Module -ListAvailable WebAdministration -ErrorAction SilentlyContinue)
+if ($iisModuleAvailable) {
+    Import-Module WebAdministration
+    $existingSite = Get-Item $sitePathIIS -ErrorAction SilentlyContinue
+    # A custom physical path is part of the existing installation too.
+    if ($existingSite -and -not $PSBoundParameters.ContainsKey("SitePath")) {
+        $SitePath = [Environment]::ExpandEnvironmentVariables("$($existingSite.physicalPath)")
+    }
+    if ($ConfigureIIS -or $existingSite) {
+        $enableAuthCommand = "powershell -ExecutionPolicy Bypass -File `"$PSCommandPath`" -ConfigureIIS -WindowsAuth -InstallDir `"$InstallDir`" -SitePath `"$SitePath`" -AppPool `"$AppPool`""
+        Test-IisAccessChoice -ExistingSite ([bool]$existingSite) -WindowsAuth ([bool]$WindowsAuth) `
+            -AllowAnonymousNetworkAccess ([bool]$AllowAnonymousNetworkAccess) -EnableAuthCommand $enableAuthCommand
+    }
+} elseif ($ConfigureIIS) {
+    throw "-ConfigureIIS requires the WebAdministration module to inspect and configure site access. Install IIS management scripting tools first."
+}
+
 $venv     = Join-Path $InstallDir "venv"
 $logs     = Join-Path $InstallDir "logs"
 
@@ -585,14 +725,18 @@ if ("$venvOut" -match "Unable to copy") {
     Write-Host "        venv creation; the venv was created and verified working, so it is not an error."
 }
 Write-Host "Installing gpo-lens ..."
-& $venvPy -m pip install --upgrade pip | Out-Null
+$requirements = Join-Path $repoRoot "deploy\iis\requirements-web.lock.txt"
+& $venvPy -m pip install --require-hashes -r $requirements
+if ($LASTEXITCODE -ne 0) {
+    throw "Hash-pinned web dependency install failed (exit $LASTEXITCODE)."
+}
 # The [web] extra pulls fastapi/uvicorn/jinja2/python-multipart needed to serve.
 $pkg = "$repoRoot[web]"
 # --upgrade so an in-place re-install actually refreshes the package metadata.
 # Without it pip could leave a prior version's dist-info in place, which is what
 # the app reports as its version (the GUI then shows a stale version after an
 # upgrade that otherwise appeared to succeed).
-& $venvPy -m pip install --upgrade $pkg
+& $venvPy -m pip install --upgrade --no-deps $pkg
 if ($LASTEXITCODE -ne 0) {
     throw "pip install of gpo-lens failed (exit $LASTEXITCODE)."
 }
@@ -657,7 +801,7 @@ if ($ConfigureIIS) {
     Write-Host "Configuring IIS ..."
 
     # Check prerequisites
-    if (-not (Get-Module -ListAvailable WebAdministration -ErrorAction SilentlyContinue)) {
+    if (-not $iisModuleAvailable) {
         Write-Host "  [skip] WebAdministration module not available; skipping IIS config."
         Write-Host "  See deploy\iis\README.md for manual IIS setup."
     } else {
@@ -716,6 +860,8 @@ if ($ConfigureIIS) {
         if (-not $existingPool) {
             Write-Host "  Creating app pool `"$AppPool`" ..."
             New-Item $poolPath | Out-Null
+            # Do not serve a fresh site until host policy and authentication are set.
+            Stop-WebAppPool -Name $AppPool
         } else {
             Write-Host "  App pool `"$AppPool`" already exists."
         }
@@ -819,20 +965,15 @@ if ($ConfigureIIS) {
             Write-Host "         Assign one via IIS Manager or re-run with -TlsCertThumbprint."
         }
 
-        # 8. Open the firewall for the chosen port (idempotent). cert-watch's
-        # 443 is typically already open; gpo-lens runs on a non-standard port, so
-        # add a rule unless one already exists.
-        $fwRule = "gpo-lens HTTPS $effPort"
+        # Merge the host policy after bindings are effective; preserve an operator's value.
+        $allowedHosts = Get-IisAllowedHosts -SiteName $siteName
+        Set-IisAllowedHosts -WebConfigPath $webConfigDst -AllowedHosts $allowedHosts
+
+        # New firewall rules are management-subnet scoped. Existing rules stay intact.
         if (Get-Command New-NetFirewallRule -ErrorAction SilentlyContinue) {
-            if (-not (Get-NetFirewallRule -DisplayName $fwRule -ErrorAction SilentlyContinue)) {
-                Write-Host "  Opening firewall for TCP $effPort ..."
-                New-NetFirewallRule -DisplayName $fwRule -Direction Inbound -Action Allow `
-                    -Protocol TCP -LocalPort $effPort -Profile Any | Out-Null
-            } else {
-                Write-Host "  Firewall rule `"$fwRule`" already present."
-            }
+            Set-IisFirewallRule -Port $effPort -RemoteAddress $FirewallRemoteAddress
         } else {
-            Write-Host "  [warn] New-NetFirewallRule unavailable; open TCP $effPort manually if blocked."
+            Write-Warning "New-NetFirewallRule unavailable; allow TCP $effPort from the intended management network manually."
         }
 
         # 9. Windows Authentication (optional - closes the access-control gap).
@@ -874,6 +1015,13 @@ if ($ConfigureIIS) {
         }
 
         $script:iisActuallyConfigured = $true
+    }
+}
+
+if (-not $ConfigureIIS -and $existingSite) {
+    $installedWebConfig = Join-Path $SitePath "web.config"
+    if (Test-Path $installedWebConfig) {
+        Set-IisAllowedHosts -WebConfigPath $installedWebConfig -AllowedHosts (Get-IisAllowedHosts -SiteName $siteName)
     }
 }
 

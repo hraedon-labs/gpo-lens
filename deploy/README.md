@@ -33,6 +33,15 @@ deployments; Caddy basic auth is the browser's login. Direct non-loopback API
 hosting requires the existing token plus operator-managed TLS and network
 controls; it is not the default example.
 
+Every proxy path must set `GPO_LENS_ALLOWED_HOSTS` to its browser-facing
+authority. It is a comma-separated, case-insensitive list of `host` or
+`host:port` (bracket IPv6). Unset accepts only `localhost`, `127.0.0.1` and
+`[::1]` on any port. Disallowed Host returns 400 naming the variable before
+authentication, CSRF or URL generation. IIS derives missing values on install
+and upgrade; the Compose proxy overlay and systemd environment file supply
+them. Preserve an existing operator policy and add approved DNS aliases as
+needed. See each deployment guide for configuration/restart steps.
+
 Keep `gpo-lens serve` as the entry point. It sets `proxy_headers=False` on
 uvicorn so forwarded client addresses cannot replace the loopback TCP peer.
 The app's middleware honors `X-Forwarded-Proto` **for scheme only**, and only
@@ -50,10 +59,12 @@ described in the [IIS guide](iis/README.md#optional-per-user-audit-attribution).
 
 1. On the DC/RSAT host, run the read-only collector:
    `scripts/Export-GpoEstate.ps1 -OutputRoot C:\GpoExport`.
-2. Preserve the complete output, including `SYSVOL-Policies`, inventory and
-   collection-errors sidecars. ZIP **the directory's contents**, so
-   `AllGPOs.xml` is at the archive root. For example in PowerShell:
-   `Compress-Archive -Path C:\GpoExport\* -DestinationPath C:\GpoExport.zip`.
+2. Transfer the **collector-produced ZIP** (created by default). It preserves
+   `SYSVOL-Policies`, inventory and collection-errors sidecars, with
+   `AllGPOs.xml` at the archive root. Its archive entries use **forward slashes**
+   so Linux recognizes the directory tree. Repacking with Windows PowerShell's
+   generic archive command can store backslashes as literal Linux filenames,
+   causing SYSVOL content to be missed. Keep the collector's ZIP unchanged.
 3. Open the local URL or authenticated HTTPS proxy, choose **Ingest**, and
    upload the ZIP. No SMB share, domain account, or collector credentials are
    required on the analysis server. Transfers and stored exports contain

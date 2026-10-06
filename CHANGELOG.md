@@ -35,6 +35,15 @@ Unreleased until the release is dated and tagged.
 
 ### Changed
 
+- IIS fresh network sites require Windows Authentication or an explicit
+  anonymous-access opt-out; upgrades preserve access and warn if anonymous.
+  New firewall rules default to LocalSubnet on Domain/Private profiles.
+- IIS uses committed hash-pinned web dependencies and installs the project
+  with `--no-deps`, preserving the shared-Python deployment design.
+- Unstable finding subjects are snapshot-scoped (`snapshot_scoped`) and refuse
+  triage (`485a5bd`).
+- Store writes use batched persistence inserts via `executemany` (`b5133fb`).
+
 - **Navigation (Plan 025 WI-4).** Primary links are Briefing / Findings /
   Explore / History / Tools, with configured-settings search. The wordmark
   opens Briefing. Existing handlers and query parameters remain valid,
@@ -61,6 +70,15 @@ Unreleased until the release is dated and tagged.
 
 ### Fixed
 
+- Danger findings avoid double-conversion and duplicate results (`c50549e`).
+- Release metadata and lockfile identify the v1.3.0 candidate as 1.3.0;
+  version checks bind to the draft target and the container API/package version.
+- Every proxy deployment configures `GPO_LENS_ALLOWED_HOSTS`; IIS merges
+  missing policy on fresh installs and upgrades without losing existing variables.
+- IIS recovery uses WAL-safe online/whole-directory offline backups, audit-log
+  copies, stale-sidecar removal and integrity/snapshot/GPO verification.
+- Collector transfer instructions use the collector's portable forward-slash ZIP.
+
 - **Triage convergence (WI-092).** UI triage writes the Plan 024 append-only
   `finding_triage_event` log; compatibility projections no longer read an
   isolated legacy store. Schema v8 migrates legacy triage idempotently,
@@ -75,6 +93,9 @@ Unreleased until the release is dated and tagged.
 - Older database GPO names resolve through both stored and canonical GUID forms.
 
 ### Security
+
+- Caddy strips the Basic-auth Authorization header before forwarding to the
+  no-token app; a mock upstream smoke assertion guards credential forwarding.
 
 - **anyio 4.13.0 → 4.14.2** in the lockfile, addressing
   **PYSEC-2026-4024 / PYSEC-2026-4025** (`7d1c939`).

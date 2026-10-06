@@ -21,9 +21,9 @@ From an **elevated** PowerShell, in a checkout of this repo:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 `
-    -ConfigureIIS `
+    -ConfigureIIS -WindowsAuth `
     -Port 8443 `
-    -HostName host.example.com `
+    -HostName lens.lab.example.com `
     -TlsCertThumbprint "<thumbprint from LocalMachine\My>"
 ```
 
@@ -32,15 +32,19 @@ That single command:
 1. Resolves a usable Python and (if it is user-scoped) copies it to a shared
    location the app pool can read.
 2. Creates `C:\ProgramData\gpo-lens` (data dir + logs) and a venv, and
-   `pip install`s `gpo-lens[web]` into it.
+   `pip install --require-hashes` installs the committed `requirements-web.lock.txt`
+   exported from `uv.lock`, then installs the checkout with `--no-deps`. uv is
+   not needed on the IIS server; the shared-Python design is unchanged.
 3. Lays down `web.config` in `C:\inetpub\gpo-lens` (paths rewritten to your
    `-InstallDir`).
 4. Creates the `gpo-lens` app pool (No Managed Code, AlwaysRunning) and IIS site
    bound to `https://*:<Port>`, grants the pool identity the ACLs it needs,
-   binds the TLS cert for that port, opens the firewall, and starts the pool.
+   binds the TLS cert for that port, enables Windows Authentication and disables
+   anonymous access, opens the firewall to `LocalSubnet` on Domain/Private
+   profiles, and starts the pool.
 
 Re-running is safe and idempotent: the estate database and an existing
-`web.config` are preserved; use it for upgrades too (it stops the pool, refreshes
+`web.config` settings are preserved (a missing host allow-list is added); use it for upgrades too (it stops the pool, refreshes
 the venv, restarts).
 
 ## Upgrading an existing installation
@@ -61,12 +65,21 @@ and you do **not** have to re-specify `-Sni`/`-Port`/`-HostName`/
 you pass one — e.g. `-Port 443` changes the port, `-TlsCertThumbprint` rotates
 the certificate.)
 
+An existing anonymous site **continues working** during an upgrade. The
+installer prints a prominent warning and the exact command to enable Windows
+Authentication later. It does not fail or change authentication unless you
+explicitly pass `-WindowsAuth`; arrange and test that change separately so a
+production upgrade cannot lock out the colleague. Existing firewall rules are
+also preserved; review their scope separately.
+
 Windows Authentication is sticky: once enabled it is not disabled by an upgrade
 run without `-WindowsAuth` (a security-positive default). The `web.config` is
-also preserved (operator-set narration env vars are kept); delete it to reset to
-the template.
+also preserved (all operator-set environment variables are kept). A missing
+`GPO_LENS_ALLOWED_HOSTS` is merged on both configured and plain upgrades; an
+existing value is left alone, including an empty value. If `-SitePath` is
+omitted, the existing site's physical path is used.
 
-The estate starts **empty**. Open the site and use **Ingest** to upload a
+A fresh estate starts **empty**. Open the site and use **Ingest** to upload a
 collector export, or drop an existing `gpo-lens.sqlite3` into the data dir.
 
 ## Access control — read this
@@ -92,8 +105,41 @@ access at the IIS layer:
   security-positive default). To revert, re-enable anonymous auth in IIS
   Manager or `Set-WebConfigurationProperty … anonymousAuthentication -Name
   enabled -Value $true`.
+- A fresh install without Windows Authentication requires the explicit
+  `-AllowAnonymousNetworkAccess` opt-out and prints a warning: every reachable
+  caller can view, ingest, delete, triage and narrate. Use this only after
+  arranging the alternative access boundary.
 - An **IP allow-list** (IIS "IP Address and Domain Restrictions").
 - Or keep the site on an **isolated/management network**.
+
+
+### Firewall scope and accepted hosts
+
+New firewall rules default to `-FirewallRemoteAddress LocalSubnet` and only
+Domain/Private profiles. Set an explicit management range when needed, for
+example `-FirewallRemoteAddress 192.0.2.0/24`. Existing rules are kept during
+upgrades to preserve access; inspect their address/profile scope in Windows
+Defender Firewall before deliberately changing them.
+
+Every proxied deployment must set `GPO_LENS_ALLOWED_HOSTS`. The installer
+derives it from **all HTTPS binding hostnames plus the machine FQDN and short
+name**, with the binding ports. A catch-all binding contributes only the machine
+names. The merge is idempotent and preserves every other variable. Include any
+additional approved DNS aliases you use with a catch-all binding yourself.
+
+For manual IIS setup add, for example, this to
+`httpPlatform/environmentVariables` and recycle the pool:
+
+```xml
+<environmentVariable name="GPO_LENS_ALLOWED_HOSTS" value="lens.lab.example.com:8443,lens:8443" />
+```
+
+The comma-separated authorities are case-insensitive `host` or `host:port`
+(bracket IPv6). When unset only `localhost`, `127.0.0.1` and `[::1]`, on any
+port, are accepted. A rejected Host returns **400 before authentication, CSRF
+and URL generation**, naming the variable. Use the browser's real DNS
+authority, preserve Host at the proxy, and keep authentication enabled; the
+host policy is an additional boundary.
 
 ### Optional: per-user audit attribution
 
@@ -131,7 +177,7 @@ Python machine-wide (e.g. under `C:\Program Files`), this copy is skipped.
 cert-watch binds the catch-all certificate on `0.0.0.0:443`. gpo-lens uses its
 own port (default 8443) with a separate `netsh` SSL binding on
 `0.0.0.0:<Port>`, so the two never collide. Both can reuse the same machine
-certificate. Browse to `https://host.example.com:8443/`.
+certificate. Browse to `https://lens.lab.example.com:8443/`.
 
 ### Sharing port 443 via SNI
 
@@ -141,7 +187,7 @@ the installer:
 
 ```powershell
 .\scripts\install-windows.ps1 -ConfigureIIS -Port 443 `
-    -HostName gpo-lens.example.com -TlsCertThumbprint "<thumb>" -Sni
+    -HostName gpo-lens.lab.example.com -TlsCertThumbprint "<thumb>" -Sni -WindowsAuth
 ```
 
 With `-Sni` the installer:
@@ -158,8 +204,8 @@ The ordering matters: `sslFlags=1` must be on the IIS binding *before* the
 handles this; if you bind by hand, set the binding flags first.
 
 cert-watch keeps the catch-all `0.0.0.0:443` binding (non-SNI), so it serves
-any request whose SNI hostname does not match `gpo-lens.example.com`. This is
-the desired fallback. Browse to `https://gpo-lens.example.com/` (no port).
+any request whose SNI hostname does not match `gpo-lens.lab.example.com`. This is
+the desired fallback. Browse to `https://gpo-lens.lab.example.com/` (no port).
 
 ## Files
 
@@ -193,6 +239,9 @@ the desired fallback. Browse to `https://gpo-lens.example.com/` (no port).
   `LocalMachine\My` with a private key. Verify reachability with an **external**
   client (`curl https://host:8443/`), not in-box .NET, which can mask binding
   issues.
+- **HTTP 400 naming `GPO_LENS_ALLOWED_HOSTS`**: add the browser URL authority
+  to that variable in `web.config`, then recycle the pool. Check HTTPS bindings
+  and aliases; an existing operator value is never overwritten.
 - **Port blocked**: confirm the firewall rule `gpo-lens HTTPS <Port>` exists
   (the installer adds it).
 
@@ -204,40 +253,126 @@ and the audit log (`audit.log` alongside it). Back it up regularly.
 
 ### Online backup (preferred — no downtime)
 
-SQLite supports hot backups via the `.backup` command. The app pool can stay
-running — WAL mode handles concurrent readers:
+Python's SQLite `Connection.backup` is the equivalent of SQLite `.backup`; it
+includes committed WAL data while the pool is running. Save this block as
+`online-backup.ps1` and run from an elevated PowerShell. Parameters allow a
+custom install location. Use a **new backup directory** per run; the procedure
+refuses to overwrite one. Keep backups outside the install/data directory.
 
+<!-- regression: online-backup -->
 ```powershell
-$py = "C:\ProgramData\gpo-lens\venv\Scripts\python.exe"
-& $py -c "import sqlite3; src=sqlite3.connect(r'C:\ProgramData\gpo-lens\gpo-lens.sqlite3'); dst=sqlite3.connect(r'C:\Backup\gpo-lens-$(Get-Date -Format yyyyMMdd).sqlite3'); src.backup(dst); dst.close(); src.close()"
+param(
+    [string]$Data = 'C:\ProgramData\gpo-lens',
+    [string]$Backup = 'C:\Backup\gpo-lens-before-upgrade',
+    [string]$Py = 'C:\ProgramData\gpo-lens\venv\Scripts\python.exe'
+)
+$ErrorActionPreference = 'Stop'
+New-Item -ItemType Directory -Path $Backup -ErrorAction Stop | Out-Null
+$databaseBackup = @'
+import sqlite3, sys
+from pathlib import Path
+source = sqlite3.connect((Path(sys.argv[1]) / 'gpo-lens.sqlite3').as_uri() + '?mode=ro', uri=True)
+destination = sqlite3.connect(str(Path(sys.argv[2]) / 'gpo-lens.sqlite3'))
+source.backup(destination)
+assert destination.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+print('integrity_check ok; snapshots', destination.execute('SELECT count(*) FROM snapshot').fetchone()[0])
+destination.close()
+source.close()
+'@
+& $Py -c $databaseBackup $Data $Backup
+if ($LASTEXITCODE -ne 0) { throw 'SQLite backup or integrity check failed' }
+Copy-Item (Join-Path $Data 'audit.log') (Join-Path $Backup 'audit.log') -ErrorAction Stop
 ```
 
-Schedule this via Task Scheduler (daily or before each ingest). Copy the
-`audit.log` alongside it if you need the audit trail preserved.
+Schedule the saved script daily or before upgrades. `audit.log` exists after
+the first audited action; on an empty install verify that no audited actions
+have occurred if it is absent, rather than treating a missing audit log as a
+successful backup. Move verified backups to restricted off-host storage. A
+concurrent audit copy can have a slightly different cutoff; stop all writers
+for a matched estate/audit trail.
 
-### Offline backup (simpler, brief downtime)
+### Offline backup (brief downtime)
 
-Stop the app pool, copy the file, restart:
+Save as `offline-backup.ps1`. Stop the pool and copy the **whole data directory**,
+including `audit.log` and any matching `-wal`/`-shm` files. The default directory
+also includes Python/venv/logs, so allow sufficient backup space. Do not rely
+on a stopped worker having checkpointed WAL. Use a fresh destination.
 
+<!-- regression: offline-backup -->
 ```powershell
-Stop-WebAppPool gpo-lens
-Copy-Item C:\ProgramData\gpo-lens\gpo-lens.sqlite3 C:\Backup\gpo-lens-backup.sqlite3
-Start-WebAppPool gpo-lens
+param(
+    [string]$Data = 'C:\ProgramData\gpo-lens',
+    [string]$Backup = 'C:\Backup\gpo-lens-data-before-upgrade',
+    [string]$Py = 'C:\ProgramData\gpo-lens\venv\Scripts\python.exe',
+    [string]$AppPool = 'gpo-lens'
+)
+$ErrorActionPreference = 'Stop'
+if (Test-Path $Backup) { throw 'Use a new backup directory' }
+Stop-WebAppPool -Name $AppPool
+try {
+    Copy-Item -LiteralPath $Data -Destination $Backup -Recurse -ErrorAction Stop
+} finally {
+    Start-WebAppPool -Name $AppPool
+}
 ```
 
-### Restore
+### Restore a standalone online backup
 
-Stop the app pool, replace the file, restart:
+Save as `restore.ps1`; supply the **recorded snapshot count** and a **known GPO's
+canonical ID** from the backup (lowercase, braces/hyphens stripped). Stop all
+writers first. The script preserves the old directory, removes stale sidecars,
+restores the DB/audit log, grants the pool modify access, checks integrity and
+the recorded evidence, then starts the pool. A failed check leaves it stopped.
 
+<!-- regression: restore -->
 ```powershell
-Stop-WebAppPool gpo-lens
-Copy-Item C:\Backup\gpo-lens-backup.sqlite3 C:\ProgramData\gpo-lens\gpo-lens.sqlite3 -Force
-Start-WebAppPool gpo-lens
+param(
+    [string]$Data = 'C:\ProgramData\gpo-lens',
+    [string]$Backup = 'C:\Backup\gpo-lens-before-upgrade',
+    [string]$Py = 'C:\ProgramData\gpo-lens\venv\Scripts\python.exe',
+    [string]$AppPool = 'gpo-lens',
+    [Parameter(Mandatory=$true)][int]$ExpectedSnapshots,
+    [Parameter(Mandatory=$true)][string]$KnownGpo
+)
+$ErrorActionPreference = 'Stop'
+Stop-WebAppPool -Name $AppPool
+$preserved = "$Data-before-restore-$(Get-Date -Format yyyyMMddHHmmssffff)"
+if (Test-Path $preserved) { throw 'Preservation directory already exists' }
+Copy-Item -LiteralPath $Data -Destination $preserved -Recurse -ErrorAction Stop
+foreach ($suffix in @('-wal', '-shm')) {
+    $sidecar = Join-Path $Data "gpo-lens.sqlite3$suffix"
+    if (Test-Path $sidecar) { Remove-Item -LiteralPath $sidecar -Force }
+}
+Copy-Item (Join-Path $Backup 'gpo-lens.sqlite3') (Join-Path $Data 'gpo-lens.sqlite3') -Force
+Copy-Item (Join-Path $Backup 'audit.log') (Join-Path $Data 'audit.log') -Force
+icacls $Data /grant:r "IIS AppPool\${AppPool}:(OI)(CI)M"
+if ($LASTEXITCODE -ne 0) { throw 'Data ACL repair failed' }
+$verifyRestore = @'
+import sqlite3, sys
+from pathlib import Path
+connection = sqlite3.connect((Path(sys.argv[1]) / 'gpo-lens.sqlite3').as_uri() + '?mode=ro', uri=True)
+assert connection.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+count = connection.execute('SELECT count(*) FROM snapshot').fetchone()[0]
+assert count == int(sys.argv[2]), (count, sys.argv[2])
+known = sys.argv[3].strip().strip('{}').replace('-', '').lower()
+assert any(row[0].strip().strip('{}').replace('-', '').lower() == known for row in connection.execute('SELECT id FROM gpo')), 'Known GPO missing'
+connection.close()
+print('integrity_check ok; snapshot count and known GPO verified')
+'@
+& $Py -c $verifyRestore $Data $ExpectedSnapshots $KnownGpo
+if ($LASTEXITCODE -ne 0) { throw 'Restore verification failed; pool remains stopped' }
+Start-WebAppPool -Name $AppPool
 ```
 
-The schema is additive-migrated on open (`_migrate_schema`), so a DB from an
-older gpo-lens version can be restored into a newer install without manual
-steps. The reverse (newer DB into older gpo-lens) is not guaranteed.
+For example: `.\restore.ps1 -ExpectedSnapshots 2 -KnownGpo <recorded-id>`.
+Check `/healthz`, `/api/version`, snapshot count and that known GPO through the
+actual browser URL after restart. Restore a complete offline directory **as a
+unit with its own sidecars**, never mix files from different backups. Preserve
+the old directory and repair ACLs before verification/restart in that case too.
+
+Older databases are additive-migrated on open. Rollback requires the previous
+code **and its matching pre-upgrade data backup**; a newer migrated database is
+not guaranteed to work with older code. Test recovery on an isolated instance.
 
 
 ## Reversible navigation rollout

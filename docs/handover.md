@@ -26,6 +26,18 @@ this page is about keeping collection alive.
   caveats for audit tickets. Dossiers, findings, occurrence history, accepted
   risks, briefings, settings and comparisons have deterministic exports;
   `gpo-lens export` provides CLI equivalents.
+- Fresh IIS sites require `-WindowsAuth` or the explicit
+  `-AllowAnonymousNetworkAccess` choice. Upgrades preserve existing access and
+  warn prominently if anonymous; do not change authentication mid-upgrade
+  without arranging and testing colleague access.
+- New IIS firewall rules use `-FirewallRemoteAddress LocalSubnet` on
+  Domain/Private profiles; existing rules stay intact. IIS installs consume
+  hash-pinned web requirements exported from `uv.lock`, then install the local
+  project with `--no-deps` using the shared Python.
+- Every proxy needs `GPO_LENS_ALLOWED_HOSTS`. IIS merges a missing value from
+  HTTPS bindings plus machine FQDN/short name without changing other variables;
+  an existing policy is kept. Container proxy and systemd guides set it too.
+  A 400 naming that variable means the browser authority needs configuration.
 - [Container](../deploy/container/README.md) and
   [systemd](../deploy/systemd/README.md) are alternatives to IIS. Start at the
   [deployment index](../deploy/README.md) for their common access boundary and
@@ -77,7 +89,8 @@ public. Fill them in with the previous owner before they leave.
    older one.
 4. **On IIS upgrade, re-run the installer with just `-ConfigureIIS`.** It keeps the
    live port, hostname, certificate binding, Windows Authentication, and
-   `web.config`. Pass binding flags only to change them deliberately.
+   `web.config` settings, adding a missing `GPO_LENS_ALLOWED_HOSTS`.
+   Anonymous sites warn and continue; existing firewall rules stay intact. Pass binding flags only to change them deliberately.
    Container/systemd upgrades use their own guides and retain proxy configuration.
 
 ## 3. Keeping collection alive
@@ -153,6 +166,26 @@ entities, events, audit logs and supported finding/risk history; they also test
 online backup/restore while committed changes remain in WAL. Test your own
 backup on an isolated instance before upgrading production.
 
+### Before you upgrade an existing site
+
+- Record `/api/version`, the actual browser URL, data/site paths, HTTPS
+  bindings and TLS certificate. Keep the previous release and configuration.
+- Check in IIS Manager whether **Windows Authentication is on and anonymous
+  authentication is off**. If anonymous access is intentional, confirm the
+  existing IP/network restrictions. An upgrade preserves it; schedule any
+  access-control change separately and test the colleague's login.
+- Review the existing firewall address/profile scope. New rules default to
+  LocalSubnet; retained rules are not tightened automatically.
+- Check `GPO_LENS_ALLOWED_HOSTS` against the browser authority and approved
+  aliases. If absent, the installer derives it; keep an existing value.
+- Make and test a WAL-safe backup: online SQLite `.backup` plus
+  `PRAGMA integrity_check` and `audit.log`, or stop the pool and copy the whole
+  data directory including sidecars. Restore while stopped, preserve the old
+  directory, remove unrelated sidecars, fix ACLs, verify integrity/snapshot
+  count/a known GPO. Use the [tested IIS commands](../deploy/iis/README.md#backup-and-restore).
+- Confirm the chosen checkout includes `deploy/iis/requirements-web.lock.txt`;
+  hash-pinned installs keep the dependency set aligned with the release.
+
 The steps below are for IIS. Alternatives:
 [container upgrade/rollback](../deploy/container/README.md#upgrade-and-rollback)
 and [systemd upgrade/rollback](../deploy/systemd/README.md#upgrade-and-rollback).
@@ -163,12 +196,15 @@ and [systemd upgrade/rollback](../deploy/systemd/README.md#upgrade-and-rollback)
 3. In the server's checkout: `git fetch --tags` then `git checkout v1.3.0` (after the coordinator publishes the tag).
 4. From an elevated PowerShell in that checkout:
    `.\scripts\install-windows.ps1 -ConfigureIIS`. It stops the pool, refreshes
-   the venv from the checkout, and restarts it.
+   the venv using the committed hash-pinned requirements and the checkout
+   with `--no-deps`, adds the host policy if missing, and restarts it.
 5. Confirm the header and `/api/version` show **1.3.0**, then run one ingest. Schema
    changes are additive and applied automatically when the database is opened.
 
-**To roll back**, check out the previous tag, re-run the installer, and
-restore the backup you took in step 2. A database a newer version has opened
+**To roll back**, stop the pool, restore the previous code/venv and the
+matching backup from step 2 using the stopped restore procedure, then restart.
+Preserve the current data directory and remove stale WAL/SHM for a standalone
+backup before restoring; repair ACLs and verify integrity/snapshots/a known GPO. A database a newer version has opened
 isn't guaranteed to work with an older one.
 
 ## 7. Where updates come from

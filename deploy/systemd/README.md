@@ -26,6 +26,8 @@ sudo /opt/gpo-lens/venv/bin/python -m pip install --require-hashes -r "$install_
 sudo /opt/gpo-lens/venv/bin/python -m pip install --no-deps '.[web]'
 rm -r "$install_work"
 sudo install -o root -g root -m 0644 deploy/systemd/gpo-lens.service /etc/systemd/system/gpo-lens.service
+sudo install -d -o root -g root -m 0755 /etc/gpo-lens
+sudo install -o root -g root -m 0600 deploy/systemd/environment /etc/gpo-lens/environment
 sudo systemctl daemon-reload
 sudo systemctl enable --now gpo-lens
 curl --fail http://127.0.0.1:8000/healthz
@@ -71,6 +73,16 @@ Generate the hash interactively. In `/etc/caddy/Caddyfile`, replace
 with your DNS hostname, login name and complete generated hash (keep the file
 root-owned and mode 0640). Do not set an app bearer token: it would require
 Bearer auth even for the proxy's loopback requests and break normal browsers.
+Before starting the proxy, edit `/etc/gpo-lens/environment` as root and set
+`GPO_LENS_ALLOWED_HOSTS=localhost,127.0.0.1,[::1],gpo-lens.lab.example.com:8443`
+with your real proxy authority. Restart `gpo-lens` to apply it. This mandatory
+environment file is loaded by the unit; keep it root-owned, mode 0600. The
+comma-separated authorities are case-insensitive `host` or `host:port` (bracket
+IPv6). Unset accepts only loopback authorities on any port. Rejected Host
+returns 400 naming the variable before authentication, CSRF or URL generation.
+Keep loopback entries for direct local health checks. The bundled Caddyfile
+strips Basic `Authorization` after authenticating, before forwarding upstream.
+
 Every permitted basic-auth user can ingest/replace snapshots; this is proxy
 access control, not app per-user authorization.
 
@@ -143,6 +155,12 @@ sudo /opt/gpo-lens/venv/bin/python -m pip install --require-hashes -r "$install_
 sudo /opt/gpo-lens/venv/bin/python -m pip install --upgrade --no-deps '.[web]'
 rm -r "$install_work"
 sudo install -o root -g root -m 0644 deploy/systemd/gpo-lens.service /etc/systemd/system/gpo-lens.service
+# On upgrade, create the environment file only if absent; preserve operator values.
+sudo install -d -o root -g root -m 0755 /etc/gpo-lens
+if ! sudo test -e /etc/gpo-lens/environment; then
+    sudo install -o root -g root -m 0600 deploy/systemd/environment /etc/gpo-lens/environment
+fi
+# Edit GPO_LENS_ALLOWED_HOSTS to the actual proxy hostname:port before restarting.
 sudo systemctl daemon-reload
 sudo systemctl start gpo-lens
 curl --fail http://127.0.0.1:8000/healthz
@@ -160,6 +178,9 @@ is not a supported substitute for the matching older backup.
 
 - Startup/permission errors: `systemctl status gpo-lens` and
   `journalctl -u gpo-lens -n 100`; verify data ownership and root-owned venv.
+- App 400 naming `GPO_LENS_ALLOWED_HOSTS`: edit `/etc/gpo-lens/environment`
+  to include the actual proxy hostname:port, preserve loopback entries, and
+  restart `gpo-lens`.
 - App 401 behind proxy: ensure the token is empty and the upstream is exactly
   `127.0.0.1:8000`; keep forwarded-IP handling disabled.
 - POST 403: preserve Host; scripts need a matching HTTPS `Origin` or `Referer`.

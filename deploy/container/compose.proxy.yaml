@@ -1,5 +1,10 @@
 {
   "services": {
+    "app": {
+      "environment": {
+        "GPO_LENS_ALLOWED_HOSTS": "localhost,127.0.0.1,[::1],${GPO_LENS_HOSTNAME:?Set the DNS name covered by the TLS certificate}:8443"
+      }
+    },
     "proxy": {
       "image": "caddy:2.11.2-alpine@sha256:834468128c7696cec0ceea6172f7d692daf645ae51983ca76e39da54a97c570d",
       "network_mode": "host",

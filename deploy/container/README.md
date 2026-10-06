@@ -98,7 +98,18 @@ Every admitted user has full analyst capabilities, including replacing estate
 data. Configure additional proxy accounts only if they should have those same
 permissions. Access control is Caddy's/network's job; do not set
 `GPO_LENS_AUTH_TOKEN` as a browser login. The proxy strips caller-supplied audit
-identity, preserves Host, and overwrites `X-Forwarded-Proto` with `https`.
+identity and the Basic-auth `Authorization` credential, preserves Host, and overwrites `X-Forwarded-Proto` with `https`.
+
+The overlay sets `GPO_LENS_ALLOWED_HOSTS` to the site authority
+`${GPO_LENS_HOSTNAME}:8443` plus loopback authorities for local health checks.
+Use a DNS hostname without a scheme or port in `GPO_LENS_HOSTNAME`. If you change
+the Caddy site port, change the app's allowed authority too. For additional
+approved aliases set a comma-separated list of case-insensitive `host` or
+`host:port` authorities (bracket IPv6) in an app environment override. Unset
+accepts only `localhost`, `127.0.0.1`, `[::1]` on any port. A disallowed Host
+returns 400 naming the variable before authentication, CSRF or URL generation.
+Recreate `app` after changing its environment; an app 400 means the browser
+authority is absent from the policy.
 
 For **every subsequent Compose command**, include
 `-f compose.yaml -f compose.proxy.yaml` if you enabled the proxy. For brevity,

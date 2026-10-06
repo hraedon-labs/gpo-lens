@@ -19,10 +19,13 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
+
+from header_probe import main as check_proxy_headers
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
@@ -55,6 +58,8 @@ def unused_port():
 
 
 def main(image):
+    check_proxy_headers()
+    package_version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
     with tempfile.TemporaryDirectory(prefix="gpo-lens-smoke-") as scratch:
         work = Path(scratch)
         for filename in ("compose.yaml", "compose.proxy.yaml", "Caddyfile"):
@@ -73,6 +78,9 @@ def main(image):
                 "app": {
                     "image": image,
                     "command": ["--host", "127.0.0.1", "--port", str(app_port)],
+                    "environment": {
+                        "GPO_LENS_ALLOWED_HOSTS": f"localhost:{proxy_port},127.0.0.1:{app_port}"
+                    },
                     "healthcheck": {
                         "test": [
                             "CMD",
@@ -171,6 +179,19 @@ def main(image):
             direct = f"http://127.0.0.1:{app_port}"
             assert request(direct + "/healthz")[0] == 200
             assert request(direct + "/")[0] == 200
+            status, _, body = request(direct + "/api/version")
+            assert status == 200 and json.loads(body)["version"] == package_version
+            installed_version = compose(
+                "exec",
+                "-T",
+                "app",
+                "python",
+                "-c",
+                "from importlib.metadata import version; print(version('gpo-lens'))",
+                capture=True,
+            ).stdout.strip()
+            assert installed_version == package_version, (installed_version, package_version)
+            print(f"PASS: /api/version and installed package equal {package_version}", flush=True)
             # Inspect the actual listener, not only the configured command.
             listener_probe = (
                 "from pathlib import Path; "

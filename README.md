@@ -156,6 +156,12 @@ Use the [deployment index](deploy/README.md) to choose:
 
 All paths consume copied exports. For remote browser access, the proxy must
 restrict who can reach the app; accepted users can replace the estate.
+Fresh IIS installs require `-WindowsAuth` or the explicit anonymous-access
+opt-out; upgrades preserve existing access and warn if anonymous. Every proxy
+must set `GPO_LENS_ALLOWED_HOSTS` to the browser authority (IIS merges a missing
+value, Compose/systemd provide it). Unset accepts only loopback Host authorities;
+a disallowed Host returns 400 naming the variable. See the deployment guides
+for firewall scope, locked installs and WAL-safe backup/restore commands.
 Inherited a running installation? Start with the [v1.3.0 operator
 handover](docs/handover.md), including backup and upgrade rules.
 
