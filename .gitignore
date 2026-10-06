@@ -18,6 +18,8 @@ htmlcov/
 # local store / generated
 *.sqlite3
 *.db
+# Released-code upgrade fixtures are synthetic and intentionally tracked.
+!tests/fixtures/released_databases/*.sqlite3
 
 # secrets
 .env

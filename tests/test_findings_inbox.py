@@ -76,6 +76,38 @@ class TestLatestSnapshotGpoIds:
         finally:
             conn.close()
 
+    def test_gpo_link_lookup_reads_only_ids_from_latest_snapshot(self) -> None:
+        conn = _make_db()
+        try:
+            conn.execute(
+                "INSERT INTO snapshot (id, domain, taken_at) "
+                "VALUES (1, 'lab.example.com', '2025-01-01')"
+            )
+            self._insert_gpo(conn, 1, "current-gpo")
+            reads = set()
+
+            def authorize(action, table, column, database, trigger):
+                if action == sqlite3.SQLITE_READ:
+                    reads.add((table, column))
+                    if (table, column) not in {
+                        ("gpo", "id"),
+                        ("gpo", "snapshot_id"),
+                        ("snapshot", "id"),
+                        ("snapshot", ""),
+                    }:
+                        return sqlite3.SQLITE_DENY
+                return sqlite3.SQLITE_OK
+
+            conn.set_authorizer(authorize)
+            assert _latest_snapshot_gpo_ids(conn) == {"current-gpo"}
+            assert reads - {("snapshot", "")} == {
+                ("gpo", "id"),
+                ("gpo", "snapshot_id"),
+                ("snapshot", "id"),
+            }
+        finally:
+            conn.close()
+
 
 class TestTriage:
     def test_triage_append_only(self) -> None:
@@ -358,6 +390,25 @@ class TestFindingsInboxWeb:
         )
 
         assert resp.status_code == 200
+
+    def test_inbox_html_identical_to_estate_reconstruction(self, monkeypatch) -> None:
+        """Pin the entire page against WI-093's former GPO link resolver."""
+        from gpo_lens.store import load_estate
+
+        client = self._seed_render_link_case(gpo_id="current-gpo", in_latest_snapshot=True)
+        url = "/findings?severity=medium&q=Finding&per_page=1"
+        headers = {"Authorization": "Bearer test-secret-token"}
+        targeted = client.get(url, headers=headers)
+        assert targeted.status_code == 200
+        assert ">GPO current-gpo</a>" in targeted.text
+        assert "Finding for current-gpo" in targeted.text
+        monkeypatch.setattr(
+            "gpo_lens.web.routes.findings._latest_snapshot_gpo_ids",
+            lambda conn: {g.id for g in load_estate(conn).gpos},
+        )
+        reconstructed = client.get(url, headers=headers)
+        assert reconstructed.status_code == 200
+        assert reconstructed.text == targeted.text
 
     def test_findings_page_renders_without_snapshot(self) -> None:
         from fastapi.testclient import TestClient

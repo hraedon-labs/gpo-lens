@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Upgrade coverage from released databases
+
+- Automatic migrations on database open are tested against databases created
+  by released v0.5.0, v0.7.0, v0.7.1, v1.0.0, v1.1.0 and v1.2.0 code, including
+  estate and snapshot history, findings and risk decisions where supported.
+  Back up the database and its separate `audit.log` before upgrading. Restoring
+  an older backup into a newer install is supported; opening a newer database
+  with an older release is not guaranteed.
+- Online SQLite backup/restore is tested with committed changes still in WAL.
+- Findings inbox GPO links use a targeted ID query (WI-093), with identical
+  rendered output and no estate reconstruction on each navigation.
+
 ### Handover page for a new operator
 
 - `docs/handover.md`: a start-here page for someone inheriting a running
