@@ -14,6 +14,16 @@
 - Findings inbox GPO links use a targeted ID query (WI-093), with identical
   rendered output and no estate reconstruction on each navigation.
 
+### Linux container and systemd deployment (WI-086)
+
+- Add a digest-pinned, non-root container with locked web dependencies, a
+  loopback-only Compose default, and an optional Caddy TLS/basic-auth proxy.
+- Add a hardened systemd service and install, upgrade, WAL-safe backup/restore,
+  and collector-upload guides. Access control remains the proxy's or network's
+  responsibility; the app's loopback-XOR-token model is unchanged.
+- CI builds the image and checks loopback routes, read-only operation, proxy
+  access control, and a synthetic collector upload.
+
 ### Handover page for a new operator
 
 - `docs/handover.md`: a start-here page for someone inheriting a running

@@ -1,0 +1,21 @@
+{
+	admin off
+	auto_https off
+	servers {
+		protocols h1 h2
+	}
+}
+
+https://{$GPO_LENS_HOSTNAME}:8443 {
+	tls /etc/caddy/tls/server.crt /etc/caddy/tls/server.key
+	# TLS only; no anonymous exception for health checks or static files.
+	basic_auth {
+		{$GPO_LENS_BASIC_USER} {$GPO_LENS_BASIC_HASH}
+	}
+	reverse_proxy 127.0.0.1:8000 {
+		header_up Host {http.request.hostport}
+		header_up X-Forwarded-Proto https
+		# Identity forwarding is off. Never pass a caller-supplied audit identity.
+		header_up -X-Forwarded-User
+	}
+}
