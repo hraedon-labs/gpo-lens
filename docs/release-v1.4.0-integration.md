@@ -108,3 +108,10 @@ On a domain-joined Windows Server 2025 lab VM (RSAT GroupPolicy present), from a
 - `-Unregister -WhatIf` left the task in place. `-Unregister` removed it and kept the exports and logs.
 
 Not validated live: the gMSA mode (the lab's KDS clock-skew defect blocks new gMSAs), UNC delivery, `-InventoryPath`, and hard-timeout behaviour.
+
+### Re-validation after review fix rounds 2 and 3 (2026-10-06, same lab VM, Windows PowerShell 5.1.26100)
+
+- **Ownership marker:** registration wrote `.gpo-lens-collection-owner` with the task name. Three scheduled runs ended `0x0`, retention kept two pairs, and unregistering kept the exports.
+- **Second task on the same root:** registering a different task name on an owned root without `-Force` was refused ("Output root owner is '…', not '…'"). No task was created and the marker was unchanged.
+- **NTFS hard-link attack:** the marker was replaced with an NTFS hard link (`mklink /H`) to a file outside the root. Registration was refused both without and with `-Force` ("Collection refuses a linked owner marker"). The outside file's content was unchanged and no task was created.
+- **Clean root after the round-3 changes:** registration (including the new link-count P/Invoke on 5.1), a scheduled run (`0x0`, ZIP produced) and re-registration of the same task over its own root all succeeded.
