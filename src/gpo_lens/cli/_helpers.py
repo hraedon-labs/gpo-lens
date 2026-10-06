@@ -140,10 +140,10 @@ def _render_json(obj: object) -> None:
 
 
 def _print_table(headers: list[str], rows: list[Sequence[str]]) -> None:
-    projected = safe_data(
-        [dict(zip(headers, row, strict=True)) for row in rows], secrets=_output_secrets.get()
-    )
-    print(render_table(headers, [[str(row[h]) for h in headers] for row in projected]))
+    # Presentation labels are not schema keys: "Cpassword" can label a count.
+    # Credential discovery comes from the source context and cell contents.
+    projected = safe_data([list(row) for row in rows], secrets=_output_secrets.get())
+    print(render_table(headers, [[str(cell) for cell in row] for row in projected]))
 
 
 def _get_admx(args: argparse.Namespace) -> PolicyDefinitions | None:

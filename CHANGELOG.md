@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+Draft **v1.4.0** — release date and package version bump by coordinator.
+
+### Fixed
+
+- **Trend counts (WI-101).** Preserve numeric aggregates and presentation
+  headers during credential masking, including text trends. Numeric password
+  strings and copied credentials remain masked.
+- **Calibration metrics.** Count resolved and unresolved principals from each
+  persisted snapshot. Report interpreter resource and deprecation warnings
+  separately from product warning templates and unclassified warnings.
+
+### Added
+
+- **Calibration harness.** Measure explicitly supplied copied-estate archives
+  across CLI, web routes and exports, with determinism and credential-leak
+  checks. Sanitized reports fail closed; optional private detail output refuses
+  destinations inside Git worktrees. The harness stays outside the package.
+
 ## v1.3.1 — 2026-10-06
 
 ### Fixed
