@@ -311,6 +311,14 @@ version 2; see [the contract](docs/spec/json-contract.md).
   A prior privileged snapshot does not automatically supply the inventory
   for later exports. No sidecar means no evidence of complete collection.
 
+## Security
+
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+[The threat model](docs/threat-model.md) covers the tool's own attack surface
+(collector, transport, ingest, database, web server, narration egress and
+deployments), the mitigations with code and test citations, and the known
+residual risks.
+
 ## Development
 
 ```bash

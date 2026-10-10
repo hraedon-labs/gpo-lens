@@ -79,3 +79,10 @@ Out of scope (welcome as regular issues):
   the configured third-party LLM endpoint.
 - Findings that require an attacker who already controls the analysis host
   account that owns the database.
+
+## Threat model
+
+[`docs/threat-model.md`](docs/threat-model.md) describes the assets, trust
+boundaries (collector host, transport, ingest, database at rest, web server,
+browser, narration and Splunk egress, deployments), the mitigations with code
+and test citations, and the residual risks that are not mitigated by code.
