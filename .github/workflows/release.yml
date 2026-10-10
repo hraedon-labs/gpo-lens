@@ -1,0 +1,230 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Nothing is granted by default; each job asks for what it needs.
+permissions: {}
+
+# A draft GitHub release is created only when, for the exact tagged commit:
+#   identity  the tag, __version__, pyproject.toml, uv.lock and the top
+#             CHANGELOG entry agree, and the commit is reachable from main;
+#   ci        every ci.yml job passes (re-run via workflow_call);
+#   build     sdist + wheel build twice byte-identically, carry the tagged
+#             version in their own metadata, and the exact wheel installs and
+#             ingests a fixture estate.
+# publish re-runs the identity check and requires the remote tag to still name
+# the built commit, so dropping a job dependency in a later edit does not drop
+# those checks.
+jobs:
+  identity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Tag, __version__, pyproject, uv.lock and CHANGELOG agree
+        run: python scripts/check_release_version.py --tag "${GITHUB_REF_NAME}"
+
+      - name: Require the tagged commit to be on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "Refusing to release ${GITHUB_SHA}: it is not reachable from origin/main."
+            exit 1
+          fi
+
+  ci:
+    needs: identity
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+    secrets:
+      FORBIDDEN_IDENTIFIERS: ${{ secrets.FORBIDDEN_IDENTIFIERS }}
+
+  build:
+    needs: identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      # Pinned: the release build and the (experimental) CycloneDX export were
+      # rehearsed with this uv version; ci.yml's unpinned uv may move ahead.
+      - name: Set up uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: "0.12.0"
+          enable-cache: false # no cache restored into a release build
+
+      # The build backend (hatchling and its dependencies) is pinned with hashes
+      # by the same lock the IIS installer uses. SOURCE_DATE_EPOCH is the tagged
+      # commit's own timestamp, so a rebuild of the tag reproduces the bytes.
+      - name: Build sdist and wheel twice and require identical bytes
+        run: |
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct "${GITHUB_SHA}")"
+          export SOURCE_DATE_EPOCH
+          for out in dist dist-repro; do
+            uv build --no-cache --build-constraints deploy/iis/requirements-build.lock.txt \
+              --require-hashes --out-dir "$out"
+          done
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 2
+          for artifact in dist/*; do
+            cmp "$artifact" "dist-repro/$(basename "$artifact")"
+          done
+
+      - name: Require the built metadata to carry the tagged version
+        run: |
+          python scripts/check_release_version.py --tag "${GITHUB_REF_NAME}" \
+            --wheel dist/gpo_lens-*.whl --sdist dist/gpo_lens-*.tar.gz \
+            --notes-out release-notes.md
+
+      # Runtime and web dependencies come from uv.lock with hashes; the wheel
+      # itself is installed with --no-deps so nothing unpinned is resolved.
+      - name: Install the exact wheel and smoke it against a fixture estate
+        run: |
+          uv export --locked --no-dev --extra web --no-emit-project \
+            --format requirements-txt -o "${RUNNER_TEMP}/runtime.txt"
+          python -m venv "${RUNNER_TEMP}/smoke"
+          SMOKE="${RUNNER_TEMP}/smoke/bin"
+          "${SMOKE}/pip" install --require-hashes --no-deps -r "${RUNNER_TEMP}/runtime.txt"
+          "${SMOKE}/pip" install --no-deps dist/gpo_lens-*.whl
+          WORK="${RUNNER_TEMP}/smoke-work"
+          mkdir -p "${WORK}"
+          cp -r tests/golden_estate "${WORK}/estate"
+          cd "${WORK}"
+          test "$("${SMOKE}/gpo-lens" --version)" = "gpo-lens ${GITHUB_REF_NAME#v}"
+          "${SMOKE}/gpo-lens" --help > /dev/null
+          "${SMOKE}/gpo-lens" --db smoke.sqlite3 ingest estate
+          "${SMOKE}/gpo-lens" --db smoke.sqlite3 --json doctor > doctor.json
+          "${SMOKE}/python" - <<'PY'
+          import json
+
+          import gpo_lens
+          import gpo_lens.web.app  # the web extra imports from the installed wheel
+
+          assert "site-packages" in gpo_lens.__file__, gpo_lens.__file__
+          findings = json.load(open("doctor.json", encoding="utf-8"))["data"]["findings"]
+          # The golden estate carries a known cpassword GPO; an installed wheel
+          # that reports nothing on it is a false all-clear.
+          assert any(f["category"] == "cpassword" for f in findings), findings
+          PY
+
+      - name: CycloneDX SBOM from the locked runtime + web set
+        run: |
+          uv export --preview-features sbom-export --locked --no-dev --extra web \
+            --format cyclonedx1.5 -o sbom.cdx.json > /dev/null
+          python -c "import json; d = json.load(open('sbom.cdx.json')); assert d['bomFormat'] == 'CycloneDX'"
+
+      - name: Checksums
+        run: sha256sum dist/* sbom.cdx.json > SHA256SUMS
+
+      - name: Upload release files
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: release-files
+          path: |
+            dist/
+            sbom.cdx.json
+            SHA256SUMS
+            release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [identity, ci, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the draft release
+      id-token: write # sign attestations
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Re-check release identity
+        run: python scripts/check_release_version.py --tag "${GITHUB_REF_NAME}"
+
+      - name: Download release files
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-files
+          path: release
+
+      - name: Verify checksums and built metadata
+        working-directory: release
+        run: |
+          sha256sum --check --strict SHA256SUMS
+          python ../scripts/check_release_version.py --tag "${GITHUB_REF_NAME}" \
+            --wheel dist/gpo_lens-*.whl --sdist dist/gpo_lens-*.tar.gz
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-path: |
+            release/dist/*
+            release/SHA256SUMS
+
+      - name: Attest SBOM
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
+        with:
+          subject-path: release/dist/*
+          sbom-path: release/sbom.cdx.json
+
+      # `gh release create --verify-tag` checks only that a tag of that name
+      # exists; a tag moved mid-run would otherwise receive this commit's
+      # artifacts. A narrow race remains between this step and the next; tag
+      # protection rules close it.
+      - name: Require the remote tag to still name the built commit
+        run: |
+          remote="$(git ls-remote origin "refs/tags/${GITHUB_REF_NAME}^{}" | cut -f1)"
+          if [ -z "${remote}" ]; then
+            remote="$(git ls-remote origin "refs/tags/${GITHUB_REF_NAME}" | cut -f1)"
+          fi
+          if [ "${remote}" != "${GITHUB_SHA}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} now names ${remote:-nothing}, not ${GITHUB_SHA}."
+            exit 1
+          fi
+
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            release/dist/* release/sbom.cdx.json release/SHA256SUMS \
+            --draft --verify-tag \
+            --title "gpo-lens ${GITHUB_REF_NAME#v}" \
+            --notes-file release/release-notes.md

@@ -85,6 +85,15 @@ CI installs from the lockfile (`uv sync --locked --extra dev --extra web`), so
 stale-lock drift fails the build. A `supply-chain` CI job runs `pip-audit`
 against the locked runtime + web set.
 
+**Releases** are tag-driven: pushing `vX.Y.Z` runs `.github/workflows/release.yml`,
+which refuses unless the tag, `__version__`, `pyproject.toml`, `uv.lock` and the
+top (released, dated) CHANGELOG heading agree (`scripts/check_release_version.py`)
+and the commit is on `main`; it then re-runs all of `ci.yml`, builds the sdist and
+wheel twice and requires identical bytes, smoke-installs the exact wheel against
+the golden estate, and creates a **draft** GitHub release with a CycloneDX SBOM,
+`SHA256SUMS` and build-provenance + SBOM attestations. Publishing the draft is a
+human step.
+
 Slice 1 is **stdlib-only** (`xml.etree.ElementTree`, `json`, `sqlite3`,
 `argparse`) — keep it dependency-free so the core stays portable/air-gappable.
 

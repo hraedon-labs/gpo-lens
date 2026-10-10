@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # release.yml re-runs this whole workflow against the tagged commit.
+  workflow_call:
+    secrets:
+      FORBIDDEN_IDENTIFIERS:
+        required: false
 
 permissions:
   contents: read
@@ -40,8 +45,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      # This gate is a no-op until the repository secret FORBIDDEN_IDENTIFIERS
-      # is configured; the script exits 0 when the environment variable is unset.
+      # publication.toml declares visibility = "public", so an unset or empty
+      # FORBIDDEN_IDENTIFIERS secret FAILS this job (exit 1) rather than skipping:
+      # scripts/check_committed_identifiers.py _unconfigured() raises GateError for
+      # a public repo. (Only a "private-until-review" or undeclared repo skips.)
       - name: Check for committed work-domain identifiers
         env:
           FORBIDDEN_IDENTIFIERS: ${{ secrets.FORBIDDEN_IDENTIFIERS }}
@@ -173,7 +180,7 @@ jobs:
         run: uv sync --locked --extra dev --extra web
 
       - name: PowerShell version
-        run: pwsh -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.ToString()'
+        run: pwsh --version
 
       - name: Collector read-only AST allowlist
         run: .venv/bin/pytest -q -n0 tests/test_collector_readonly.py
