@@ -19,7 +19,6 @@ from __future__ import annotations
 import ast
 import importlib.util
 import inspect
-import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -291,14 +290,53 @@ def test_merge_cse_sets_are_snapshotted() -> None:
         )
 
 
+def _expr_root_name(node: ast.AST) -> str | None:
+    """The base identifier of an expression, unwrapping ``.strip()/.lower()/
+    .casefold()/.upper()`` method chains so the comparison idiom does not matter.
+
+    ``cse`` -> ``cse``; ``cse.strip().lower()`` -> ``cse``; ``cse.casefold()`` -> ``cse``.
+    """
+    while isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        node = node.func.value
+    if isinstance(node, ast.Attribute):  # e.g. cse.Value — not what we match
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else None
+
+
 def _ingest_dispatch_cses() -> set[str]:
-    """CSE display names the ingest dispatcher special-cases (``cse == "X"`` /
-    ``cse.strip().lower() == "x"``), plus the Advanced Audit CSE constant."""
-    src = (_ROOT / "src" / "gpo_lens" / "ingest.py").read_text(encoding="utf-8")
-    names = set(re.findall(r'cse\s*==\s*"([^"]+)"', src))
-    names |= set(re.findall(r'cse\.strip\(\)\.lower\(\)\s*==\s*"([^"]+)"', src))
-    names.add(ingest._AUDIT_CSE)
-    names.discard("_AUDIT_CSE")
+    """CSE names the ingest dispatcher branches on, found by AST (idiom-independent).
+
+    Covers ``cse == "x"``, ``"x" == cse``, ``cse.strip().lower() == "x"``,
+    ``cse.casefold() == "x"`` and ``match cse: case "x"`` — any comparison or
+    match whose subject's root identifier is ``cse`` against a string constant
+    (DeepSeek NON-BL-2). Plus the Advanced Audit CSE module constant.
+    """
+    tree = ast.parse((_ROOT / "src" / "gpo_lens" / "ingest.py").read_text(encoding="utf-8"))
+    names: set[str] = {ingest._AUDIT_CSE}
+
+    def consts(values: list[ast.expr]) -> set[str]:
+        return {v.value for v in values if isinstance(v, ast.Constant) and isinstance(v.value, str)}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Compare) and all(
+            isinstance(op, ast.Eq | ast.In) for op in node.ops
+        ):
+            operands = [node.left, *node.comparators]
+            if any(_expr_root_name(o) == "cse" for o in operands):
+                for operand in operands:
+                    if isinstance(operand, ast.Constant) and isinstance(operand.value, str):
+                        names.add(operand.value)
+                    # `cse in ("a", "b")` / list/set of CSE names
+                    if isinstance(operand, ast.Tuple | ast.List | ast.Set):
+                        names |= consts(operand.elts)
+        elif isinstance(node, ast.Match) and _expr_root_name(node.subject) == "cse":
+            for case in node.cases:
+                pattern = case.pattern
+                values = pattern.patterns if isinstance(pattern, ast.MatchOr) else [pattern]
+                for value in values:
+                    if isinstance(value, ast.MatchValue) and isinstance(value.value, ast.Constant):
+                        if isinstance(value.value.value, str):
+                            names.add(value.value.value)
     return {n.casefold() for n in names}
 
 

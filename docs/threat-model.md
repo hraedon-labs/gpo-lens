@@ -72,8 +72,8 @@ it receives; physical access.
 
 | Threat | Mitigation | Evidence |
 |--------|------------|----------|
-| Collector writes to AD, GPO or SYSVOL | A CI gate parses (never executes) every DC/RSAT-side script with the PowerShell AST and fails on any command, dynamic invocation, static or instance .NET call, property assignment, redirection, `using` statement, `New-Object` type or `Add-Type` form outside a per-script allowlist (strict both ways: unused entries also fail). AD/GroupPolicy cmdlets in the allowlist must be `Get-*`; only `Register-GpoLensCollection.ps1` may use the ScheduledTasks cmdlets, with `-Execute`/`-Argument`/`-UserId`/`-TaskName` pinned. `[ADSI]`/`[adsisearcher]`/`System.DirectoryServices.*`/COM/runspace type references are rejected, and each allowlisted instance method is bound to the receiver variable(s) it may be called on. Inline C# passed to `Add-Type` is pinned by SHA-256. Every reviewer bypass probe (both review lineages) is a regression case. | `tests/test_collector_readonly.py`; `tests/powershell/Get-ScriptCallInventory.ps1`; CI job `collector-readonly` |
-| Collector writes local files outside its outputs | Dataflow confinement: every write-root variable (and every variable whose value reaches `& $CollectorPath` or the scheduled-task action) is pinned to its documented assignment(s); any extra or changed `=` assignment — a rebind to UNC/SYSVOL, a registry/cert/AD provider path (`HKLM:`…), or an absolute path — fails. Write targets must be anchored at a pinned root with no absolute/UNC/provider/`..` literal; file redirections must target `$null`; `New-Item` may not create a symlink/junction/hardlink or name a non-filesystem provider; `Get-GPOReport -Path` and other output-path parameters are confined like any other write. | `tests/test_collector_readonly.py` (`test_local_writes_stay_under_declared_roots`, `test_pinned_variables_are_not_rebound`, `test_no_using_or_disallowed_redirection`, `test_scheduled_task_arguments_are_pinned`, `test_reviewer_probes_are_flagged`) |
+| Collector writes to AD, GPO or SYSVOL | **Closed-world gate.** A CI check parses (never executes) every DC/RSAT-side script with the PowerShell AST and compares a normalized inventory of *every* side-effect-capable node (each command with its full argument vector, each member call with its receiver, each assignment, redirection and type reference) against a committed golden file; **any** difference fails, so a new construct cannot slip through a gap in the rules below — it simply is not in the committed inventory. A second semantic layer (which the golden-file generator must also pass) keeps the inventory honest: commands, dynamic invocations, `using` statements, redirections (must target `$null`), `New-Object`/`Add-Type` forms, and static/instance .NET calls are allowlisted per script (strict both ways). AD/GroupPolicy cmdlets must be `Get-*`; only `Register-GpoLensCollection.ps1` may use the ScheduledTasks cmdlets, and each such call's full argument vector must match a pinned vector exactly (so `-Execute`/`-Argument`/`-UserId`/`-RunLevel`/`-TaskName` are fixed and `-CimSession`, a wildcard `Unregister`, etc. are rejected). `[ADSI]`/`[adsisearcher]`/`System.DirectoryServices.*`/COM/WMI/CIM/runspace type references are rejected. Inline C# passed to `Add-Type` is pinned by SHA-256. Every reviewer bypass probe (three rounds, two lineages) is a regression case asserted to fail at its intended check. | `tests/test_collector_readonly.py`; `tests/powershell/Get-ScriptCallInventory.ps1`; `tests/powershell/collector-inventory.json`; `scripts/gen_collector_inventory.py`; CI job `collector-readonly` |
+| Collector writes local files outside its outputs | Dataflow confinement: every write-root variable (and every variable whose value reaches `& $CollectorPath` or the scheduled-task action) is pinned to its documented binding(s). A rebind — an extra/changed `=` assignment, a scope-qualified assignment (`$script:`/`$global:`), a `foreach` loop variable, or a variable-writing common parameter (`-OutVariable`/`-ErrorVariable`/…) — to UNC/SYSVOL, a provider path (`HKLM:`…) or an absolute path fails. Each write target must be **exactly one of a committed set of pinned path expressions** per script (no free child data: `Join-Path $root $childVar`, a `$env:` or computed `..` component, `New-Item -Name`, an interpolated child — none are in the set); file redirections must target `$null`; `New-Item` may not create a symlink/junction/hardlink or name a provider. | `tests/test_collector_readonly.py` (`test_local_writes_stay_under_declared_roots`, `test_pinned_variables_are_not_rebound`, `test_no_using_or_disallowed_redirection`, `test_scheduled_task_arguments_are_pinned`, `test_inventory_matches_golden`, `test_reviewer_probes_are_flagged`) |
 | Retention or log rotation deletes outside the output root, or follows a link | Owner marker required before any write; reparse points refused before retention deletes; marker opened with link-count check. | `scripts/Run-GpoLensCollection.ps1:67-99,115-126,183-195`; `scripts/GpoLensCollectionMarker.ps1:3-68`; `tests/powershell/collection.Tests.ps1` |
 | Service-account password exposure during task registration | Prompted via `Get-Credential`, passed only to `Register-ScheduledTask`, variables cleared in `finally`; gMSA path supplies no password. | `scripts/Register-GpoLensCollection.ps1:148-164`; `tests/powershell/collection.Tests.ps1` ("registers a gMSA Password principal without supplying a password") |
 | Non-ASCII byte breaks parsing under Windows PowerShell 5.1 and a run silently collects less | Every `scripts/*.ps1` must parse and be ASCII-only. | `tests/powershell/scripts-parse.Tests.ps1` |
@@ -186,19 +186,29 @@ These are known and not mitigated by code at this commit.
   GPOs, settings or coverage evidence and produce a false all-clear. Coverage
   reconciliation cannot detect this because the inventory travels in the same
   archive.
-- **R5 — Limits of the collector AST gate.** It is static. Instance .NET
-  methods are bound to a receiver *variable name* (whose binding is pinned),
-  not a resolved runtime type, so a method allowlisted on one receiver could in
-  principle be reached on another object assigned to a same-named variable; the
-  type-reference denylist (`[ADSI]`, `System.DirectoryServices.*`, COM,
-  runspace) is the backstop. The claim that the allowlisted `Get-*`
-  AD/GroupPolicy cmdlets do not write rests on Microsoft's documentation.
-  `Run-GpoLensCollection.ps1` executes whatever `-CollectorPath` the operator
-  registered; only the default (`Export-GpoEstate.ps1`) is checked, and
-  `$CollectorPath`'s binding is pinned so the in-file default cannot be rebound.
-  The gate reasons about the committed scripts; a module resolved at runtime on
-  the DC that is not one of these files is outside its view (hence `using`/
-  `Import-Module` of non-allowlisted modules are rejected, not inspected).
+- **R5 — Limits of the collector gate.** It is static and reasons only about
+  the committed scripts. Completeness rests on the closed-world inventory: any
+  *new or changed* side-effect node fails the golden-file comparison, so the
+  semantic rules do not have to enumerate every bad form. What the semantic
+  layer does **not** by itself decide:
+  - Instance methods are bound to a receiver *variable name* (whose binding is
+    pinned), not a resolved runtime type; a side-effecting method on a
+    parenthesized/computed receiver is rejected, and a pure read/string method
+    on such a receiver is allowed (and still appears in the golden inventory).
+    The type-reference denylist (`[ADSI]`, `System.DirectoryServices.*`, COM,
+    WMI/CIM, runspace) is the backstop for a dangerous receiver type.
+  - That the allowlisted `Get-*` AD/GroupPolicy cmdlets do not write rests on
+    Microsoft's documentation.
+  - `Run-GpoLensCollection.ps1` executes whatever `-CollectorPath` the operator
+    registers at runtime; only the default (`Export-GpoEstate.ps1`) is in scope,
+    and `$CollectorPath`'s in-file binding is pinned (including against
+    `$script:`-scoped rebinds and `-OutVariable`).
+  - A module resolved at runtime that is not one of these files is outside the
+    gate's view, hence `using`/`Import-Module` of non-allowlisted modules are
+    rejected rather than inspected.
+  - The capability-matrix dispatch check reads `cse` comparisons and `match`
+    arms by AST; a dispatcher that selected a CSE by some wholly different
+    mechanism would still need its merge-alias set (snapshotted) to change.
   `install-windows.ps1` and `uninstall-windows.ps1` run on the analysis host
   and are out of scope.
 - **R6 — CLI narration sends estate strings.** `ask` and `doctor --explain`
