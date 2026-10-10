@@ -93,6 +93,14 @@ Slice 1 is **stdlib-only** (`xml.etree.ElementTree`, `json`, `sqlite3`,
 `scripts/Export-GpoEstate.ps1` produces the inputs (read-only PowerShell, run on
 a DC/RSAT box). The tool consumes its output dir.
 
+Read-only is enforced by `tests/test_collector_readonly.py`: it parses every
+DC/RSAT-side script with the PowerShell AST (via `pwsh`) and fails on anything
+outside a strict per-script allowlist of commands, .NET calls and file-write
+targets. Adding a command or a write to a collector script means editing that
+allowlist with a reason, in the same change. Every new `scripts/*.ps1` must be
+classified there (in scope, or out of scope with a reason). Locally the test
+skips when `pwsh` is absent; in CI it fails instead.
+
 ## Module map
 
 | Module | Purpose |

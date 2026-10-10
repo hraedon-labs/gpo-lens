@@ -146,6 +146,38 @@ jobs:
       - name: pip-audit
         run: uvx pip-audit --strict --requirement requirements-audit.txt
 
+  collector-readonly:
+    # Parses (never executes) the DC/RSAT-side PowerShell with the PowerShell
+    # AST and fails on any command, .NET call or file-write target outside the
+    # explicit allowlist in tests/test_collector_readonly.py. GitHub sets CI=true,
+    # which turns a missing pwsh into a failure instead of a skip.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (from lockfile)
+        run: uv sync --locked --extra dev --extra web
+
+      - name: PowerShell version
+        run: pwsh -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.ToString()'
+
+      - name: Collector read-only AST allowlist
+        run: .venv/bin/pytest -q -n0 tests/test_collector_readonly.py
+
   pester:
     runs-on: windows-latest
 

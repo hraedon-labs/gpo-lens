@@ -72,7 +72,8 @@ it receives; physical access.
 
 | Threat | Mitigation | Evidence |
 |--------|------------|----------|
-| Collector writes to AD, GPO or SYSVOL | Only `Get-*` AD/GroupPolicy cmdlets are used; writes go to the output root. **Verified by inspection only** at this commit; no mechanical check yet (residual R5). | `scripts/Export-GpoEstate.ps1` |
+| Collector writes to AD, GPO or SYSVOL | A CI gate parses (never executes) every DC/RSAT-side script with the PowerShell AST and fails on any command, dynamic invocation, static or instance .NET call, property assignment, `New-Object` type or `Add-Type` form outside a per-script allowlist (strict both ways: unused entries also fail). AD/GroupPolicy cmdlets in the allowlist must be `Get-*`; only `Register-GpoLensCollection.ps1` may use the ScheduledTasks cmdlets. Inline C# passed to `Add-Type` is pinned by SHA-256. Limits in residual R5. | `tests/test_collector_readonly.py`; `tests/powershell/Get-ScriptCallInventory.ps1`; CI job `collector-readonly` |
+| Collector writes local files outside its outputs | Every file-writing cmdlet or `[IO.File]`/`ZipFile` write must target an expression built only from that script's declared write-root variables (derived from `-OutputRoot`, `-OutputPath` or `-CopyTo`), with no absolute, UNC or `..` literal. | `tests/test_collector_readonly.py::test_local_writes_stay_under_declared_roots` |
 | Retention or log rotation deletes outside the output root, or follows a link | Owner marker required before any write; reparse points refused before retention deletes; marker opened with link-count check. | `scripts/Run-GpoLensCollection.ps1:67-99,115-126,183-195`; `scripts/GpoLensCollectionMarker.ps1:3-68`; `tests/powershell/collection.Tests.ps1` |
 | Service-account password exposure during task registration | Prompted via `Get-Credential`, passed only to `Register-ScheduledTask`, variables cleared in `finally`; gMSA path supplies no password. | `scripts/Register-GpoLensCollection.ps1:148-164`; `tests/powershell/collection.Tests.ps1` ("registers a gMSA Password principal without supplying a password") |
 | Non-ASCII byte breaks parsing under Windows PowerShell 5.1 and a run silently collects less | Every `scripts/*.ps1` must parse and be ASCII-only. | `tests/powershell/scripts-parse.Tests.ps1` |
@@ -185,9 +186,15 @@ These are known and not mitigated by code at this commit.
   GPOs, settings or coverage evidence and produce a false all-clear. Coverage
   reconciliation cannot detect this because the inventory travels in the same
   archive.
-- **R5 — Collector read-only property is by inspection only.** No test
-  enumerates the PowerShell commands the collector runs; a future edit adding
-  a write cmdlet would not fail CI.
+- **R5 — Limits of the collector AST gate.** It is static: instance .NET
+  methods are matched by name only (the receiver type is unknown), the
+  derivation of each write-root variable from `-OutputRoot`/`-OutputPath`/
+  `-CopyTo` is verified by inspection and recorded in the allowlist, and the
+  claim that the allowlisted `Get-*` AD/GroupPolicy cmdlets do not write rests
+  on Microsoft's documentation. `Run-GpoLensCollection.ps1` executes whatever
+  `-CollectorPath` the operator registered; only the default
+  (`Export-GpoEstate.ps1`) is checked. `install-windows.ps1` and
+  `uninstall-windows.ps1` run on the analysis host and are out of scope.
 - **R6 — CLI narration sends estate strings.** `ask` and `doctor --explain`
   send `safe_data`-redacted estate content (GPO names, settings, finding text)
   to the configured endpoint; redaction targets credentials, not names or
