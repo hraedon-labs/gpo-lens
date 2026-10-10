@@ -1,0 +1,497 @@
+{
+  "axe_version": "4.13.0",
+  "entries": [
+    {
+      "page": "/briefing",
+      "rule": "color-contrast",
+      "target": ".gp-eyebrow",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/briefing",
+      "rule": "color-contrast",
+      "target": ".gp-ver",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/briefing",
+      "rule": "color-contrast",
+      "target": ".muted.gp-posture-tile:nth-child(4) > .gp-posture-label",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/briefing",
+      "rule": "color-contrast",
+      "target": ".muted.gp-posture-tile:nth-child(5) > .gp-posture-label",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/briefing",
+      "rule": "color-contrast",
+      "target": "div:nth-child(2) > .muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/briefing",
+      "rule": "link-in-text-block",
+      "target": ":root",
+      "reason": "Inline links are distinguished from body text by colour only; adding underlines or a 3:1 contrast change is a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/briefing",
+      "rule": "link-in-text-block",
+      "target": "a[href$=\"trends\"]",
+      "reason": "Inline links are distinguished from body text by colour only; adding underlines or a 3:1 contrast change is a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/briefing",
+      "rule": "link-in-text-block",
+      "target": "li:nth-child(1) > a",
+      "reason": "Inline links are distinguished from body text by colour only; adding underlines or a 3:1 contrast change is a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/changelog",
+      "rule": "color-contrast",
+      "target": ".gp-eyebrow",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/changelog",
+      "rule": "color-contrast",
+      "target": ".gp-ver",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/changelog",
+      "rule": "color-contrast",
+      "target": ".sub",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/explore",
+      "rule": "color-contrast",
+      "target": ".gp-eyebrow",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/explore",
+      "rule": "color-contrast",
+      "target": ".gp-ver",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/explore",
+      "rule": "color-contrast",
+      "target": "a[href$=\"conflicts\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/explore",
+      "rule": "color-contrast",
+      "target": "a[href$=\"danger\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/explore",
+      "rule": "color-contrast",
+      "target": "a[href$=\"delegation\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/explore",
+      "rule": "color-contrast",
+      "target": "a[href$=\"dependencies\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/explore",
+      "rule": "color-contrast",
+      "target": "a[href$=\"inventory\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/explore",
+      "rule": "color-contrast",
+      "target": "a[href$=\"resultant\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/explore",
+      "rule": "color-contrast",
+      "target": "a[href$=\"search\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/explore",
+      "rule": "color-contrast",
+      "target": "a[href=\"/ou\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/explore",
+      "rule": "color-contrast",
+      "target": "p",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(1) > td:nth-child(1) > .crit.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(1) > td:nth-child(2) > .crit.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(1) > td:nth-child(6) > .muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(2) > td:nth-child(1) > .crit.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(2) > td:nth-child(2) > .crit.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(2) > td:nth-child(6) > .muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(3) > td:nth-child(1) > .crit.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(3) > td:nth-child(2) > .crit.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(3) > td:nth-child(6) > .muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(4) > td:nth-child(1) > .crit.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(4) > td:nth-child(2) > .crit.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(4) > td:nth-child(6) > .muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(5) > td:nth-child(1) > .crit.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(5) > td:nth-child(2) > .crit.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(5) > td:nth-child(6) > .muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(6) > td:nth-child(1) > .crit.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(6) > td:nth-child(2) > .muted.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(6) > td:nth-child(6) > .muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(7) > td:nth-child(1) > .crit.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(7) > td:nth-child(2) > .muted.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(7) > td:nth-child(6) > .muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(8) > td:nth-child(1) > .crit.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(8) > td:nth-child(2) > .muted.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(8) > td:nth-child(6) > .muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(9) > td:nth-child(1) > .crit.gp-chip",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".flag:nth-child(9) > td:nth-child(6) > .muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".gp-eyebrow",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": ".gp-ver",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": "th:nth-child(2)",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": "th:nth-child(3)",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": "th:nth-child(4)",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": "th:nth-child(5)",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": "th:nth-child(6)",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": "th:nth-child(7)",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "color-contrast",
+      "target": "thead > tr > th:nth-child(1)",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/findings",
+      "rule": "link-in-text-block",
+      "target": ":root",
+      "reason": "Inline links are distinguished from body text by colour only; adding underlines or a 3:1 contrast change is a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/ingest",
+      "rule": "color-contrast",
+      "target": ".gp-breadcrumb > span:nth-child(3)",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/ingest",
+      "rule": "color-contrast",
+      "target": ".gp-eyebrow",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/ingest",
+      "rule": "color-contrast",
+      "target": ".gp-ver",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/ingest",
+      "rule": "color-contrast",
+      "target": ".hint",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/ingest",
+      "rule": "color-contrast",
+      "target": ".mono",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/ingest",
+      "rule": "color-contrast",
+      "target": ".sub.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/ingest",
+      "rule": "color-contrast",
+      "target": "div > .sub",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/ingest",
+      "rule": "color-contrast",
+      "target": "th:nth-child(2)",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/ingest",
+      "rule": "color-contrast",
+      "target": "th:nth-child(3)",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/ingest",
+      "rule": "link-in-text-block",
+      "target": ".gp-breadcrumb > a[href$=\"tools\"]",
+      "reason": "Inline links are distinguished from body text by colour only; adding underlines or a 3:1 contrast change is a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/tools",
+      "rule": "color-contrast",
+      "target": ".gp-eyebrow",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/tools",
+      "rule": "color-contrast",
+      "target": ".gp-ver",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/tools",
+      "rule": "color-contrast",
+      "target": "a[href$=\"accepted-risks\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/tools",
+      "rule": "color-contrast",
+      "target": "a[href$=\"admx-coverage\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/tools",
+      "rule": "color-contrast",
+      "target": "a[href$=\"ask\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/tools",
+      "rule": "color-contrast",
+      "target": "a[href$=\"baseline\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/tools",
+      "rule": "color-contrast",
+      "target": "a[href$=\"changelog\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/tools",
+      "rule": "color-contrast",
+      "target": "a[href$=\"findings\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/tools",
+      "rule": "color-contrast",
+      "target": "a[href$=\"golden-diff\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/tools",
+      "rule": "color-contrast",
+      "target": "a[href$=\"ingest\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/tools",
+      "rule": "color-contrast",
+      "target": "a[href$=\"routes\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/tools",
+      "rule": "color-contrast",
+      "target": "a[href$=\"trends\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/tools",
+      "rule": "color-contrast",
+      "target": "a[href=\"/\"] > .gp-dir-desc.muted",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    },
+    {
+      "page": "/tools",
+      "rule": "color-contrast",
+      "target": "p",
+      "reason": "Muted/secondary text tokens (version tag, eyebrows, table headers, descriptions) measure below WCAG AA 4.5:1; fixing means changing the palette tokens, a visual-design decision deferred to the owner."
+    }
+  ]
+}
