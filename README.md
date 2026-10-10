@@ -291,6 +291,10 @@ version 2; see [the contract](docs/spec/json-contract.md).
 
 ## Limits
 
+The [capability matrix](docs/capability-matrix.md), generated from the code,
+lists for every collector input, CSE and detector whether gpo-lens parses,
+flags or resolves it; its last section repeats what is not supported.
+
 - **One estate per store.** Each database holds snapshots of one domain.
   Use separate databases/instances for unrelated estates. Multi-domain,
   multi-forest and cross-estate comparison are not supported.

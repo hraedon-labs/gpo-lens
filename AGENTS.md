@@ -85,6 +85,12 @@ CI installs from the lockfile (`uv sync --locked --extra dev --extra web`), so
 stale-lock drift fails the build. A `supply-chain` CI job runs `pip-audit`
 against the locked runtime + web set.
 
+`docs/capability-matrix.md` is generated: after adding a detector, danger rule,
+ingest parser, collector input or CSE handling, run
+`python scripts/gen_capability_matrix.py` (curated descriptions live in that
+script). `tests/test_capability_matrix.py` fails on a stale file or on a
+detector/parser/input without a row.
+
 **Releases** are tag-driven: pushing `vX.Y.Z` runs `.github/workflows/release.yml`,
 which refuses unless the tag, `__version__`, `pyproject.toml`, `uv.lock` and the
 top (released, dated) CHANGELOG heading agree (`scripts/check_release_version.py`)
