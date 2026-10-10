@@ -103,12 +103,34 @@ foreach ($file in $Path) {
     $commands = @()
     foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true)) {
         $name = $node.GetCommandName()
+        # Full ordered element list: every parameter (named, incl. common
+        # parameters like -OutVariable, with its switch colon value) and every
+        # positional argument, so the closed-world inventory sees them all.
+        $arguments = @()
+        $elems = $node.CommandElements
+        for ($ei = 1; $ei -lt $elems.Count; $ei++) {
+            $el = $elems[$ei]
+            if ($el -is [System.Management.Automation.Language.CommandParameterAst]) {
+                $pv = $null
+                if ($null -ne $el.Argument) {
+                    $pv = Get-Text $el.Argument
+                } elseif ($ei + 1 -lt $elems.Count -and
+                    -not ($elems[$ei + 1] -is [System.Management.Automation.Language.CommandParameterAst])) {
+                    $pv = Get-Text $elems[$ei + 1]
+                    $ei++
+                }
+                $arguments += [pscustomobject][ordered]@{ parameter = $el.ParameterName; value = $pv }
+            } else {
+                $arguments += [pscustomobject][ordered]@{ parameter = $null; value = (Get-Text $el) }
+            }
+        }
         $record = [ordered]@{
             name = $name
             line = $node.Extent.StartLineNumber
             invocation = [string]$node.InvocationOperator
             text = $node.Extent.Text
             bound = (Get-BoundParameters $node)
+            arguments = $arguments
             type_definition_sha256 = $null
         }
         if ($name -eq 'Add-Type') {

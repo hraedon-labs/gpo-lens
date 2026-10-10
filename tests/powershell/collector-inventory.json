@@ -1,0 +1,7823 @@
+{
+  "Export-GpoEstate.ps1": {
+    "assignments": [
+      {
+        "kind": "assign",
+        "name": "ErrorActionPreference",
+        "operator": "Equals",
+        "rhs": "'Stop'",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "allGpc",
+        "operator": "Equals",
+        "rhs": "Get-ADObject -SearchBase $policiesDN -LDAPFilter \"(objectClass=groupPolicyContainer)\" ` -Properties displayName -ErrorAction Stop",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "allGpos",
+        "operator": "Equals",
+        "rhs": "Get-GPO -All",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "allSids",
+        "operator": "Equals",
+        "rhs": "[System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "allXmlPath",
+        "operator": "Equals",
+        "rhs": "Join-Path $out 'AllGPOs.xml'",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "archive",
+        "operator": "Equals",
+        "rhs": "\"$ExportPath.zip\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "collectionErrors",
+        "operator": "Equals",
+        "rhs": "[System.Collections.Generic.List[object]]::new()",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "configNC",
+        "operator": "Equals",
+        "rhs": "(Get-ADRootDSE).configurationNamingContext",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "content",
+        "operator": "Equals",
+        "rhs": "Get-Content -LiteralPath $f.FullName -Raw -ErrorAction Stop",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "content",
+        "operator": "Equals",
+        "rhs": "Get-Content -LiteralPath $metaPath -Raw",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "copiedCount",
+        "operator": "Equals",
+        "rhs": "@(Get-ChildItem -LiteralPath $dest -Recurse -File -ErrorAction SilentlyContinue).Count",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "dest",
+        "operator": "Equals",
+        "rhs": "Join-Path $out 'SYSVOL-Policies'",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "detail",
+        "operator": "Equals",
+        "rhs": "if ($policyFolders.Count -eq 0) { \"enumerated 0 policy folders at $src\" + $(if ($srcErr) { \" ($($srcErr[0].Exception.Message))\" } else { \"\" }) } else { \"copy wrote 0 files to SYSVOL-Policies\" }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "diskFiles",
+        "operator": "Equals",
+        "rhs": "@(Get-ChildItem -LiteralPath $ExportPath -Recurse -File ` -ErrorAction SilentlyContinue -ErrorVariable +zipEnumErr)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "dom",
+        "operator": "Equals",
+        "rhs": "Get-ADDomain",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "domPart",
+        "operator": "Equals",
+        "rhs": "$matches[1]",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "domPart",
+        "operator": "Equals",
+        "rhs": "$matches[2]",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "domPart",
+        "operator": "Equals",
+        "rhs": "\"\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "domainSids",
+        "operator": "Equals",
+        "rhs": "@($allSids | Where-Object { $_ -match '^S-1-5-21-' -and $principals[$_].type -eq 'Unresolved' })",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "entryName",
+        "operator": "Equals",
+        "rhs": "$f.FullName.Substring($rootLen).Replace('\\', '/')",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "failedSections",
+        "operator": "Equals",
+        "rhs": "[System.Collections.Generic.List[string]]::new()",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "g",
+        "operator": "Equals",
+        "rhs": "Get-GPInheritance -Target $t",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "gName",
+        "operator": "Equals",
+        "rhs": "$principals[$gSid].name",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "gpoCount",
+        "operator": "Equals",
+        "rhs": "$allGpos.Count",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "groupMembers",
+        "operator": "Equals",
+        "rhs": "[ordered]@{}",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "groupMembersOut",
+        "operator": "Equals",
+        "rhs": "[ordered]@{ collected = (Get-Date -Format 'o'); domain = $dom.DNSRoot; groups = $groupMembers }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "groupSids",
+        "operator": "Equals",
+        "rhs": "@($principals.Keys | Where-Object { $principals[$_].type -eq 'Group' })",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "groupsExpanded",
+        "operator": "Equals",
+        "rhs": "0",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "groupsFailed",
+        "operator": "Equals",
+        "rhs": "0",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "guid",
+        "operator": "Equals",
+        "rhs": "$gpc.Name.Trim('{}')",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "i",
+        "operator": "Equals",
+        "rhs": "0",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "inh",
+        "operator": "Equals",
+        "rhs": "foreach ($t in $targets) { try { $g = Get-GPInheritance -Target $t [pscustomobject]@{ Path = $g.Path Name = $g.Name ContainerType = $g.ContainerType GpoInheritanceBlocked = $g.GpoInheritanceBlocked InheritedGpoLinks = $g.InheritedGpoLinks | Select-Object DisplayName, GpoId, Enabled, Enforced, Order, Target } } catch { Write-Warning \"GPInheritance failed for $t : $($_.Exception.Message)\" } }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "knownIds",
+        "operator": "Equals",
+        "rhs": "[System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "memberSids",
+        "operator": "Equals",
+        "rhs": "@($members | ForEach-Object { $_.SID.Value })",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "members",
+        "operator": "Equals",
+        "rhs": "Get-ADGroupMember -Identity $gSid -Recursive -ErrorAction Stop",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "metaPath",
+        "operator": "Equals",
+        "rhs": "Join-Path $out 'gpo-metadata.json'",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "name",
+        "operator": "Equals",
+        "rhs": "$sid",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "name",
+        "operator": "Equals",
+        "rhs": "$translated",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "name",
+        "operator": "Equals",
+        "rhs": "\"\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "null",
+        "operator": "Equals",
+        "rhs": "$knownIds.Add($g.Id.Guid)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "obj",
+        "operator": "Equals",
+        "rhs": "Get-ADObject -Filter \"objectSid -eq '$sid'\" -Properties objectClass, sAMAccountName, name -ErrorAction Stop",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "objClass",
+        "operator": "Equals",
+        "rhs": "$obj.objectClass[-1]",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "ouCount",
+        "operator": "Equals",
+        "rhs": "@(Get-ADOrganizationalUnit -Filter *).Count",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "out",
+        "operator": "Equals",
+        "rhs": "Join-Path $OutputRoot \"$($dom.DNSRoot)-$stamp\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "pct",
+        "operator": "Equals",
+        "rhs": "[math]::Round(($Section / $totalSections) * 100)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "policiesDN",
+        "operator": "Equals",
+        "rhs": "\"CN=Policies,CN=System,$($dom.DistinguishedName)\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "policyFolders",
+        "operator": "Equals",
+        "rhs": "@(Get-ChildItem -LiteralPath $src -Directory ` -ErrorAction SilentlyContinue -ErrorVariable +srcErr)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "principals",
+        "operator": "Equals",
+        "rhs": "[ordered]@{}",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "principalsOut",
+        "operator": "Equals",
+        "rhs": "[ordered]@{ collected = (Get-Date -Format 'o'); domain = $dom.DNSRoot; principals = $principals }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "ptype",
+        "operator": "Equals",
+        "rhs": "switch ($objClass) { 'group' { 'Group' } 'computer' { 'Computer' } default { 'User' } }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "resolved",
+        "operator": "Equals",
+        "rhs": "0",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "rootLen",
+        "operator": "Equals",
+        "rhs": "$ExportPath.Length + 1",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "safe",
+        "operator": "Equals",
+        "rhs": "($gpo.DisplayName -replace '[\\\\/:*?\"<>|\\[\\]]', '_')",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sam",
+        "operator": "Equals",
+        "rhs": "$matches[1]",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sam",
+        "operator": "Equals",
+        "rhs": "$matches[2]",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sam",
+        "operator": "Equals",
+        "rhs": "$translated",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sam",
+        "operator": "Equals",
+        "rhs": "\"\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sam",
+        "operator": "Equals",
+        "rhs": "if ($obj.sAMAccountName) { $obj.sAMAccountName } else { $obj.Name }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sectionNum",
+        "operator": "Equals",
+        "rhs": "0",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sidObj",
+        "operator": "Equals",
+        "rhs": "New-Object System.Security.Principal.SecurityIdentifier($sid)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "siteCount",
+        "operator": "Equals",
+        "rhs": "@(Get-ADObject -SearchBase \"CN=Sites,$((Get-ADRootDSE).configurationNamingContext)\" -LDAPFilter \"(objectClass=site)\" -ErrorAction SilentlyContinue).Count",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "src",
+        "operator": "Equals",
+        "rhs": "\"\\\\$($dom.DNSRoot)\\SYSVOL\\$($dom.DNSRoot)\\Policies\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "src",
+        "operator": "Equals",
+        "rhs": "\"\\\\$($dom.DNSRoot)\\SYSVOL\\$($dom.DNSRoot)\\Policies\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "srcErr",
+        "operator": "Equals",
+        "rhs": "$null",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "stamp",
+        "operator": "Equals",
+        "rhs": "Get-Date -Format \"yyyyMMdd-HHmmss\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "successSections",
+        "operator": "Equals",
+        "rhs": "[System.Collections.Generic.List[string]]::new()",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sysvolErrors",
+        "operator": "Equals",
+        "rhs": "0",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sysvolSize",
+        "operator": "Equals",
+        "rhs": "(Get-ChildItem $src -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sysvolSizeStr",
+        "operator": "Equals",
+        "rhs": "\"$([math]::Round($sysvolSize / 1MB, 2)) MB\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sysvolSizeStr",
+        "operator": "Equals",
+        "rhs": "\"skipped\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "targets",
+        "operator": "Equals",
+        "rhs": "@($dom.DistinguishedName) + (Get-ADOrganizationalUnit -Filter * | Select-Object -Expand DistinguishedName)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "testFile",
+        "operator": "Equals",
+        "rhs": "Join-Path $OutputRoot \"_writetest_.tmp\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "totalSections",
+        "operator": "Equals",
+        "rhs": "9",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "totalTargets",
+        "operator": "Equals",
+        "rhs": "$targets.Count",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "translated",
+        "operator": "Equals",
+        "rhs": "$sidObj.Translate([System.Security.Principal.NTAccount]).Value",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "type",
+        "operator": "Equals",
+        "rhs": "\"Unresolved\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "type",
+        "operator": "Equals",
+        "rhs": "\"Unresolved\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "type",
+        "operator": "Equals",
+        "rhs": "\"WellKnown\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "type",
+        "operator": "Equals",
+        "rhs": "\"WellKnown\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "type",
+        "operator": "Equals",
+        "rhs": "if ($sam -match '\\$$') { \"Computer\" } else { \"Group\" }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "unresolved",
+        "operator": "Equals",
+        "rhs": "0",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "wmiCount",
+        "operator": "Equals",
+        "rhs": "@(Get-ADObject -Filter \"objectClass -eq 'msWMI-Som'\" -Properties 'msWMI-Name' -ErrorAction SilentlyContinue).Count",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "xmlFiles",
+        "operator": "Equals",
+        "rhs": "@(Get-ChildItem -LiteralPath (Join-Path $out 'reports') -Filter '*.xml' -ErrorAction SilentlyContinue)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "xmlFiles",
+        "operator": "PlusEquals",
+        "rhs": "Get-Item -LiteralPath $allXmlPath",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "zip",
+        "operator": "Equals",
+        "rhs": "[System.IO.Compression.ZipFile]::Open($archive, 'Create')",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "zipEnumErr",
+        "operator": "Equals",
+        "rhs": "$null",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "f",
+        "operator": "foreach",
+        "rhs": "$diskFiles",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "f",
+        "operator": "foreach",
+        "rhs": "$xmlFiles",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "g",
+        "operator": "foreach",
+        "rhs": "$allGpos",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "gSid",
+        "operator": "foreach",
+        "rhs": "$groupSids",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "gpc",
+        "operator": "foreach",
+        "rhs": "$allGpc",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "gpo",
+        "operator": "foreach",
+        "rhs": "$allGpos",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "m",
+        "operator": "foreach",
+        "rhs": "[regex]::Matches($content, 'S-1-[0-9]+-[0-9-]+')",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "m",
+        "operator": "foreach",
+        "rhs": "[regex]::Matches($content, 'S-1-[0-9]+-[0-9-]+')",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "mod",
+        "operator": "foreach",
+        "rhs": "@('GroupPolicy','ActiveDirectory')",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "pf",
+        "operator": "foreach",
+        "rhs": "$policyFolders",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "s",
+        "operator": "foreach",
+        "rhs": "$failedSections",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "s",
+        "operator": "foreach",
+        "rhs": "$successSections",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "sid",
+        "operator": "foreach",
+        "rhs": "$domainSids",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "sid",
+        "operator": "foreach",
+        "rhs": "($allSids | Sort-Object)",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "t",
+        "operator": "foreach",
+        "rhs": "$targets",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Activity",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "DryRun",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "ExportPath",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "NoZip",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "OutputRoot",
+        "operator": "param",
+        "rhs": "\"C:\\gpo-export\"",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Section",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "SkipSysvol",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      }
+    ],
+    "commands": [
+      {
+        "args": [
+          [
+            "Activity",
+            "$Activity"
+          ],
+          [
+            "PercentComplete",
+            "$pct"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Progress",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Activity",
+            "\"AD sites\""
+          ],
+          [
+            "Section",
+            "$sectionNum"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-SectionProgress",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Activity",
+            "\"Export complete\""
+          ],
+          [
+            "Completed",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Progress",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Activity",
+            "\"GPO metadata\""
+          ],
+          [
+            "Section",
+            "$sectionNum"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-SectionProgress",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Activity",
+            "\"GPO settings (XML reports)\""
+          ],
+          [
+            "Section",
+            "$sectionNum"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-SectionProgress",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Activity",
+            "\"GPO settings (XML reports)\""
+          ],
+          [
+            "Status",
+            "\"$i / $gpoCount\""
+          ],
+          [
+            "PercentComplete",
+            "([math]::Round(($sectionNum - 1 + ($i / $gpoCount)) / $totalSections * 100))"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Progress",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Activity",
+            "\"Group membership\""
+          ],
+          [
+            "Section",
+            "$sectionNum"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-SectionProgress",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Activity",
+            "\"Inheritance (gp-inheritance)\""
+          ],
+          [
+            "Section",
+            "$sectionNum"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-SectionProgress",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Activity",
+            "\"OU tree\""
+          ],
+          [
+            "Section",
+            "$sectionNum"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-SectionProgress",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Activity",
+            "\"Principals (SID -> name)\""
+          ],
+          [
+            "Section",
+            "$sectionNum"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-SectionProgress",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Activity",
+            "\"SYSVOL copy\""
+          ],
+          [
+            "Section",
+            "$sectionNum"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-SectionProgress",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Activity",
+            "\"WMI filters\""
+          ],
+          [
+            "Section",
+            "$sectionNum"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-SectionProgress",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "All",
+            null
+          ],
+          [
+            "ReportType",
+            "Xml"
+          ],
+          [
+            "Path",
+            "(Join-Path $out 'AllGPOs.xml')"
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-GPOReport",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "All",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-GPO",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "AssemblyName",
+            "System.IO.Compression.FileSystem"
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Add-Type",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Depth",
+            "4"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-Json",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Depth",
+            "4"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-Json",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Depth",
+            "4"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-Json",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Depth",
+            "4"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-Json",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Depth",
+            "4"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-Json",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Depth",
+            "4"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-Json",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Depth",
+            "4"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-Json",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Depth",
+            "4"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-Json",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Depth",
+            "5"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-Json",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Depth",
+            "5"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-Json",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Depth",
+            "6"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-Json",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Expand",
+            "DistinguishedName"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Select-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "ExportPath",
+            "$out"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "New-GpoExportZip",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Filter",
+            "*"
+          ],
+          [
+            "Properties",
+            "gPLink, gPOptions"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ADOrganizationalUnit",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Filter",
+            "*"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ADOrganizationalUnit",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Filter",
+            "*"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ADOrganizationalUnit",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Filter",
+            "\"objectClass -eq 'msWMI-Som'\""
+          ],
+          [
+            "Properties",
+            "'msWMI-Name'"
+          ],
+          [
+            "ErrorAction",
+            "SilentlyContinue"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ADObject",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Filter",
+            "\"objectClass -eq 'msWMI-Som'\""
+          ],
+          [
+            "Properties",
+            "'msWMI-Name', 'msWMI-Parm2'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ADObject",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Filter",
+            "\"objectSid -eq '$sid'\""
+          ],
+          [
+            "Properties",
+            "objectClass, sAMAccountName, name"
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ADObject",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Format",
+            "'o'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Date",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Format",
+            "'o'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Date",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Format",
+            "\"yyyyMMdd-HHmmss\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Date",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Guid",
+            "$gpo.Id"
+          ],
+          [
+            "ReportType",
+            "Xml"
+          ],
+          [
+            "Path",
+            "(Join-Path $out \"reports\\${safe}__$($gpo.Id).xml\")"
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-GPOReport",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Identity",
+            "$gSid"
+          ],
+          [
+            "Recursive",
+            null
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ADGroupMember",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "ItemType",
+            "Directory"
+          ],
+          [
+            "Force",
+            null
+          ],
+          [
+            "Path",
+            "$OutputRoot"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "New-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "ItemType",
+            "Directory"
+          ],
+          [
+            "Force",
+            null
+          ],
+          [
+            "Path",
+            "$dest"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "New-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "ItemType",
+            "Directory"
+          ],
+          [
+            "Force",
+            null
+          ],
+          [
+            "Path",
+            "(Join-Path $out 'reports')"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "New-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "ListAvailable",
+            null
+          ],
+          [
+            "Name",
+            "$mod"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Module",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$ExportPath"
+          ],
+          [
+            "Recurse",
+            null
+          ],
+          [
+            "File",
+            null
+          ],
+          [
+            "ErrorAction",
+            "SilentlyContinue"
+          ],
+          [
+            "ErrorVariable",
+            "+zipEnumErr"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ChildItem",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$OutputRoot"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$_.FullName"
+          ],
+          [
+            "Destination",
+            "$dest"
+          ],
+          [
+            "Force",
+            null
+          ],
+          [
+            "ErrorAction",
+            "SilentlyContinue"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Copy-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$allXmlPath"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$allXmlPath"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$archive"
+          ],
+          [
+            "Force",
+            null
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Remove-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$archive"
+          ],
+          [
+            "Force",
+            null
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Remove-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$archive"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$archive"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$dest"
+          ],
+          [
+            "Recurse",
+            null
+          ],
+          [
+            "File",
+            null
+          ],
+          [
+            "ErrorAction",
+            "SilentlyContinue"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ChildItem",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$f.FullName"
+          ],
+          [
+            "Raw",
+            null
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$metaPath"
+          ],
+          [
+            "Raw",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$metaPath"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$pf.FullName"
+          ],
+          [
+            "Destination",
+            "$dest"
+          ],
+          [
+            "Recurse",
+            null
+          ],
+          [
+            "Force",
+            null
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Copy-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$src"
+          ],
+          [
+            "Directory",
+            null
+          ],
+          [
+            "ErrorAction",
+            "SilentlyContinue"
+          ],
+          [
+            "ErrorVariable",
+            "+srcErr"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ChildItem",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$src"
+          ],
+          [
+            "File",
+            null
+          ],
+          [
+            "ErrorAction",
+            "SilentlyContinue"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ChildItem",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "(Join-Path $out 'reports')"
+          ],
+          [
+            "Filter",
+            "'*.xml'"
+          ],
+          [
+            "ErrorAction",
+            "SilentlyContinue"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ChildItem",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Property",
+            "Length"
+          ],
+          [
+            "Sum",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Measure-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "SearchBase",
+            "$policiesDN"
+          ],
+          [
+            "LDAPFilter",
+            "\"(objectClass=groupPolicyContainer)\""
+          ],
+          [
+            "Properties",
+            "displayName"
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ADObject",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "SearchBase",
+            "\"CN=Sites,$((Get-ADRootDSE).configurationNamingContext)\""
+          ],
+          [
+            "LDAPFilter",
+            "\"(objectClass=site)\""
+          ],
+          [
+            "ErrorAction",
+            "SilentlyContinue"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ADObject",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "SearchBase",
+            "\"CN=Sites,$configNC\""
+          ],
+          [
+            "LDAPFilter",
+            "\"(objectClass=site)\""
+          ],
+          [
+            "Properties",
+            "gPLink, gPOptions, name"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ADObject",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Target",
+            "$t"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-GPInheritance",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$OutputRoot"
+          ],
+          [
+            null,
+            "\"$($dom.DNSRoot)-$stamp\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$OutputRoot"
+          ],
+          [
+            null,
+            "\"_writetest_.tmp\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'AllGPOs.xml'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'AllGPOs.xml'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'SYSVOL-Policies'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'collection-errors.json'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'collection-errors.json'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'collection-errors.json'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'collection-errors.json'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'gp-inheritance.json'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'gpo-inventory.json'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'gpo-metadata.json'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'gpo-metadata.json'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'group-members.json'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'ou-tree.json'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'principals.json'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'reports'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'reports'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'sites.json'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "'wmi-filters.json'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$out"
+          ],
+          [
+            null,
+            "\"reports\\${safe}__$($gpo.Id).xml\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$src"
+          ],
+          [
+            "Recurse",
+            null
+          ],
+          [
+            "File",
+            null
+          ],
+          [
+            "ErrorAction",
+            "SilentlyContinue"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ChildItem",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$testFile"
+          ],
+          [
+            "Force",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Remove-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "(Join-Path $out 'collection-errors.json')"
+          ],
+          [
+            "Encoding",
+            "UTF8"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "(Join-Path $out 'collection-errors.json')"
+          ],
+          [
+            "Encoding",
+            "UTF8"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "(Join-Path $out 'collection-errors.json')"
+          ],
+          [
+            "Encoding",
+            "UTF8"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "(Join-Path $out 'collection-errors.json')"
+          ],
+          [
+            "Encoding",
+            "UTF8"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "(Join-Path $out 'gp-inheritance.json')"
+          ],
+          [
+            "Encoding",
+            "UTF8"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "(Join-Path $out 'gpo-inventory.json')"
+          ],
+          [
+            "Encoding",
+            "UTF8"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "(Join-Path $out 'gpo-metadata.json')"
+          ],
+          [
+            "Encoding",
+            "UTF8"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "(Join-Path $out 'group-members.json')"
+          ],
+          [
+            "Encoding",
+            "UTF8"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "(Join-Path $out 'ou-tree.json')"
+          ],
+          [
+            "Encoding",
+            "UTF8"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "(Join-Path $out 'principals.json')"
+          ],
+          [
+            "Encoding",
+            "UTF8"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "(Join-Path $out 'sites.json')"
+          ],
+          [
+            "Encoding",
+            "UTF8"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "(Join-Path $out 'wmi-filters.json')"
+          ],
+          [
+            "Encoding",
+            "UTF8"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "@{n='Name';e={$_.'msWMI-Name'}}, @{n='Query';e={$_.'msWMI-Parm2'}}"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Select-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "DisplayName, GpoId, Enabled, Enforced, Order, Target"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Select-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "DisplayName, Id, GpoStatus, CreationTime, ModificationTime, @{n='UserDSVersion';e={$_.User.DSVersion}}, @{n='UserSysvolVersion';e={$_.User.SysvolVersion}}, @{n='ComputerDSVersion';e={$_.Computer.DSVersion}}, @{n='ComputerSysvolVersion';e={$_.Computer.SysvolVersion}}, @{n='WmiFilter';e={$_.WmiFilter.Name}}"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Select-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "DistinguishedName, Name, gPLink, gPOptions"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Select-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "DistinguishedName, Name, gPLink, gPOptions"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Select-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "System.Security.Principal.SecurityIdentifier"
+          ],
+          [
+            null,
+            "($sid)"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "New-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" - $s\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" - $s\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" AD sites: $siteCount\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" All sections succeeded.\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" Domain: $($dom.DNSRoot)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" Expanded: $groupsExpanded, Failed: $groupsFailed\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" Expanding $($groupSids.Count) groups...\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" Failed ($($failedSections.Count)):\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" Found $($allSids.Count) unique SIDs to resolve\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" GPOs: $gpoCount\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" OUs: $ouCount\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" Output dir: $out\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" Resolved: $resolved, Unresolved: $unresolved\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" Resolving $($domainSids.Count) domain SIDs via Get-ADObject...\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" SYSVOL: $(if ($SkipSysvol) {'skipped'} else {$sysvolSizeStr})\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" WMI filters: $wmiCount\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" Zip: $(if ($NoZip) {'skipped'} else {\"$out.zip\"})\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Combined GPO report failed: $($_.Exception.Message)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Warning",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Done: $archive ($($diskFiles.Count) files)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"DryRun: would export the following:\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Exporting $($dom.DNSRoot) -> $out\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"GPC completeness cross-check failed: $($_.Exception.Message)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Warning",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"GPInheritance failed for $t : $($_.Exception.Message)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Warning",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"GPO report failed for '$($gpo.DisplayName)' ($($gpo.Id)): $($_.Exception.Message)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Warning",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Group membership collection failed: $($_.Exception.Message)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Warning",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Inaccessible GPO detected: $guid$(if ($gpc.displayName) { \" ($($gpc.displayName))\" })\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Warning",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"OutputRoot '$OutputRoot' is not writable: $($_.Exception.Message)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Error",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Principals collection failed: $($_.Exception.Message)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Warning",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Required module '$mod' is not available. Install RSAT.\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Error",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"SYSVOL copy failed for policy folder $($pf.Name): $($_.Exception.Message)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Warning",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"SYSVOL copy produced no files: $detail\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Warning",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"`nExport summary:`n Succeeded ($($successSections.Count)):\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "{ $_ -match '^S-1-5-21-' -and $principals[$_].type -eq 'Unresolved' }"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Where-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "{ $_.SID.Value }"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ForEach-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "{ $principals[$_].type -eq 'Group' }"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Where-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "{ Copy-Item -LiteralPath $_.FullName -Destination $dest -Force -ErrorAction SilentlyContinue }"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ForEach-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "{ [pscustomobject]@{ Id = $_.Name.Trim('{}'); DisplayName = $_.displayName } }"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ForEach-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Unknown",
+        "name": "Get-ADDomain",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Unknown",
+        "name": "Get-ADRootDSE",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Unknown",
+        "name": "Get-ADRootDSE",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Unknown",
+        "name": "Out-Null",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Unknown",
+        "name": "Out-Null",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Unknown",
+        "name": "Out-Null",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Unknown",
+        "name": "Sort-Object",
+        "type_definition_sha256": null
+      }
+    ],
+    "functions": [
+      "New-GpoExportZip",
+      "Set-SectionProgress"
+    ],
+    "indirect_writes": [],
+    "members": [
+      {
+        "member": "Add",
+        "receiver": "$allSids",
+        "receiver_types": [],
+        "receiver_var": "allSids",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$allSids",
+        "receiver_types": [],
+        "receiver_var": "allSids",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$collectionErrors",
+        "receiver_types": [],
+        "receiver_var": "collectionErrors",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$collectionErrors",
+        "receiver_types": [],
+        "receiver_var": "collectionErrors",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$collectionErrors",
+        "receiver_types": [],
+        "receiver_var": "collectionErrors",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$collectionErrors",
+        "receiver_types": [],
+        "receiver_var": "collectionErrors",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$collectionErrors",
+        "receiver_types": [],
+        "receiver_var": "collectionErrors",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$failedSections",
+        "receiver_types": [],
+        "receiver_var": "failedSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$failedSections",
+        "receiver_types": [],
+        "receiver_var": "failedSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$failedSections",
+        "receiver_types": [],
+        "receiver_var": "failedSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$failedSections",
+        "receiver_types": [],
+        "receiver_var": "failedSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$failedSections",
+        "receiver_types": [],
+        "receiver_var": "failedSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$failedSections",
+        "receiver_types": [],
+        "receiver_var": "failedSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$failedSections",
+        "receiver_types": [],
+        "receiver_var": "failedSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$failedSections",
+        "receiver_types": [],
+        "receiver_var": "failedSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$failedSections",
+        "receiver_types": [],
+        "receiver_var": "failedSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$failedSections",
+        "receiver_types": [],
+        "receiver_var": "failedSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$knownIds",
+        "receiver_types": [],
+        "receiver_var": "knownIds",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$successSections",
+        "receiver_types": [],
+        "receiver_var": "successSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$successSections",
+        "receiver_types": [],
+        "receiver_var": "successSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$successSections",
+        "receiver_types": [],
+        "receiver_var": "successSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$successSections",
+        "receiver_types": [],
+        "receiver_var": "successSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$successSections",
+        "receiver_types": [],
+        "receiver_var": "successSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$successSections",
+        "receiver_types": [],
+        "receiver_var": "successSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$successSections",
+        "receiver_types": [],
+        "receiver_var": "successSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$successSections",
+        "receiver_types": [],
+        "receiver_var": "successSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$successSections",
+        "receiver_types": [],
+        "receiver_var": "successSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$successSections",
+        "receiver_types": [],
+        "receiver_var": "successSections",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Contains",
+        "receiver": "$knownIds",
+        "receiver_types": [],
+        "receiver_var": "knownIds",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "CreateEntryFromFile",
+        "receiver": "[System.IO.Compression.ZipFileExtensions]",
+        "receiver_types": [
+          "System.IO.Compression.ZipFileExtensions"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "System.IO.Compression.ZipFileExtensions"
+      },
+      {
+        "member": "Dispose",
+        "receiver": "$zip",
+        "receiver_types": [],
+        "receiver_var": "zip",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Matches",
+        "receiver": "[regex]",
+        "receiver_types": [
+          "regex"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "regex"
+      },
+      {
+        "member": "Matches",
+        "receiver": "[regex]",
+        "receiver_types": [
+          "regex"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "regex"
+      },
+      {
+        "member": "Open",
+        "receiver": "[System.IO.Compression.ZipFile]",
+        "receiver_types": [
+          "System.IO.Compression.ZipFile"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "System.IO.Compression.ZipFile"
+      },
+      {
+        "member": "Replace",
+        "receiver": "$f.FullName.Substring($rootLen)",
+        "receiver_types": [],
+        "receiver_var": "f",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Round",
+        "receiver": "[math]",
+        "receiver_types": [
+          "math"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "math"
+      },
+      {
+        "member": "Round",
+        "receiver": "[math]",
+        "receiver_types": [
+          "math"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "math"
+      },
+      {
+        "member": "Round",
+        "receiver": "[math]",
+        "receiver_types": [
+          "math"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "math"
+      },
+      {
+        "member": "Split",
+        "receiver": "$dom.DNSRoot",
+        "receiver_types": [],
+        "receiver_var": "dom",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Split",
+        "receiver": "$dom.DNSRoot",
+        "receiver_types": [],
+        "receiver_var": "dom",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Substring",
+        "receiver": "$f.FullName",
+        "receiver_types": [],
+        "receiver_var": "f",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Translate",
+        "receiver": "$sidObj",
+        "receiver_types": [],
+        "receiver_var": "sidObj",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Trim",
+        "receiver": "$_.Name",
+        "receiver_types": [],
+        "receiver_var": "_",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Trim",
+        "receiver": "$gpc.Name",
+        "receiver_types": [],
+        "receiver_var": "gpc",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Trim",
+        "receiver": "$pf.Name",
+        "receiver_types": [],
+        "receiver_var": "pf",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "WriteAllText",
+        "receiver": "[System.IO.File]",
+        "receiver_types": [
+          "System.IO.File"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "System.IO.File"
+      },
+      {
+        "member": "new",
+        "receiver": "[System.Collections.Generic.HashSet[string]]",
+        "receiver_types": [
+          "System.Collections.Generic.HashSet[string]"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "System.Collections.Generic.HashSet[string]"
+      },
+      {
+        "member": "new",
+        "receiver": "[System.Collections.Generic.HashSet[string]]",
+        "receiver_types": [
+          "System.Collections.Generic.HashSet[string]"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "System.Collections.Generic.HashSet[string]"
+      },
+      {
+        "member": "new",
+        "receiver": "[System.Collections.Generic.List[object]]",
+        "receiver_types": [
+          "System.Collections.Generic.List[object]"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "System.Collections.Generic.List[object]"
+      },
+      {
+        "member": "new",
+        "receiver": "[System.Collections.Generic.List[string]]",
+        "receiver_types": [
+          "System.Collections.Generic.List[string]"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "System.Collections.Generic.List[string]"
+      },
+      {
+        "member": "new",
+        "receiver": "[System.Collections.Generic.List[string]]",
+        "receiver_types": [
+          "System.Collections.Generic.List[string]"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "System.Collections.Generic.List[string]"
+      }
+    ],
+    "parse_errors": [],
+    "redirections": [],
+    "type_references": [
+      "System.Collections.Generic.HashSet[string]",
+      "System.Collections.Generic.List[object]",
+      "System.Collections.Generic.List[string]",
+      "System.IO.Compression.ZipFile",
+      "System.IO.Compression.ZipFileExtensions",
+      "System.IO.File",
+      "System.Security.Principal.NTAccount",
+      "System.StringComparer",
+      "math",
+      "ordered",
+      "pscustomobject",
+      "regex",
+      "void"
+    ],
+    "using_statements": []
+  },
+  "Export-GroupMembers.ps1": {
+    "assignments": [
+      {
+        "kind": "assign",
+        "name": "ErrorActionPreference",
+        "operator": "Equals",
+        "rhs": "'Stop'",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "adParams",
+        "operator": "Equals",
+        "rhs": "@{}",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "expanded",
+        "operator": "Equals",
+        "rhs": "0",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "failed",
+        "operator": "Equals",
+        "rhs": "0",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "groupMembers",
+        "operator": "Equals",
+        "rhs": "[ordered]@{}",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "groups",
+        "operator": "Equals",
+        "rhs": "$principalsData.principals.PSObject.Properties | Where-Object { $_.Value.type -eq \"Group\" }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "memberSids",
+        "operator": "Equals",
+        "rhs": "@()",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "memberSids",
+        "operator": "PlusEquals",
+        "rhs": "$m.SID.Value",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "members",
+        "operator": "Equals",
+        "rhs": "Get-ADGroupMember -Identity $sid -Recursive @adParams -ErrorAction Stop",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "name",
+        "operator": "Equals",
+        "rhs": "$grp.Value.name",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "out",
+        "operator": "Equals",
+        "rhs": "[ordered]@{ collected = (Get-Date -Format \"o\") domain = $principalsData.domain groups = $groupMembers }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "principalsData",
+        "operator": "Equals",
+        "rhs": "Get-Content $PrincipalsPath -Raw -Encoding UTF8 | ConvertFrom-Json",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sid",
+        "operator": "Equals",
+        "rhs": "$grp.Name",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "grp",
+        "operator": "foreach",
+        "rhs": "$groups",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "m",
+        "operator": "foreach",
+        "rhs": "$members",
+        "scope": ""
+      },
+      {
+        "kind": "member",
+        "name": null,
+        "operator": "member",
+        "rhs": "$adParams.Credential",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Credential",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "OutputPath",
+        "operator": "param",
+        "rhs": "\"group-members.json\"",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "PrincipalsPath",
+        "operator": "param",
+        "rhs": "\"principals.json\"",
+        "scope": ""
+      }
+    ],
+    "commands": [
+      {
+        "args": [
+          [
+            "Depth",
+            "5"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-Json",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Format",
+            "\"o\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Date",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Identity",
+            "$sid"
+          ],
+          [
+            "Recursive",
+            "@adParams"
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ADGroupMember",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$OutputPath"
+          ],
+          [
+            "Encoding",
+            "UTF8"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$PrincipalsPath"
+          ],
+          [
+            "Raw",
+            null
+          ],
+          [
+            "Encoding",
+            "UTF8"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" $($memberSids.Count) members\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" Expanding $name ($sid)...\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" FAIL: $($_.Exception.Message)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Done: $expanded expanded, $failed failed -> $OutputPath\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Found $($groups.Count) groups to expand\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "{ $_.Value.type -eq \"Group\" }"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Where-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Unknown",
+        "name": "ConvertFrom-Json",
+        "type_definition_sha256": null
+      }
+    ],
+    "functions": [],
+    "indirect_writes": [],
+    "members": [],
+    "parse_errors": [],
+    "redirections": [],
+    "type_references": [
+      "ordered"
+    ],
+    "using_statements": []
+  },
+  "Export-Principals.ps1": {
+    "assignments": [
+      {
+        "kind": "assign",
+        "name": "ErrorActionPreference",
+        "operator": "Equals",
+        "rhs": "'Stop'",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "adParams",
+        "operator": "Equals",
+        "rhs": "@{}",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "adParams",
+        "operator": "Equals",
+        "rhs": "@{}",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "allSids",
+        "operator": "Equals",
+        "rhs": "[System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "allXml",
+        "operator": "Equals",
+        "rhs": "Join-Path $SddlSource \"AllGPOs.xml\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "content",
+        "operator": "Equals",
+        "rhs": "Get-Content $f -Raw -ErrorAction Stop",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "content",
+        "operator": "Equals",
+        "rhs": "Get-Content $metaFile -Raw",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "dom",
+        "operator": "Equals",
+        "rhs": "$null",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "dom",
+        "operator": "Equals",
+        "rhs": "Get-ADDomain @adParams",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "dom",
+        "operator": "Equals",
+        "rhs": "Get-ADDomain @adParams",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "domName",
+        "operator": "Equals",
+        "rhs": "if ($dom) { $dom.NetBIOSName } else { \"\" }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "domPart",
+        "operator": "Equals",
+        "rhs": "$matches[1]",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "domPart",
+        "operator": "Equals",
+        "rhs": "$matches[2]",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "domPart",
+        "operator": "Equals",
+        "rhs": "\"\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "domainDns",
+        "operator": "Equals",
+        "rhs": "if ($dom) { $dom.DNSRoot } else { \"\" }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "domainSids",
+        "operator": "Equals",
+        "rhs": "@($allSids | Where-Object { $_ -match '^S-1-5-21-' -and $principals[$_].type -eq 'Unresolved' })",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "gpcObjs",
+        "operator": "Equals",
+        "rhs": "Get-ADObject -SearchBase $policiesDN -LDAPFilter \"(objectClass=groupPolicyContainer)\" -Properties nTSecurityDescriptor, displayName @adParams",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "matches",
+        "operator": "Equals",
+        "rhs": "[regex]::Matches($content, 'S-1-[0-9]+-[0-9-]+')",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "matches",
+        "operator": "Equals",
+        "rhs": "[regex]::Matches($content, 'S-1-[0-9]+-[0-9-]+')",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "matches",
+        "operator": "Equals",
+        "rhs": "[regex]::Matches($sddl, 'S-1-[0-9]+-[0-9-]+')",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "metaFile",
+        "operator": "Equals",
+        "rhs": "Join-Path $SddlSource \"gpo-metadata.json\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "name",
+        "operator": "Equals",
+        "rhs": "$sid",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "name",
+        "operator": "Equals",
+        "rhs": "$translated",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "name",
+        "operator": "Equals",
+        "rhs": "\"\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "obj",
+        "operator": "Equals",
+        "rhs": "Get-ADObject -Filter \"objectSid -eq '$sid'\" -Properties objectClass, sAMAccountName, name @adParams -ErrorAction Stop",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "objClass",
+        "operator": "Equals",
+        "rhs": "$obj.objectClass[-1]",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "out",
+        "operator": "Equals",
+        "rhs": "[ordered]@{ collected = (Get-Date -Format \"o\"); domain = $domainDns; principals = $principals }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "policiesDN",
+        "operator": "Equals",
+        "rhs": "\"CN=Policies,CN=System,$($dom.DistinguishedName)\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "principals",
+        "operator": "Equals",
+        "rhs": "[ordered]@{}",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "ptype",
+        "operator": "Equals",
+        "rhs": "switch ($objClass) { 'group' { 'Group' } 'computer' { 'Computer' } default { 'User' } }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "reportsDir",
+        "operator": "Equals",
+        "rhs": "Join-Path $SddlSource \"reports\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "resolved",
+        "operator": "Equals",
+        "rhs": "0",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sam",
+        "operator": "Equals",
+        "rhs": "$matches[1]",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sam",
+        "operator": "Equals",
+        "rhs": "$matches[2]",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sam",
+        "operator": "Equals",
+        "rhs": "$translated",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sam",
+        "operator": "Equals",
+        "rhs": "\"\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sam",
+        "operator": "Equals",
+        "rhs": "if ($obj.sAMAccountName) { $obj.sAMAccountName } else { $obj.Name }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sd",
+        "operator": "Equals",
+        "rhs": "$gpc.nTSecurityDescriptor",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sddl",
+        "operator": "Equals",
+        "rhs": "$sd.GetSecurityDescriptorSddlForm()",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "sidObj",
+        "operator": "Equals",
+        "rhs": "New-Object System.Security.Principal.SecurityIdentifier($sid)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "translated",
+        "operator": "Equals",
+        "rhs": "$sidObj.Translate([System.Security.Principal.NTAccount]).Value",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "type",
+        "operator": "Equals",
+        "rhs": "\"Computer\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "type",
+        "operator": "Equals",
+        "rhs": "\"Unresolved\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "type",
+        "operator": "Equals",
+        "rhs": "\"Unresolved\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "type",
+        "operator": "Equals",
+        "rhs": "\"WellKnown\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "type",
+        "operator": "Equals",
+        "rhs": "\"WellKnown\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "type",
+        "operator": "Equals",
+        "rhs": "if ($sid -match '^S-1-5-21-') { \"Group\" } else { \"User\" }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "unresolved",
+        "operator": "Equals",
+        "rhs": "0",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "xmlFiles",
+        "operator": "Equals",
+        "rhs": "@()",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "xmlFiles",
+        "operator": "PlusEquals",
+        "rhs": "$allXml",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "xmlFiles",
+        "operator": "PlusEquals",
+        "rhs": "(Get-ChildItem $reportsDir -Filter \"*.xml\" -ErrorAction SilentlyContinue).FullName",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "f",
+        "operator": "foreach",
+        "rhs": "$xmlFiles",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "gpc",
+        "operator": "foreach",
+        "rhs": "$gpcObjs",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "m",
+        "operator": "foreach",
+        "rhs": "$matches",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "m",
+        "operator": "foreach",
+        "rhs": "$matches",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "m",
+        "operator": "foreach",
+        "rhs": "$matches",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "sid",
+        "operator": "foreach",
+        "rhs": "$allSids | Sort-Object",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "sid",
+        "operator": "foreach",
+        "rhs": "$domainSids",
+        "scope": ""
+      },
+      {
+        "kind": "member",
+        "name": null,
+        "operator": "member",
+        "rhs": "$adParams.Credential",
+        "scope": ""
+      },
+      {
+        "kind": "member",
+        "name": null,
+        "operator": "member",
+        "rhs": "$adParams.Credential",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Credential",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "OutputPath",
+        "operator": "param",
+        "rhs": "\"principals.json\"",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "SddlSource",
+        "operator": "param",
+        "rhs": "\"\"",
+        "scope": ""
+      }
+    ],
+    "commands": [
+      {
+        "args": [
+          [
+            "Depth",
+            "5"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-Json",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Filter",
+            "\"objectSid -eq '$sid'\""
+          ],
+          [
+            "Properties",
+            "objectClass, sAMAccountName, name"
+          ],
+          [
+            null,
+            "@adParams"
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ADObject",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Format",
+            "\"o\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Date",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "SearchBase",
+            "$policiesDN"
+          ],
+          [
+            "LDAPFilter",
+            "\"(objectClass=groupPolicyContainer)\""
+          ],
+          [
+            "Properties",
+            "nTSecurityDescriptor, displayName"
+          ],
+          [
+            null,
+            "@adParams"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ADObject",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$OutputPath"
+          ],
+          [
+            "Encoding",
+            "UTF8"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$SddlSource"
+          ],
+          [
+            null,
+            "\"AllGPOs.xml\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$SddlSource"
+          ],
+          [
+            null,
+            "\"gpo-metadata.json\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$SddlSource"
+          ],
+          [
+            null,
+            "\"reports\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$SddlSource"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$allXml"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$f"
+          ],
+          [
+            "Raw",
+            null
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$metaFile"
+          ],
+          [
+            "Raw",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Content",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$metaFile"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$reportsDir"
+          ],
+          [
+            "Filter",
+            "\"*.xml\""
+          ],
+          [
+            "ErrorAction",
+            "SilentlyContinue"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ChildItem",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$reportsDir"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "@adParams"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ADDomain",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "@adParams"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ADDomain",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "System.Security.Principal.SecurityIdentifier"
+          ],
+          [
+            null,
+            "($sid)"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "New-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" $sid -> $translated\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" $sid -> (unresolved)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" AD resolve failed for $sid : $($_.Exception.Message)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" AD: $sid -> $sam ($ptype)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Collecting SDDL from live AD via Get-ADObject...\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Done: $resolved resolved, $unresolved unresolved -> $OutputPath\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Found $($allSids.Count) unique SIDs to resolve\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Reading SDDL from: $SddlSource\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Resolving $($domainSids.Count) domain SIDs via Get-ADObject...\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "{ $_ -match '^S-1-5-21-' -and $principals[$_].type -eq 'Unresolved' }"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Where-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Unknown",
+        "name": "Sort-Object",
+        "type_definition_sha256": null
+      }
+    ],
+    "functions": [],
+    "indirect_writes": [],
+    "members": [
+      {
+        "member": "Add",
+        "receiver": "$allSids",
+        "receiver_types": [],
+        "receiver_var": "allSids",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$allSids",
+        "receiver_types": [],
+        "receiver_var": "allSids",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Add",
+        "receiver": "$allSids",
+        "receiver_types": [],
+        "receiver_var": "allSids",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "GetSecurityDescriptorSddlForm",
+        "receiver": "$sd",
+        "receiver_types": [],
+        "receiver_var": "sd",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Matches",
+        "receiver": "[regex]",
+        "receiver_types": [
+          "regex"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "regex"
+      },
+      {
+        "member": "Matches",
+        "receiver": "[regex]",
+        "receiver_types": [
+          "regex"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "regex"
+      },
+      {
+        "member": "Matches",
+        "receiver": "[regex]",
+        "receiver_types": [
+          "regex"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "regex"
+      },
+      {
+        "member": "Translate",
+        "receiver": "$sidObj",
+        "receiver_types": [],
+        "receiver_var": "sidObj",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "new",
+        "receiver": "[System.Collections.Generic.HashSet[string]]",
+        "receiver_types": [
+          "System.Collections.Generic.HashSet[string]"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "System.Collections.Generic.HashSet[string]"
+      }
+    ],
+    "parse_errors": [],
+    "redirections": [],
+    "type_references": [
+      "System.Collections.Generic.HashSet[string]",
+      "System.Security.Principal.NTAccount",
+      "System.StringComparer",
+      "ordered",
+      "regex",
+      "void"
+    ],
+    "using_statements": []
+  },
+  "GpoLensCollectionMarker.ps1": {
+    "assignments": [
+      {
+        "kind": "assign",
+        "name": "bytes",
+        "operator": "Equals",
+        "rhs": "[IO.MemoryStream]::new()",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "count",
+        "operator": "Equals",
+        "rhs": "& stat -L --format=%h -- $opened 2>$null",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "fd",
+        "operator": "Equals",
+        "rhs": "$stream.SafeFileHandle.DangerousGetHandle().ToInt64()",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "links",
+        "operator": "Equals",
+        "rhs": "0",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "links",
+        "operator": "Equals",
+        "rhs": "[GpoLens.MarkerFileInfo]::LinkCount($stream.SafeFileHandle)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "marker",
+        "operator": "Equals",
+        "rhs": "Join-Path $root.FullName '.gpo-lens-collection-owner'",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "opened",
+        "operator": "Equals",
+        "rhs": "\"/proc/$PID/fd/$fd\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "root",
+        "operator": "Equals",
+        "rhs": "Get-Item -LiteralPath $OutputRoot -Force -ErrorAction Stop",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "stream",
+        "operator": "Equals",
+        "rhs": "[IO.File]::Open($Marker, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "stream",
+        "operator": "Equals",
+        "rhs": "[IO.File]::Open($marker, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Bytes",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Marker",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "OutputRoot",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      }
+    ],
+    "commands": [
+      {
+        "args": [
+          [
+            "L",
+            "--format=%h"
+          ],
+          [
+            "-",
+            "$opened"
+          ]
+        ],
+        "invocation": "Ampersand",
+        "name": "stat",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$Marker"
+          ],
+          [
+            "Force",
+            null
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$OutputRoot"
+          ],
+          [
+            "Force",
+            null
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$opened"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "TypeDefinition",
+            "@' using System; using System.ComponentModel; using System.Runtime.InteropServices; using Microsoft.Win32.SafeHandles; namespace GpoLens { public static class MarkerFileInfo { [StructLayout(LayoutKind.Sequential)] private struct FileInfo { public uint Attributes; public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime; public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime; public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime; public uint VolumeSerialNumber; public uint FileSizeHigh; public uint FileSizeLow; public uint NumberOfLinks; public uint FileIndexHigh; public uint FileIndexLow; } [DllImport(\"kernel32.dll\", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FileInfo info); public static uint LinkCount(SafeFileHandle handle) { FileInfo info; if (!GetFileInformationByHandle(handle, out info)) throw new Win32Exception(Marshal.GetLastWin32Error()); if ((info.Attributes & 0x400) != 0) throw new InvalidOperationException(\"Collection refuses a linked owner marker.\"); return info.NumberOfLinks; } } } '@"
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Add-Type",
+        "type_definition_sha256": "8e3d8b0b78dcf2319d6a1e414007e80fdb055c76715b83f81e94ba32d42c5f67"
+      },
+      {
+        "args": [
+          [
+            null,
+            "$root.FullName"
+          ],
+          [
+            null,
+            "'.gpo-lens-collection-owner'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      }
+    ],
+    "functions": [
+      "Read-GpoLensOwnerMarkerBytes",
+      "Write-GpoLensOwnerMarkerBytes"
+    ],
+    "indirect_writes": [],
+    "members": [
+      {
+        "member": "CopyTo",
+        "receiver": "$stream",
+        "receiver_types": [],
+        "receiver_var": "stream",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "DangerousGetHandle",
+        "receiver": "$stream.SafeFileHandle",
+        "receiver_types": [],
+        "receiver_var": "stream",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Delete",
+        "receiver": "[IO.File]",
+        "receiver_types": [
+          "IO.File"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "IO.File"
+      },
+      {
+        "member": "Dispose",
+        "receiver": "$bytes",
+        "receiver_types": [],
+        "receiver_var": "bytes",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Dispose",
+        "receiver": "$stream",
+        "receiver_types": [],
+        "receiver_var": "stream",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Dispose",
+        "receiver": "$stream",
+        "receiver_types": [],
+        "receiver_var": "stream",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "LinkCount",
+        "receiver": "[GpoLens.MarkerFileInfo]",
+        "receiver_types": [
+          "GpoLens.MarkerFileInfo"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "GpoLens.MarkerFileInfo"
+      },
+      {
+        "member": "Open",
+        "receiver": "[IO.File]",
+        "receiver_types": [
+          "IO.File"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "IO.File"
+      },
+      {
+        "member": "Open",
+        "receiver": "[IO.File]",
+        "receiver_types": [
+          "IO.File"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "IO.File"
+      },
+      {
+        "member": "ToArray",
+        "receiver": "$bytes",
+        "receiver_types": [],
+        "receiver_var": "bytes",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "ToInt64",
+        "receiver": "$stream.SafeFileHandle.DangerousGetHandle()",
+        "receiver_types": [],
+        "receiver_var": "stream",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "TryParse",
+        "receiver": "[uint32]",
+        "receiver_types": [
+          "uint32"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "uint32"
+      },
+      {
+        "member": "Write",
+        "receiver": "$stream",
+        "receiver_types": [],
+        "receiver_var": "stream",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "new",
+        "receiver": "[IO.MemoryStream]",
+        "receiver_types": [
+          "IO.MemoryStream"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "IO.MemoryStream"
+      }
+    ],
+    "parse_errors": [],
+    "redirections": [
+      {
+        "from": "Error",
+        "kind": "file",
+        "to": "$null"
+      }
+    ],
+    "type_references": [
+      "Environment",
+      "GpoLens.MarkerFileInfo",
+      "IO.File",
+      "IO.FileAccess",
+      "IO.FileAttributes",
+      "IO.FileMode",
+      "IO.FileShare",
+      "IO.MemoryStream",
+      "PlatformID",
+      "ref",
+      "string",
+      "type",
+      "uint32"
+    ],
+    "using_statements": []
+  },
+  "Register-GpoLensCollection.ps1": {
+    "assignments": [
+      {
+        "kind": "assign",
+        "name": "CollectorPath",
+        "operator": "Equals",
+        "rhs": "(Resolve-Path -LiteralPath $CollectorPath).ProviderPath",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "Credential",
+        "operator": "Equals",
+        "rhs": "$null",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "Credential",
+        "operator": "Equals",
+        "rhs": "Get-Credential -UserName $ServiceAccount -Message 'Collection task credentials (saved only by Windows Task Scheduler)'",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "ErrorActionPreference",
+        "operator": "Equals",
+        "rhs": "'Stop'",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "OutputRoot",
+        "operator": "Equals",
+        "rhs": "[IO.Path]::GetFullPath($OutputRoot)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "account",
+        "operator": "Equals",
+        "rhs": "if ($GmsaAccount) { $GmsaAccount } else { $ServiceAccount }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "action",
+        "operator": "Equals",
+        "rhs": "New-ScheduledTaskAction -Execute \"$windowsRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" ` -Argument $taskArgs -WorkingDirectory $PSScriptRoot",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "lock",
+        "operator": "Equals",
+        "rhs": "[IO.File]::Open((Join-Path $OutputRoot 'collection.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "marker",
+        "operator": "Equals",
+        "rhs": "Join-Path $OutputRoot '.gpo-lens-collection-owner'",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "owner",
+        "operator": "Equals",
+        "rhs": "[Text.Encoding]::UTF8.GetString($previousBytes).TrimStart([char]0xFEFF).TrimEnd([char[]]\"`r`n\")",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "previousBytes",
+        "operator": "Equals",
+        "rhs": "$null",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "previousBytes",
+        "operator": "Equals",
+        "rhs": "Read-GpoLensOwnerMarkerBytes -Marker $marker",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "principal",
+        "operator": "Equals",
+        "rhs": "New-ScheduledTaskPrincipal -UserId $account -LogonType Password -RunLevel Limited",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "runner",
+        "operator": "Equals",
+        "rhs": "(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'Run-GpoLensCollection.ps1')).ProviderPath",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "scheduleTime",
+        "operator": "Equals",
+        "rhs": "[datetime]::MinValue",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "settings",
+        "operator": "Equals",
+        "rhs": "New-ScheduledTaskSettingsSet -ExecutionTimeLimit $ExecutionTimeLimit ` -MultipleInstances IgnoreNew -StartWhenAvailable",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "task",
+        "operator": "Equals",
+        "rhs": "New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings ` -Description 'Read-only GPO export, bounded retention, rotating logs and optional ZIP delivery.'",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "taskArgs",
+        "operator": "Equals",
+        "rhs": "'-NoProfile -NonInteractive -File ' + (ConvertTo-GpoLensTaskArgument $runner) + ' -CollectorPath ' + (ConvertTo-GpoLensTaskArgument $CollectorPath) + ' -OutputRoot ' + (ConvertTo-GpoLensTaskArgument $OutputRoot) + ' -TaskName ' + (ConvertTo-GpoLensTaskArgument $TaskName) + \" -Retention $Retention -LogMaxBytes $LogMaxBytes -LogFiles $LogFiles\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "taskArgs",
+        "operator": "PlusEquals",
+        "rhs": "' -CopyTo ' + (ConvertTo-GpoLensTaskArgument (ConvertTo-GpoLensAbsolutePath $CopyTo))",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "taskArgs",
+        "operator": "PlusEquals",
+        "rhs": "' -InventoryPath ' + (ConvertTo-GpoLensTaskArgument (ConvertTo-GpoLensAbsolutePath $InventoryPath))",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "taskPassword",
+        "operator": "Equals",
+        "rhs": "$Credential.GetNetworkCredential().Password",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "taskPassword",
+        "operator": "Equals",
+        "rhs": "$null",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "trigger",
+        "operator": "Equals",
+        "rhs": "New-ScheduledTaskTrigger -Daily -DaysInterval $EveryDays -At $scheduleTime",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "windowsRoot",
+        "operator": "Equals",
+        "rhs": "if ($env:SystemRoot) { $env:SystemRoot } else { 'C:\\Windows' }",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "At",
+        "operator": "param",
+        "rhs": "'02:00'",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "CollectorPath",
+        "operator": "param",
+        "rhs": "(Join-Path $PSScriptRoot 'Export-GpoEstate.ps1')",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "CopyTo",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Credential",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "EveryDays",
+        "operator": "param",
+        "rhs": "1",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "ExecutionTimeLimit",
+        "operator": "param",
+        "rhs": "[timespan]::FromHours(2)",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Force",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Force",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "GmsaAccount",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "InventoryPath",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "LogFiles",
+        "operator": "param",
+        "rhs": "5",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "LogMaxBytes",
+        "operator": "param",
+        "rhs": "5242880",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "OutputRoot",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "OutputRoot",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "RegisterTask",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Retention",
+        "operator": "param",
+        "rhs": "14",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "ServiceAccount",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "TaskName",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "TaskName",
+        "operator": "param",
+        "rhs": "'GpoLensCollection'",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Unregister",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Value",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Value",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      }
+    ],
+    "commands": [
+      {
+        "args": [
+          [
+            "Action",
+            "$action"
+          ],
+          [
+            "Trigger",
+            "$trigger"
+          ],
+          [
+            "Principal",
+            "$principal"
+          ],
+          [
+            "Settings",
+            "$settings"
+          ],
+          [
+            "Description",
+            "'Read-only GPO export, bounded retention, rotating logs and optional ZIP delivery.'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "New-ScheduledTask",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Daily",
+            null
+          ],
+          [
+            "DaysInterval",
+            "$EveryDays"
+          ],
+          [
+            "At",
+            "$scheduleTime"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "New-ScheduledTaskTrigger",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Execute",
+            "\"$windowsRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\""
+          ],
+          [
+            "Argument",
+            "$taskArgs"
+          ],
+          [
+            "WorkingDirectory",
+            "$PSScriptRoot"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "New-ScheduledTaskAction",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "ExecutionTimeLimit",
+            "$ExecutionTimeLimit"
+          ],
+          [
+            "MultipleInstances",
+            "IgnoreNew"
+          ],
+          [
+            "StartWhenAvailable",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "New-ScheduledTaskSettingsSet",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "ItemType",
+            "Directory"
+          ],
+          [
+            "Path",
+            "$OutputRoot"
+          ],
+          [
+            "Force",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "New-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$CollectorPath"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Resolve-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$OutputRoot"
+          ],
+          [
+            "Force",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$OutputRoot"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$marker"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "(Join-Path $PSScriptRoot 'Run-GpoLensCollection.ps1')"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Resolve-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Marker",
+            "$marker"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Read-GpoLensOwnerMarkerBytes",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "OutputRoot",
+            "$OutputRoot"
+          ],
+          [
+            "Bytes",
+            "$previousBytes"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-GpoLensOwnerMarkerBytes",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "OutputRoot",
+            "$OutputRoot"
+          ],
+          [
+            "Bytes",
+            "([Text.UTF8Encoding]::new($false).GetBytes($TaskName))"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-GpoLensOwnerMarkerBytes",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "OutputRoot",
+            "$OutputRoot"
+          ],
+          [
+            "TaskName",
+            "$TaskName"
+          ],
+          [
+            "Force",
+            "$Force"
+          ],
+          [
+            "RegisterTask",
+            "{ if ($GmsaAccount) { Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null } else { Register-ScheduledTask -TaskName $TaskName -InputObject $task -User $ServiceAccount -Password $taskPassword -Force | Out-Null } }"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Set-GpoLensCollectionOwner",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "TaskName",
+            "$TaskName"
+          ],
+          [
+            "Confirm",
+            "$false"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Unregister-ScheduledTask",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "TaskName",
+            "$TaskName"
+          ],
+          [
+            "InputObject",
+            "$task"
+          ],
+          [
+            "Force",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Register-ScheduledTask",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "TaskName",
+            "$TaskName"
+          ],
+          [
+            "InputObject",
+            "$task"
+          ],
+          [
+            "User",
+            "$ServiceAccount"
+          ],
+          [
+            "Password",
+            "$taskPassword"
+          ],
+          [
+            "Force",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Register-ScheduledTask",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "UserId",
+            "$account"
+          ],
+          [
+            "LogonType",
+            "Password"
+          ],
+          [
+            "RunLevel",
+            "Limited"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "New-ScheduledTaskPrincipal",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "UserName",
+            "$ServiceAccount"
+          ],
+          [
+            "Message",
+            "'Collection task credentials (saved only by Windows Task Scheduler)'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Credential",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$CollectorPath"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-GpoLensTaskArgument",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$CopyTo"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-GpoLensAbsolutePath",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$InventoryPath"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-GpoLensAbsolutePath",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$OutputRoot"
+          ],
+          [
+            null,
+            "'.gpo-lens-collection-owner'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$OutputRoot"
+          ],
+          [
+            null,
+            "'collection.lock'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$OutputRoot"
+          ],
+          [
+            null,
+            "'collection.log'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$OutputRoot"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-GpoLensTaskArgument",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$PSScriptRoot"
+          ],
+          [
+            null,
+            "'Export-GpoEstate.ps1'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$PSScriptRoot"
+          ],
+          [
+            null,
+            "'GpoLensCollectionMarker.ps1'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$PSScriptRoot"
+          ],
+          [
+            null,
+            "'Run-GpoLensCollection.ps1'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$TaskName"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-GpoLensTaskArgument",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$runner"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-GpoLensTaskArgument",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "(ConvertTo-GpoLensAbsolutePath $CopyTo)"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-GpoLensTaskArgument",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "(ConvertTo-GpoLensAbsolutePath $InventoryPath)"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ConvertTo-GpoLensTaskArgument",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" Account: $account; every $EveryDays day(s) at $At (host local time)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" Hard time limit: $ExecutionTimeLimit; retain $Retention exports\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" Output: $OutputRoot; log: $(Join-Path $OutputRoot 'collection.log')\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\" ZIP delivery: $CopyTo (ingest separately)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Changing output root owner from '$owner' to '$TaskName'; the previous task will refuse to run. Existing exports become subject to this task's retention.\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Warning",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Registered task: $TaskName\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Unregistered task: $TaskName (exports and logs retained)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Verify with: Get-ScheduledTaskInfo -TaskName '$TaskName'\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Ampersand",
+        "name": null,
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Dot",
+        "name": null,
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Unknown",
+        "name": "Out-Null",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Unknown",
+        "name": "Out-Null",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Unknown",
+        "name": "Out-Null",
+        "type_definition_sha256": null
+      }
+    ],
+    "functions": [
+      "ConvertTo-GpoLensAbsolutePath",
+      "ConvertTo-GpoLensTaskArgument",
+      "Set-GpoLensCollectionOwner"
+    ],
+    "indirect_writes": [],
+    "members": [
+      {
+        "member": "Delete",
+        "receiver": "[IO.File]",
+        "receiver_types": [
+          "IO.File"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "IO.File"
+      },
+      {
+        "member": "Dispose",
+        "receiver": "$lock",
+        "receiver_types": [],
+        "receiver_var": "lock",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Equals",
+        "receiver": "[string]",
+        "receiver_types": [
+          "string"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "string"
+      },
+      {
+        "member": "FromDays",
+        "receiver": "[timespan]",
+        "receiver_types": [
+          "timespan"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "timespan"
+      },
+      {
+        "member": "FromHours",
+        "receiver": "[timespan]",
+        "receiver_types": [
+          "timespan"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "timespan"
+      },
+      {
+        "member": "GetBytes",
+        "receiver": "[Text.UTF8Encoding]::new($false)",
+        "receiver_types": [
+          "Text.UTF8Encoding"
+        ],
+        "receiver_var": null,
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "GetFullPath",
+        "receiver": "[IO.Path]",
+        "receiver_types": [
+          "IO.Path"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "IO.Path"
+      },
+      {
+        "member": "GetFullPath",
+        "receiver": "[IO.Path]",
+        "receiver_types": [
+          "IO.Path"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "IO.Path"
+      },
+      {
+        "member": "GetNetworkCredential",
+        "receiver": "$Credential",
+        "receiver_types": [],
+        "receiver_var": "Credential",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "GetString",
+        "receiver": "[Text.Encoding]::UTF8",
+        "receiver_types": [
+          "Text.Encoding"
+        ],
+        "receiver_var": null,
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "IsNullOrWhiteSpace",
+        "receiver": "[string]",
+        "receiver_types": [
+          "string"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "string"
+      },
+      {
+        "member": "Open",
+        "receiver": "[IO.File]",
+        "receiver_types": [
+          "IO.File"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "IO.File"
+      },
+      {
+        "member": "ShouldProcess",
+        "receiver": "$PSCmdlet",
+        "receiver_types": [],
+        "receiver_var": "PSCmdlet",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "ShouldProcess",
+        "receiver": "$PSCmdlet",
+        "receiver_types": [],
+        "receiver_var": "PSCmdlet",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "TrimEnd",
+        "receiver": "[Text.Encoding]::UTF8.GetString($previousBytes).TrimStart([char]0xFEFF)",
+        "receiver_types": [
+          "Text.Encoding",
+          "char"
+        ],
+        "receiver_var": null,
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "TrimStart",
+        "receiver": "[Text.Encoding]::UTF8.GetString($previousBytes)",
+        "receiver_types": [
+          "Text.Encoding"
+        ],
+        "receiver_var": null,
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "TryParseExact",
+        "receiver": "[datetime]",
+        "receiver_types": [
+          "datetime"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "datetime"
+      },
+      {
+        "member": "new",
+        "receiver": "[Text.UTF8Encoding]",
+        "receiver_types": [
+          "Text.UTF8Encoding"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "Text.UTF8Encoding"
+      }
+    ],
+    "parse_errors": [],
+    "redirections": [],
+    "type_references": [
+      "Globalization.CultureInfo",
+      "Globalization.DateTimeStyles",
+      "IO.File",
+      "IO.FileAccess",
+      "IO.FileAttributes",
+      "IO.FileMode",
+      "IO.FileShare",
+      "IO.Path",
+      "StringComparison",
+      "Text.Encoding",
+      "Text.UTF8Encoding",
+      "char",
+      "char[]",
+      "datetime",
+      "ref",
+      "string",
+      "timespan"
+    ],
+    "using_statements": []
+  },
+  "Run-GpoLensCollection.ps1": {
+    "assignments": [
+      {
+        "kind": "assign",
+        "name": "ErrorActionPreference",
+        "operator": "Equals",
+        "rhs": "'Stop'",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "bytes",
+        "operator": "Equals",
+        "rhs": "$encoding.GetByteCount($line)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "bytes",
+        "operator": "Equals",
+        "rhs": "Read-GpoLensOwnerMarkerBytes -Marker $marker",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "candidates",
+        "operator": "Equals",
+        "rhs": "@(Get-ChildItem -LiteralPath $OutputRoot -File -Filter '*.zip' -ErrorAction Stop | Where-Object { $_.BaseName -match '^.+-\\d{8}-\\d{6}$' -and (Test-Path -LiteralPath (Join-Path (Join-Path $OutputRoot $_.BaseName) 'AllGPOs.xml') -PathType Leaf) } | Sort-Object @{ Expression = { $_.BaseName.Substring($_.BaseName.Length - 15) }; Descending = $true }, Name)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "created",
+        "operator": "Equals",
+        "rhs": "@(Get-GpoLensCompletedExports -OutputRoot $OutputRoot | Where-Object { -not $previous.ContainsKey($_.FullName) })",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "delivery",
+        "operator": "Equals",
+        "rhs": "Join-Path $CopyTo $newest.Name",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "directory",
+        "operator": "Equals",
+        "rhs": "$pending.Pop()",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "encoding",
+        "operator": "Equals",
+        "rhs": "[Text.UTF8Encoding]::new($false)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "entry",
+        "operator": "Equals",
+        "rhs": "$zip.CreateEntry('gpo-inventory.json')",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "entry",
+        "operator": "Equals",
+        "rhs": "$zip.GetEntry('gpo-inventory.json')",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "expired",
+        "operator": "Equals",
+        "rhs": "@(Get-GpoLensCompletedExports -OutputRoot $OutputRoot | Where-Object { [string]::Equals($_.BaseName.Substring(0, $_.BaseName.Length - 16), $producerPrefix, [StringComparison]::Ordinal) } | Select-Object -Skip $Retention)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "exportDir",
+        "operator": "Equals",
+        "rhs": "Join-Path $OutputRoot $newest.BaseName",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "failure",
+        "operator": "Equals",
+        "rhs": "$_",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "folder",
+        "operator": "Equals",
+        "rhs": "Join-Path $OutputRoot $archive.BaseName",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "i",
+        "operator": "Equals",
+        "rhs": "$LogFiles",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "id",
+        "operator": "Equals",
+        "rhs": "[guid]::Empty",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "ids",
+        "operator": "Equals",
+        "rhs": "[Collections.Generic.HashSet[guid]]::new()",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "inventory",
+        "operator": "Equals",
+        "rhs": "[Text.Encoding]::UTF8.GetString($inventoryBytes).TrimStart([char]0xFEFF) | ConvertFrom-Json",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "inventoryBytes",
+        "operator": "Equals",
+        "rhs": "[IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $InventoryPath).ProviderPath)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "item",
+        "operator": "Equals",
+        "rhs": "Get-Item -LiteralPath $directory -Force",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "line",
+        "operator": "Equals",
+        "rhs": "$line.Substring(0, $maxChars) + \" [truncated]`r`n\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "line",
+        "operator": "Equals",
+        "rhs": "\"$(Get-Date -Format o) $Message`r`n\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "lock",
+        "operator": "Equals",
+        "rhs": "[IO.File]::Open((Join-Path $OutputRoot 'collection.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "logArgs",
+        "operator": "Equals",
+        "rhs": "@{LogPath=(Join-Path $OutputRoot 'collection.log'); LogMaxBytes=$LogMaxBytes; LogFiles=$LogFiles}",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "marker",
+        "operator": "Equals",
+        "rhs": "Join-Path $OutputRoot '.gpo-lens-collection-owner'",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "maxChars",
+        "operator": "Equals",
+        "rhs": "[math]::Max(1, [int]($LogMaxBytes / 4) - 40)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "newest",
+        "operator": "Equals",
+        "rhs": "$created[0]",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "next",
+        "operator": "Equals",
+        "rhs": "\"$LogPath.$i\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "old",
+        "operator": "Equals",
+        "rhs": "if ($i -eq 1) { $LogPath } else { \"$LogPath.$($i - 1)\" }",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "owner",
+        "operator": "Equals",
+        "rhs": "[Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF).TrimEnd([char[]]\"`r`n\")",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "partial",
+        "operator": "Equals",
+        "rhs": "\"$delivery.$([guid]::NewGuid().ToString('N')).partial\"",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "pending",
+        "operator": "Equals",
+        "rhs": "[Collections.Generic.Stack[string]]::new()",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "previous",
+        "operator": "Equals",
+        "rhs": "@{}",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "producerPrefix",
+        "operator": "Equals",
+        "rhs": "$newest.BaseName.Substring(0, $newest.BaseName.Length - 16)",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "stream",
+        "operator": "Equals",
+        "rhs": "$entry.Open()",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "zip",
+        "operator": "Equals",
+        "rhs": "$null",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "zip",
+        "operator": "Equals",
+        "rhs": "$null",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "zip",
+        "operator": "Equals",
+        "rhs": "[IO.Compression.ZipFile]::Open($newest.FullName, 'Update')",
+        "scope": ""
+      },
+      {
+        "kind": "assign",
+        "name": "zip",
+        "operator": "Equals",
+        "rhs": "[IO.Compression.ZipFile]::OpenRead($archive.FullName)",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "archive",
+        "operator": "foreach",
+        "rhs": "$candidates",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "archive",
+        "operator": "foreach",
+        "rhs": "$expired",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "child",
+        "operator": "foreach",
+        "rhs": "@(Get-ChildItem -LiteralPath $directory -Force)",
+        "scope": ""
+      },
+      {
+        "kind": "foreach",
+        "name": "entry",
+        "operator": "foreach",
+        "rhs": "@($inventory)",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "CollectorPath",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "CollectorPath",
+        "operator": "param",
+        "rhs": "(Join-Path $PSScriptRoot 'Export-GpoEstate.ps1')",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "CopyTo",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "CopyTo",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "InventoryPath",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "InventoryPath",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "LogFiles",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "LogFiles",
+        "operator": "param",
+        "rhs": "5",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "LogFiles",
+        "operator": "param",
+        "rhs": "5",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "LogMaxBytes",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "LogMaxBytes",
+        "operator": "param",
+        "rhs": "5242880",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "LogMaxBytes",
+        "operator": "param",
+        "rhs": "5242880",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "LogPath",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Message",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "OutputRoot",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "OutputRoot",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "OutputRoot",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "OutputRoot",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Retention",
+        "operator": "param",
+        "rhs": "14",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Retention",
+        "operator": "param",
+        "rhs": "14",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "Root",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "TaskName",
+        "operator": "param",
+        "rhs": "",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "TaskName",
+        "operator": "param",
+        "rhs": "'GpoLensCollection'",
+        "scope": ""
+      },
+      {
+        "kind": "param",
+        "name": "TaskName",
+        "operator": "param",
+        "rhs": "'GpoLensCollection'",
+        "scope": ""
+      }
+    ],
+    "commands": [
+      {
+        "args": [
+          [
+            "AssemblyName",
+            "System.IO.Compression.FileSystem"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Add-Type",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "AssemblyName",
+            "System.IO.Compression.FileSystem"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Add-Type",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Format",
+            "o"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Date",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "ItemType",
+            "Directory"
+          ],
+          [
+            "Path",
+            "$CopyTo"
+          ],
+          [
+            "Force",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "New-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$InventoryPath"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Resolve-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$LogPath"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$LogPath"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$OutputRoot"
+          ],
+          [
+            "File",
+            null
+          ],
+          [
+            "Filter",
+            "'*.zip'"
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ChildItem",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$OutputRoot"
+          ],
+          [
+            "File",
+            null
+          ],
+          [
+            "Filter",
+            "'*.zip'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ChildItem",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$OutputRoot"
+          ],
+          [
+            "Force",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$OutputRoot"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$archive.FullName"
+          ],
+          [
+            "Force",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Remove-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$directory"
+          ],
+          [
+            "Force",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-ChildItem",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$directory"
+          ],
+          [
+            "Force",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$folder"
+          ],
+          [
+            "Recurse",
+            null
+          ],
+          [
+            "Force",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Remove-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$marker"
+          ],
+          [
+            "PathType",
+            "Leaf"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$newest.FullName"
+          ],
+          [
+            "Destination",
+            "$partial"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Copy-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$newest.FullName"
+          ],
+          [
+            "Force",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Remove-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$next"
+          ],
+          [
+            "Force",
+            null
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Remove-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$next"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$old"
+          ],
+          [
+            "Destination",
+            "$next"
+          ],
+          [
+            "ErrorAction",
+            "Stop"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Move-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$old"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$partial"
+          ],
+          [
+            "Destination",
+            "$delivery"
+          ],
+          [
+            "Force",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Move-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$partial"
+          ],
+          [
+            "Force",
+            null
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Remove-Item",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "$partial"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "LiteralPath",
+            "(Join-Path (Join-Path $OutputRoot $_.BaseName) 'AllGPOs.xml')"
+          ],
+          [
+            "PathType",
+            "Leaf"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Test-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Marker",
+            "$marker"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Read-GpoLensOwnerMarkerBytes",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "OutputRoot",
+            "$OutputRoot"
+          ],
+          [
+            "CollectorPath",
+            "$CollectorPath"
+          ],
+          [
+            "TaskName",
+            "$TaskName"
+          ],
+          [
+            "Retention",
+            "$Retention"
+          ],
+          [
+            "CopyTo",
+            "$CopyTo"
+          ],
+          [
+            "InventoryPath",
+            "$InventoryPath"
+          ],
+          [
+            "LogMaxBytes",
+            "$LogMaxBytes"
+          ],
+          [
+            "LogFiles",
+            "$LogFiles"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Invoke-GpoLensCollection",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "OutputRoot",
+            "$OutputRoot"
+          ],
+          [
+            "TaskName",
+            "$TaskName"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Assert-GpoLensCollectionOwner",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "OutputRoot",
+            "$OutputRoot"
+          ],
+          [
+            "TaskName",
+            "$TaskName"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Assert-GpoLensCollectionOwner",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "OutputRoot",
+            "$OutputRoot"
+          ],
+          [
+            "TaskName",
+            "$TaskName"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Assert-GpoLensCollectionOwner",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "OutputRoot",
+            "$OutputRoot"
+          ]
+        ],
+        "invocation": "Ampersand",
+        "name": null,
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "OutputRoot",
+            "$OutputRoot"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-GpoLensCompletedExports",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "OutputRoot",
+            "$OutputRoot"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Get-GpoLensCompletedExports",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Root",
+            "$folder"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Assert-GpoLensRegularTree",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            "Skip",
+            "$Retention"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Select-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$CopyTo"
+          ],
+          [
+            null,
+            "$newest.Name"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$OutputRoot"
+          ],
+          [
+            null,
+            "$_.BaseName"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$OutputRoot"
+          ],
+          [
+            null,
+            "$archive.BaseName"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$OutputRoot"
+          ],
+          [
+            null,
+            "$newest.BaseName"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$OutputRoot"
+          ],
+          [
+            null,
+            "'.gpo-lens-collection-owner'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$OutputRoot"
+          ],
+          [
+            null,
+            "'collection.lock'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$OutputRoot"
+          ],
+          [
+            null,
+            "'collection.log'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$PSScriptRoot"
+          ],
+          [
+            null,
+            "'Export-GpoEstate.ps1'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$PSScriptRoot"
+          ],
+          [
+            null,
+            "'GpoLensCollectionMarker.ps1'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "$exportDir"
+          ],
+          [
+            null,
+            "'gpo-inventory.json'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "'Unable to write collection failure log.'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Warning",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "(Join-Path $OutputRoot $_.BaseName)"
+          ],
+          [
+            null,
+            "'AllGPOs.xml'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Join-Path",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "@logArgs"
+          ],
+          [
+            "Message",
+            "'Collection started'"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-GpoLensCollectionLog",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "@logArgs"
+          ],
+          [
+            "Message",
+            "($_ | Out-String).TrimEnd()"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-GpoLensCollectionLog",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "@logArgs"
+          ],
+          [
+            "Message",
+            "\"Collection failed: $($failure.Exception.Message)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-GpoLensCollectionLog",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "@logArgs"
+          ],
+          [
+            "Message",
+            "\"Collection succeeded: $($newest.Name); retained at most $Retention exports\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-GpoLensCollectionLog",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "@logArgs"
+          ],
+          [
+            "Message",
+            "\"ZIP delivered: $delivery\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-GpoLensCollectionLog",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "@{ Expression = { $_.BaseName.Substring($_.BaseName.Length - 15) }; Descending = $true }, Name"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Sort-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Collection failed: $($_.Exception.Message)\""
+          ],
+          [
+            "ErrorAction",
+            "Continue"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Error",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Collection succeeded: $($newest.FullName)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Host",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Skipping incomplete ZIP (no estate report): $($archive.Name)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Warning",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "\"Skipping unreadable/incomplete ZIP: $($archive.Name)\""
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Write-Warning",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "{ $_.BaseName -match '^.+-\\d{8}-\\d{6}$' -and (Test-Path -LiteralPath (Join-Path (Join-Path $OutputRoot $_.BaseName) 'AllGPOs.xml') -PathType Leaf) }"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Where-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "{ $previous[$_.FullName] = $true }"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ForEach-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "{ -not $previous.ContainsKey($_.FullName) }"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Where-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "{ Write-GpoLensCollectionLog @logArgs -Message ($_ | Out-String).TrimEnd() }"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "ForEach-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [
+          [
+            null,
+            "{ [string]::Equals($_.BaseName.Substring(0, $_.BaseName.Length - 16), $producerPrefix, [StringComparison]::Ordinal) }"
+          ]
+        ],
+        "invocation": "Unknown",
+        "name": "Where-Object",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Dot",
+        "name": null,
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Unknown",
+        "name": "ConvertFrom-Json",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Unknown",
+        "name": "Out-Null",
+        "type_definition_sha256": null
+      },
+      {
+        "args": [],
+        "invocation": "Unknown",
+        "name": "Out-String",
+        "type_definition_sha256": null
+      }
+    ],
+    "functions": [
+      "Assert-GpoLensCollectionOwner",
+      "Assert-GpoLensRegularTree",
+      "Get-GpoLensCompletedExports",
+      "Invoke-GpoLensCollection",
+      "Write-GpoLensCollectionLog"
+    ],
+    "indirect_writes": [],
+    "members": [
+      {
+        "member": "Add",
+        "receiver": "$ids",
+        "receiver_types": [],
+        "receiver_var": "ids",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "AppendAllText",
+        "receiver": "[IO.File]",
+        "receiver_types": [
+          "IO.File"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "IO.File"
+      },
+      {
+        "member": "ContainsKey",
+        "receiver": "$previous",
+        "receiver_types": [],
+        "receiver_var": "previous",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "CreateEntry",
+        "receiver": "$zip",
+        "receiver_types": [],
+        "receiver_var": "zip",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Delete",
+        "receiver": "$entry",
+        "receiver_types": [],
+        "receiver_var": "entry",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Dispose",
+        "receiver": "$lock",
+        "receiver_types": [],
+        "receiver_var": "lock",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Dispose",
+        "receiver": "$stream",
+        "receiver_types": [],
+        "receiver_var": "stream",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Dispose",
+        "receiver": "$zip",
+        "receiver_types": [],
+        "receiver_var": "zip",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Dispose",
+        "receiver": "$zip",
+        "receiver_types": [],
+        "receiver_var": "zip",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Dispose",
+        "receiver": "$zip",
+        "receiver_types": [],
+        "receiver_var": "zip",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Equals",
+        "receiver": "[string]",
+        "receiver_types": [
+          "string"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "string"
+      },
+      {
+        "member": "Equals",
+        "receiver": "[string]",
+        "receiver_types": [
+          "string"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "string"
+      },
+      {
+        "member": "GetByteCount",
+        "receiver": "$encoding",
+        "receiver_types": [],
+        "receiver_var": "encoding",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "GetEntry",
+        "receiver": "$zip",
+        "receiver_types": [],
+        "receiver_var": "zip",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "GetEntry",
+        "receiver": "$zip",
+        "receiver_types": [],
+        "receiver_var": "zip",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "GetEntry",
+        "receiver": "$zip",
+        "receiver_types": [],
+        "receiver_var": "zip",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "GetString",
+        "receiver": "[Text.Encoding]::UTF8",
+        "receiver_types": [
+          "Text.Encoding"
+        ],
+        "receiver_var": null,
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "GetString",
+        "receiver": "[Text.Encoding]::UTF8",
+        "receiver_types": [
+          "Text.Encoding"
+        ],
+        "receiver_var": null,
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "IsNullOrWhiteSpace",
+        "receiver": "[string]",
+        "receiver_types": [
+          "string"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "string"
+      },
+      {
+        "member": "IsNullOrWhiteSpace",
+        "receiver": "[string]",
+        "receiver_types": [
+          "string"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "string"
+      },
+      {
+        "member": "Max",
+        "receiver": "[math]",
+        "receiver_types": [
+          "math"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "math"
+      },
+      {
+        "member": "NewGuid",
+        "receiver": "[guid]",
+        "receiver_types": [
+          "guid"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "guid"
+      },
+      {
+        "member": "Open",
+        "receiver": "$entry",
+        "receiver_types": [],
+        "receiver_var": "entry",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Open",
+        "receiver": "[IO.Compression.ZipFile]",
+        "receiver_types": [
+          "IO.Compression.ZipFile"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "IO.Compression.ZipFile"
+      },
+      {
+        "member": "Open",
+        "receiver": "[IO.File]",
+        "receiver_types": [
+          "IO.File"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "IO.File"
+      },
+      {
+        "member": "OpenRead",
+        "receiver": "[IO.Compression.ZipFile]",
+        "receiver_types": [
+          "IO.Compression.ZipFile"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "IO.Compression.ZipFile"
+      },
+      {
+        "member": "Pop",
+        "receiver": "$pending",
+        "receiver_types": [],
+        "receiver_var": "pending",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Push",
+        "receiver": "$pending",
+        "receiver_types": [],
+        "receiver_var": "pending",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Push",
+        "receiver": "$pending",
+        "receiver_types": [],
+        "receiver_var": "pending",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "ReadAllBytes",
+        "receiver": "[IO.File]",
+        "receiver_types": [
+          "IO.File"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "IO.File"
+      },
+      {
+        "member": "Substring",
+        "receiver": "$_.BaseName",
+        "receiver_types": [],
+        "receiver_var": "_",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Substring",
+        "receiver": "$_.BaseName",
+        "receiver_types": [],
+        "receiver_var": "_",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Substring",
+        "receiver": "$line",
+        "receiver_types": [],
+        "receiver_var": "line",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "Substring",
+        "receiver": "$newest.BaseName",
+        "receiver_types": [],
+        "receiver_var": "newest",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "ToString",
+        "receiver": "[guid]::NewGuid()",
+        "receiver_types": [
+          "guid"
+        ],
+        "receiver_var": null,
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "TrimEnd",
+        "receiver": "($_ | Out-String)",
+        "receiver_types": [],
+        "receiver_var": null,
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "TrimEnd",
+        "receiver": "[Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)",
+        "receiver_types": [
+          "Text.Encoding",
+          "char"
+        ],
+        "receiver_var": null,
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "TrimStart",
+        "receiver": "[Text.Encoding]::UTF8.GetString($bytes)",
+        "receiver_types": [
+          "Text.Encoding"
+        ],
+        "receiver_var": null,
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "TrimStart",
+        "receiver": "[Text.Encoding]::UTF8.GetString($inventoryBytes)",
+        "receiver_types": [
+          "Text.Encoding"
+        ],
+        "receiver_var": null,
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "TryParse",
+        "receiver": "[guid]",
+        "receiver_types": [
+          "guid"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "guid"
+      },
+      {
+        "member": "Write",
+        "receiver": "$stream",
+        "receiver_types": [],
+        "receiver_var": "stream",
+        "static": false,
+        "type": null
+      },
+      {
+        "member": "WriteAllBytes",
+        "receiver": "[IO.File]",
+        "receiver_types": [
+          "IO.File"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "IO.File"
+      },
+      {
+        "member": "new",
+        "receiver": "[Collections.Generic.HashSet[guid]]",
+        "receiver_types": [
+          "Collections.Generic.HashSet[guid]"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "Collections.Generic.HashSet[guid]"
+      },
+      {
+        "member": "new",
+        "receiver": "[Collections.Generic.Stack[string]]",
+        "receiver_types": [
+          "Collections.Generic.Stack[string]"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "Collections.Generic.Stack[string]"
+      },
+      {
+        "member": "new",
+        "receiver": "[Text.UTF8Encoding]",
+        "receiver_types": [
+          "Text.UTF8Encoding"
+        ],
+        "receiver_var": null,
+        "static": true,
+        "type": "Text.UTF8Encoding"
+      }
+    ],
+    "parse_errors": [],
+    "redirections": [
+      {
+        "from": "All",
+        "kind": "merging",
+        "to": "Output"
+      }
+    ],
+    "type_references": [
+      "Collections.Generic.HashSet[guid]",
+      "Collections.Generic.Stack[string]",
+      "IO.Compression.ZipFile",
+      "IO.File",
+      "IO.FileAccess",
+      "IO.FileAttributes",
+      "IO.FileMode",
+      "IO.FileShare",
+      "StringComparison",
+      "Text.Encoding",
+      "Text.UTF8Encoding",
+      "char",
+      "char[]",
+      "guid",
+      "int",
+      "math",
+      "ref",
+      "string"
+    ],
+    "using_statements": []
+  }
+}

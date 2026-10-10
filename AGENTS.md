@@ -110,15 +110,19 @@ a DC/RSAT box). The tool consumes its output dir.
 
 Read-only is enforced by `tests/test_collector_readonly.py`: it parses every
 DC/RSAT-side script with the PowerShell AST (via `pwsh`) and fails on anything
-outside a strict per-script allowlist. It checks commands, .NET calls,
-redirections, `using`/type references, scheduled-task arguments, and
-**dataflow confinement** of write/exec roots (every write-root variable is
-pinned to its documented assignment, so a rebind to UNC/SYSVOL/a provider path
-fails). Every reviewer bypass probe is a regression case in
-`test_reviewer_probes_are_flagged`. Adding a command, a write, or a new root
-derivation means editing the allowlist/`PINNED_VARS` with a reason in the same
-change. Every new `scripts/*.ps1` must be classified. Locally the test skips
-when `pwsh` is absent; in CI it fails instead.
+a **closed-world** model: a committed golden inventory
+(`tests/powershell/collector-inventory.json`) of every side-effect node, plus a
+strict per-script semantic allowlist (commands, .NET calls, redirections,
+`using`/type references, exact scheduled-task argument vectors, and dataflow
+confinement of write/exec roots against `=`/`$script:`/foreach/`-OutVariable`
+rebinds and to a pinned set of write-target expressions). Any change to a
+collector script changes the inventory and must be regenerated with
+`python scripts/gen_collector_inventory.py` (which refuses to write unless the
+semantic layer passes) and reviewed as a diff; a new command/write/root
+derivation also needs an allowlist/`PINNED_VARS` edit with a reason. Every
+reviewer bypass probe is a regression case in `test_reviewer_probes_are_flagged`
+asserted to fail at its intended check. Every new `scripts/*.ps1` must be
+classified. Locally the test skips when `pwsh` is absent; in CI it fails.
 
 ## Module map
 
