@@ -19,6 +19,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import inspect
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -217,3 +218,113 @@ def test_every_fixture_cse_has_a_row() -> None:
     rows = {row.name for row in gen.CSE_ROWS}
     missing = sorted(_fixture_cse_names() - rows)
     assert not missing, f"fixture CSEs with no capability-matrix row: {missing}"
+
+
+_ROW_CSES = frozenset(row.name.strip().casefold() for row in gen.CSE_ROWS if row.name != _CATCH_ALL)
+
+# Snapshot of the per-CSE merge-alias sets. Pinned so that adding a CSE the code
+# supports (Sol matrix/new_cse) forces a matrix + test update in the same change,
+# rather than silently resolving a new CSE with no capability-matrix row.
+_MERGE_CSE_SNAPSHOT: dict[str, frozenset[str]] = {
+    "_SCRIPTS_CSES": merge._SCRIPTS_CSES,
+    "_GPP_CSES": merge._GPP_CSES,
+    "_IPSEC_WIRELESS_CSES": merge._IPSEC_WIRELESS_CSES,
+    "_FOLDER_REDIRECTION_CSES": merge._FOLDER_REDIRECTION_CSES,
+    "REGISTRY_CSES": normalize.REGISTRY_CSES,
+}
+_EXPECTED_MERGE_CSES: dict[str, frozenset[str]] = {
+    "_SCRIPTS_CSES": frozenset({"scripts", "group policy scripts"}),
+    "_GPP_CSES": frozenset(
+        {
+            "group policy preferences",
+            "gpp",
+            "gpp drive maps",
+            "gpp registry",
+            "gpp files",
+            "gpp local users and groups",
+            "gpp scheduled tasks",
+            "drives",
+            "files",
+            "groups",
+            "scheduledtasks",
+            "localusersandgroups",
+            "datasources",
+            "printers",
+            "folders",
+            "services",
+            "environment",
+            "shortcuts",
+            "internetsettings",
+            "regional",
+            "poweroptions",
+            "networkshares",
+            "eventlogs",
+        }
+    ),
+    "_IPSEC_WIRELESS_CSES": frozenset(
+        {
+            "ipsec",
+            "ip security",
+            "wireless",
+            "wired",
+            "wireless network (ieee 802.11) policy",
+            "wired network policy",
+        }
+    ),
+    "_FOLDER_REDIRECTION_CSES": frozenset({"folder redirection", "folders redirection"}),
+    "REGISTRY_CSES": frozenset({"registry", "windows registry"}),
+}
+
+
+def test_merge_cse_sets_are_snapshotted() -> None:
+    """A new supported CSE must land in the capability matrix in the same change.
+
+    If a merge-alias set changes, this fails; update the matrix (and this
+    snapshot) together so no CSE the code resolves is missing a row.
+    """
+    for name, expected in _EXPECTED_MERGE_CSES.items():
+        actual = _MERGE_CSE_SNAPSHOT[name]
+        assert actual == expected, (
+            f"merge.{name} changed: added {sorted(actual - expected)}, "
+            f"removed {sorted(expected - actual)}; update docs/capability-matrix.md "
+            "and _EXPECTED_MERGE_CSES together"
+        )
+
+
+def _ingest_dispatch_cses() -> set[str]:
+    """CSE display names the ingest dispatcher special-cases (``cse == "X"`` /
+    ``cse.strip().lower() == "x"``), plus the Advanced Audit CSE constant."""
+    src = (_ROOT / "src" / "gpo_lens" / "ingest.py").read_text(encoding="utf-8")
+    names = set(re.findall(r'cse\s*==\s*"([^"]+)"', src))
+    names |= set(re.findall(r'cse\.strip\(\)\.lower\(\)\s*==\s*"([^"]+)"', src))
+    names.add(ingest._AUDIT_CSE)
+    names.discard("_AUDIT_CSE")
+    return {n.casefold() for n in names}
+
+
+def test_ingest_special_cased_cses_have_a_row() -> None:
+    """Every CSE the ingest dispatcher names must have a capability-matrix row.
+
+    Catches a renamed dispatch literal (Sol matrix/cse_rename) and a new
+    ``if cse == "..."`` branch added without a row.
+    """
+    missing = sorted(_ingest_dispatch_cses() - _ROW_CSES)
+    assert not missing, f"ingest special-cases these CSEs but the matrix has no row: {missing}"
+
+
+def test_parsers_produce_data_for_the_golden_fixture() -> None:
+    """A parser that silently stops returning data (Sol matrix/parser_noop) is a
+    false all-clear. Ingest the golden estate and require the parsers that have
+    fixture data to produce it."""
+    from gpo_lens.ingest import load_estate
+
+    estate = load_estate(str(_ROOT / "tests" / "golden_estate"))
+    assert estate.gpos, "parse_report produced no GPOs"
+    assert estate.wmi_filters, "parse_wmi_filters produced no WMI filters for the golden fixture"
+    assert estate.soms, "parse_inheritance produced no SOMs for the golden fixture"
+    parsed = {s.cse for g in estate.gpos for s in g.settings}
+    expected = {"Registry", "Security", "Drive Maps", "Scheduled Tasks", "Printers"}
+    missing = sorted(expected - parsed)
+    assert not missing, (
+        f"golden fixture CSEs no longer parsed (dispatch/parser regressed): {missing}"
+    )

@@ -72,8 +72,8 @@ it receives; physical access.
 
 | Threat | Mitigation | Evidence |
 |--------|------------|----------|
-| Collector writes to AD, GPO or SYSVOL | A CI gate parses (never executes) every DC/RSAT-side script with the PowerShell AST and fails on any command, dynamic invocation, static or instance .NET call, property assignment, `New-Object` type or `Add-Type` form outside a per-script allowlist (strict both ways: unused entries also fail). AD/GroupPolicy cmdlets in the allowlist must be `Get-*`; only `Register-GpoLensCollection.ps1` may use the ScheduledTasks cmdlets. Inline C# passed to `Add-Type` is pinned by SHA-256. Limits in residual R5. | `tests/test_collector_readonly.py`; `tests/powershell/Get-ScriptCallInventory.ps1`; CI job `collector-readonly` |
-| Collector writes local files outside its outputs | Every file-writing cmdlet or `[IO.File]`/`ZipFile` write must target an expression built only from that script's declared write-root variables (derived from `-OutputRoot`, `-OutputPath` or `-CopyTo`), with no absolute, UNC or `..` literal. | `tests/test_collector_readonly.py::test_local_writes_stay_under_declared_roots` |
+| Collector writes to AD, GPO or SYSVOL | A CI gate parses (never executes) every DC/RSAT-side script with the PowerShell AST and fails on any command, dynamic invocation, static or instance .NET call, property assignment, redirection, `using` statement, `New-Object` type or `Add-Type` form outside a per-script allowlist (strict both ways: unused entries also fail). AD/GroupPolicy cmdlets in the allowlist must be `Get-*`; only `Register-GpoLensCollection.ps1` may use the ScheduledTasks cmdlets, with `-Execute`/`-Argument`/`-UserId`/`-TaskName` pinned. `[ADSI]`/`[adsisearcher]`/`System.DirectoryServices.*`/COM/runspace type references are rejected, and each allowlisted instance method is bound to the receiver variable(s) it may be called on. Inline C# passed to `Add-Type` is pinned by SHA-256. Every reviewer bypass probe (both review lineages) is a regression case. | `tests/test_collector_readonly.py`; `tests/powershell/Get-ScriptCallInventory.ps1`; CI job `collector-readonly` |
+| Collector writes local files outside its outputs | Dataflow confinement: every write-root variable (and every variable whose value reaches `& $CollectorPath` or the scheduled-task action) is pinned to its documented assignment(s); any extra or changed `=` assignment — a rebind to UNC/SYSVOL, a registry/cert/AD provider path (`HKLM:`…), or an absolute path — fails. Write targets must be anchored at a pinned root with no absolute/UNC/provider/`..` literal; file redirections must target `$null`; `New-Item` may not create a symlink/junction/hardlink or name a non-filesystem provider; `Get-GPOReport -Path` and other output-path parameters are confined like any other write. | `tests/test_collector_readonly.py` (`test_local_writes_stay_under_declared_roots`, `test_pinned_variables_are_not_rebound`, `test_no_using_or_disallowed_redirection`, `test_scheduled_task_arguments_are_pinned`, `test_reviewer_probes_are_flagged`) |
 | Retention or log rotation deletes outside the output root, or follows a link | Owner marker required before any write; reparse points refused before retention deletes; marker opened with link-count check. | `scripts/Run-GpoLensCollection.ps1:67-99,115-126,183-195`; `scripts/GpoLensCollectionMarker.ps1:3-68`; `tests/powershell/collection.Tests.ps1` |
 | Service-account password exposure during task registration | Prompted via `Get-Credential`, passed only to `Register-ScheduledTask`, variables cleared in `finally`; gMSA path supplies no password. | `scripts/Register-GpoLensCollection.ps1:148-164`; `tests/powershell/collection.Tests.ps1` ("registers a gMSA Password principal without supplying a password") |
 | Non-ASCII byte breaks parsing under Windows PowerShell 5.1 and a run silently collects less | Every `scripts/*.ps1` must parse and be ASCII-only. | `tests/powershell/scripts-parse.Tests.ps1` |
@@ -186,15 +186,21 @@ These are known and not mitigated by code at this commit.
   GPOs, settings or coverage evidence and produce a false all-clear. Coverage
   reconciliation cannot detect this because the inventory travels in the same
   archive.
-- **R5 — Limits of the collector AST gate.** It is static: instance .NET
-  methods are matched by name only (the receiver type is unknown), the
-  derivation of each write-root variable from `-OutputRoot`/`-OutputPath`/
-  `-CopyTo` is verified by inspection and recorded in the allowlist, and the
-  claim that the allowlisted `Get-*` AD/GroupPolicy cmdlets do not write rests
-  on Microsoft's documentation. `Run-GpoLensCollection.ps1` executes whatever
-  `-CollectorPath` the operator registered; only the default
-  (`Export-GpoEstate.ps1`) is checked. `install-windows.ps1` and
-  `uninstall-windows.ps1` run on the analysis host and are out of scope.
+- **R5 — Limits of the collector AST gate.** It is static. Instance .NET
+  methods are bound to a receiver *variable name* (whose binding is pinned),
+  not a resolved runtime type, so a method allowlisted on one receiver could in
+  principle be reached on another object assigned to a same-named variable; the
+  type-reference denylist (`[ADSI]`, `System.DirectoryServices.*`, COM,
+  runspace) is the backstop. The claim that the allowlisted `Get-*`
+  AD/GroupPolicy cmdlets do not write rests on Microsoft's documentation.
+  `Run-GpoLensCollection.ps1` executes whatever `-CollectorPath` the operator
+  registered; only the default (`Export-GpoEstate.ps1`) is checked, and
+  `$CollectorPath`'s binding is pinned so the in-file default cannot be rebound.
+  The gate reasons about the committed scripts; a module resolved at runtime on
+  the DC that is not one of these files is outside its view (hence `using`/
+  `Import-Module` of non-allowlisted modules are rejected, not inspected).
+  `install-windows.ps1` and `uninstall-windows.ps1` run on the analysis host
+  and are out of scope.
 - **R6 — CLI narration sends estate strings.** `ask` and `doctor --explain`
   send `safe_data`-redacted estate content (GPO names, settings, finding text)
   to the configured endpoint; redaction targets credentials, not names or
