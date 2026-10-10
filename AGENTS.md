@@ -117,11 +117,15 @@ a DC/RSAT box). The tool consumes its output dir.
 
 Read-only is enforced by `tests/test_collector_readonly.py`: it parses every
 DC/RSAT-side script with the PowerShell AST (via `pwsh`) and fails on anything
-outside a strict per-script allowlist of commands, .NET calls and file-write
-targets. Adding a command or a write to a collector script means editing that
-allowlist with a reason, in the same change. Every new `scripts/*.ps1` must be
-classified there (in scope, or out of scope with a reason). Locally the test
-skips when `pwsh` is absent; in CI it fails instead.
+outside a strict per-script allowlist. It checks commands, .NET calls,
+redirections, `using`/type references, scheduled-task arguments, and
+**dataflow confinement** of write/exec roots (every write-root variable is
+pinned to its documented assignment, so a rebind to UNC/SYSVOL/a provider path
+fails). Every reviewer bypass probe is a regression case in
+`test_reviewer_probes_are_flagged`. Adding a command, a write, or a new root
+derivation means editing the allowlist/`PINNED_VARS` with a reason in the same
+change. Every new `scripts/*.ps1` must be classified. Locally the test skips
+when `pwsh` is absent; in CI it fails instead.
 
 ## Module map
 
