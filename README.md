@@ -4,12 +4,11 @@ Local-first, read-only Group Policy analysis. Ingests copies of a GPO estate
 (never touches live AD) and answers questions about it. The deterministic core
 has no AI in the truth path — the optional LLM layer explains computed facts.
 
-This checkout is the **v1.4.0 release candidate**; the coordinator will date
-and tag the release. The latest published release is **v1.3.1**, which fixes
-v1.3.0's over-redacted broken-reference details. Commands below describe 1.4;
-on 1.3.1, ingest an export directory with the CLI or upload its ZIP through the
-browser. The dependency inventory, scheduled collection helper and freshness
-warning require 1.4.
+**Project status:** the current release is **v1.4.0** (2026-10-06, tag
+`v1.4.0`); see the [changelog](CHANGELOG.md). Commands below describe 1.4. The
+dependency inventory, scheduled collection helper, CLI ZIP ingest and freshness
+warning require 1.4. Report security issues privately as described in
+[SECURITY.md](SECURITY.md).
 
 ## Install and quick start
 
