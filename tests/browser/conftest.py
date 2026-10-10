@@ -23,7 +23,7 @@ from _live import LiveServer, start, stop
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     here = Path(__file__).resolve().parent
     for item in items:
-        if Path(str(item.fspath)).resolve().is_relative_to(here):
+        if item.path.resolve().is_relative_to(here):
             item.add_marker(pytest.mark.browser)
 
 
@@ -31,15 +31,19 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 def live_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[LiveServer]:
     """Shared read-only server. Tests that mutate state use ``fresh_server``."""
     server = start(tmp_path_factory.mktemp("live"))
-    yield server
-    stop(server)
+    try:
+        yield server
+    finally:
+        stop(server)
 
 
 @pytest.fixture
 def fresh_server(tmp_path: Path) -> Iterator[LiveServer]:
     server = start(tmp_path)
-    yield server
-    stop(server)
+    try:
+        yield server
+    finally:
+        stop(server)
 
 
 @pytest.fixture

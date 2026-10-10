@@ -1,0 +1,24 @@
+Vendored third-party code: axe-core
+====================================
+
+axe-4.13.0.min.js
+  Project:  axe-core, Deque Systems, Inc.
+  Version:  4.13.0
+  Source:   https://github.com/dequelabs/axe-core/tree/v4.13.0
+  Package:  https://www.npmjs.com/package/axe-core/v/4.13.0
+            (npm registry integrity
+             sha512-UzGt8zg7Ny8djbYMhxl2zuEevVa7r2gJjYY5Lwr1xM7+XU2nd6CkIWFTVcCIbAP63vSz71NaVyyuSk9lHKcy0A==)
+  File:     package/axe.min.js from that tarball, copied unmodified
+  SHA-256:  c24f097bd2f451d4f933e8bc7d8d539f8672a2ebcb5cc9f9f3eec8ca9470a0c1
+  License:  MPL-2.0 (axe-core-LICENSE.txt in this directory)
+
+This is the Executable Form of the MPL-2.0 Covered Software. The Source Code
+Form is available at the Source location above. The file is test-only: it is
+injected into pages by tests/browser/test_browser_ui.py, which refuses to use
+it unless its SHA-256 matches the value above. It is never shipped in the
+gpo-lens wheel.
+
+To upgrade: download the new npm tarball, check its integrity against the
+registry, copy package/axe.min.js and LICENSE here, update this file and the
+AXE_VERSION / AXE_SHA256 constants, then regenerate the baseline with
+GPO_LENS_AXE_WRITE_BASELINE=1 and review the diff.

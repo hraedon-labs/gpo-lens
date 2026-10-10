@@ -63,3 +63,6 @@ testResults.xml
 # (e.g. CLI write blocked by a pending schema migration). Transient — drain
 # into regista once writes are unblocked, then delete. Never the source of truth.
 PENDING-REGISTA-WI.md
+
+# Playwright output (pytest-playwright --output default)
+test-results/

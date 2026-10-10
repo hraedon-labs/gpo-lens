@@ -28,6 +28,7 @@ import io
 import json
 import os
 import re
+import sys
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,11 @@ AXE_VERSION = "4.13.0"
 AXE_SHA256 = "c24f097bd2f451d4f933e8bc7d8d539f8672a2ebcb5cc9f9f3eec8ca9470a0c1"
 BASELINE_PATH = _HERE / "axe-baseline.json"
 GATED_IMPACTS = {"serious", "critical"}
+# Run-specific text in axe html snippets (random port origin, ingest timestamps).
+_VOLATILE = (
+    (re.compile(r"https?://127\.0\.0\.1:\d+"), ""),
+    (re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[+-]\d{2}:\d{2}|Z)?"), "<ts>"),
+)
 
 # (link text in the primary nav, path it must load)
 PRIMARY_NAV = [
@@ -101,8 +107,15 @@ def _goto(page: Page, url: str) -> Response:
 
 
 def test_vendored_axe_is_the_pinned_release() -> None:
-    assert hashlib.sha256(AXE_PATH.read_bytes()).hexdigest() == AXE_SHA256
-    assert AXE_PATH.read_text(encoding="utf-8").startswith(f"/*! axe v{AXE_VERSION}")
+    assert _load_axe_source().startswith(f"/*! axe v{AXE_VERSION}")
+
+
+def test_tampered_axe_is_refused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    tampered = tmp_path / AXE_PATH.name
+    tampered.write_bytes(AXE_PATH.read_bytes() + b"\n// tampered")
+    monkeypatch.setattr(sys.modules[__name__], "AXE_PATH", tampered)
+    with pytest.raises(AssertionError, match="sha256"):
+        _load_axe_source()
 
 
 @pytest.mark.parametrize(("label", "path"), PRIMARY_NAV)
@@ -145,9 +158,8 @@ def test_primary_nav_is_keyboard_operable(page: Page, live_server: LiveServer) -
 
     # Activating a focused nav link with Enter navigates.
     page.keyboard.press("Shift+Tab")  # back to History
-    with page.expect_navigation():
-        page.keyboard.press("Enter")
-    assert page.url.endswith("/changelog")
+    page.keyboard.press("Enter")
+    page.wait_for_url(re.compile(r"/changelog$"))
 
     # The skip link moves focus to the main landmark.
     _goto(page, live_server.url + "/findings")
@@ -171,9 +183,8 @@ def test_acknowledge_a_finding_round_trip(page: Page, fresh_server: LiveServer) 
     review.locator("summary").click()
     form.locator("select[name=status]").select_option("acknowledged")
     form.locator("textarea[name=note]").fill("browser test: synthetic acknowledgement")
-    with page.expect_navigation():
-        form.get_by_role("button", name="Save decision").click()
-    assert re.search(r"/findings(\?|$)", page.url)
+    form.get_by_role("button", name="Save decision").click()
+    page.wait_for_url(re.compile(r"/findings(\?|$)"))
 
     rows = fresh_server.query(events, finding_id)
     assert rows == [("acknowledged", "browser test: synthetic acknowledgement", "local-analyst")]
@@ -199,41 +210,57 @@ def test_tools_ingest_upload_of_a_collector_zip(
     archive = tmp_path / "golden-collector.zip"
     archive.write_bytes(_golden_zip())
     _goto(page, fresh_server.url + "/tools")
-    with page.expect_navigation():
-        page.locator('main a[href="/ingest"]').click()
-    assert page.url.endswith("/ingest")
+    page.locator('main a[href="/ingest"]').click()
+    page.wait_for_url(re.compile(r"/ingest$"))
 
     page.locator("#file-input").set_input_files(archive)
     proceed = page.locator("#confirm-proceed")
     # An existing snapshot triggers the replace confirmation, which takes focus.
     expect(proceed).to_be_focused()
-    with page.expect_navigation():
-        proceed.click()
+    proceed.click()
+    # A successful ingest redirects (303) to the legacy dashboard.
+    page.wait_for_url(fresh_server.url + "/")
     page.wait_for_load_state("networkidle")
     snapshots = fresh_server.query("SELECT id FROM snapshot ORDER BY id")
     assert len(snapshots) == fresh_server.snapshots_at_start + 1
     assert health.problems == []
 
 
+def _load_axe_source() -> str:
+    """The vendored axe bytes, refused unless they match the pinned SHA-256."""
+    data = AXE_PATH.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != AXE_SHA256:
+        raise AssertionError(f"{AXE_PATH.name} sha256 {digest} != pinned {AXE_SHA256}")
+    return data.decode("utf-8")
+
+
 def _axe_violations(page: Page) -> list[dict[str, Any]]:
-    page.evaluate(AXE_PATH.read_text(encoding="utf-8"))
+    page.evaluate(_load_axe_source())
     assert page.evaluate("() => axe.version") == AXE_VERSION
     result: list[dict[str, Any]] = page.evaluate(
         """async () => {
             const r = await axe.run(document, {resultTypes: ['violations']});
             return r.violations.map(v => ({id: v.id, impact: v.impact,
-                nodes: v.nodes.map(n => ({target: n.target.join(' '), impact: n.impact}))}));
+                nodes: v.nodes.map(n => ({target: n.target.join(' '), impact: n.impact,
+                                          html: n.html}))}));
         }"""
     )
     return result
 
 
-def _gated(page_path: str, violations: list[dict[str, Any]]) -> set[tuple[str, str, str]]:
-    found = set()
+def _gated(page_path: str, violations: list[dict[str, Any]]) -> dict[tuple[str, str, str], str]:
+    """Gated (serious/critical) violations -> axe's html snippet of the node."""
+    found: dict[tuple[str, str, str], str] = {}
     for violation in violations:
         for node in violation["nodes"]:
             if (node["impact"] or violation["impact"]) in GATED_IMPACTS:
-                found.add((page_path, violation["id"], node["target"]))
+                key = (page_path, violation["id"], node["target"])
+                # Strip run-specific text so the snippet is deterministic.
+                html = " ".join(str(node.get("html") or "").split())
+                for pattern, replacement in _VOLATILE:
+                    html = pattern.sub(replacement, html)
+                found.setdefault(key, html[:240])
     return found
 
 
@@ -243,22 +270,33 @@ def _load_baseline() -> set[tuple[str, str, str]]:
     entries = set()
     for entry in data["entries"]:
         assert entry["reason"] == BASELINE_REASONS[entry["rule"]], entry
+        # The node's html documents opaque selectors such as `:root`.
+        assert entry.get("html"), f"baseline entry without an html snippet: {entry}"
         entries.add((entry["page"], entry["rule"], entry["target"]))
     return entries
 
 
 def test_axe_has_no_new_or_stale_serious_violations(page: Page, live_server: LiveServer) -> None:
-    found: set[tuple[str, str, str]] = set()
+    health = PageHealth(page)
+    found: dict[tuple[str, str, str], str] = {}
+    scanned: list[str] = []
     for path in AXE_PAGES:
-        _goto(page, live_server.url + path)
+        response = _goto(page, live_server.url + path)
+        assert response.status == 200, f"{path} returned {response.status}; cannot scan it"
         found |= _gated(path, _axe_violations(page))
+        scanned.append(path)
+    # Console errors / failed requests on any scanned page (including /ingest).
+    assert health.problems == [], health.problems
 
     if os.environ.get("GPO_LENS_AXE_WRITE_BASELINE") == "1":
+        # Refuse to rewrite unless every page loaded with 200 and was scanned,
+        # so a broken page cannot silently shrink the baseline.
+        assert scanned == AXE_PAGES, f"not every page was scanned: {scanned}"
         unexplained = sorted({rule for _, rule, _ in found} - set(BASELINE_REASONS))
         assert not unexplained, f"add a BASELINE_REASONS entry before baselining {unexplained}"
         entries = [
-            {"page": p, "rule": r, "target": t, "reason": BASELINE_REASONS[r]}
-            for p, r, t in sorted(found)
+            {"page": p, "rule": r, "target": t, "html": html, "reason": BASELINE_REASONS[r]}
+            for (p, r, t), html in sorted(found.items())
         ]
         BASELINE_PATH.write_text(
             json.dumps({"axe_version": AXE_VERSION, "entries": entries}, indent=2) + "\n",
@@ -266,7 +304,23 @@ def test_axe_has_no_new_or_stale_serious_violations(page: Page, live_server: Liv
         )
 
     baseline = _load_baseline()
-    new = sorted(found - baseline)
-    gone = sorted(baseline - found)
+    new = sorted(set(found) - baseline)
+    gone = sorted(baseline - set(found))
     assert not new, f"new serious/critical axe violations (fix them): {new}"
     assert not gone, f"baselined violations no longer occur (remove them from the baseline): {gone}"
+
+
+def test_live_server_refuses_a_foreign_listener(
+    live_server: LiveServer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Port TOCTOU: if the chosen port is already served by another (healthy)
+    gpo-lens, start() must not attach to it. Force every attempt onto the
+    shared server's port; start() must fail rather than return that server."""
+    import _live
+
+    foreign_port = int(live_server.url.rsplit(":", 1)[1])
+    monkeypatch.setattr(_live, "_free_port", lambda: foreign_port)
+    with pytest.raises(RuntimeError, match="could not bind"):
+        _live.start(tmp_path)
+    # The foreign server is untouched and still the one answering.
+    assert live_server.process.poll() is None
