@@ -24,6 +24,7 @@ from gpo_lens.queries import cpassword_scan, estate_doctor
 from gpo_lens.redaction import (
     CPASSWORD_FINDING_DETAIL,
     CPASSWORD_MARKER,
+    Chaser,
     redact_structure,
     redact_text,
 )
@@ -345,7 +346,9 @@ def test_v140_database_is_scrubbed_and_purged(tmp_path: Path) -> None:
         scrub = events[-1]
         assert scrub["event_type"] == "maintenance.cpassword_scrub"
         assert scrub["payload"]["rewritten_event_ids"] == [1, 4]
-        assert scrub["payload"]["rehashed_from_event_id"] == 1
+        assert scrub["payload"]["rehashed_event_ids"] == [1, 2, 3, 4, 5]
+        assert scrub["payload"]["pre_existing_broken_event_ids"] == []
+        assert scrub["payload"]["discovered_value_count"] >= len(B.REPORT_PROBES) - 1
         assert scrub["payload"]["changed"] == {
             "events.payload": 2,
             "finding.detail": 1,
@@ -370,8 +373,8 @@ def test_v140_database_is_scrubbed_and_purged(tmp_path: Path) -> None:
                     expected, _ = redact_structure(s_before.raw)
                     assert s_after.raw == expected
                     assert s_after.identity == s_before.identity
-                    assert s_after.display_value == redact_text(
-                        s_before.display_value, B.REPORT_PROBES
+                    assert s_after.display_value == Chaser(B.REPORT_PROBES).sub(
+                        redact_text(s_before.display_value)
                     )
         first = {
             t: conn.execute(f'SELECT * FROM "{t}"').fetchall()
@@ -431,3 +434,82 @@ def test_purge_is_retried_until_old_pages_are_gone(tmp_path: Path) -> None:
 def test_inline_redaction(text: str, expected: str) -> None:
     assert redact_text(text) == expected
     assert redact_text(expected) == expected  # idempotent
+
+
+# --- Copy-chasing safety rules (review B-03) ------------------------------------
+
+
+def test_short_or_word_like_values_are_not_chased_into_unrelated_fields(tmp_path: Path) -> None:
+    """Labelled values are always redacted; only distinctive values are chased.
+
+    ``Enabled``/``Administrators`` (no digit, not ciphertext-shaped) and values
+    under 12 characters stay wherever they occur unlabelled, so a malformed
+    cpassword cannot blank unrelated names, descriptions or GUIDs.
+    """
+    from gpo_lens.redaction import chase_eligible
+
+    assert not chase_eligible("Enabled")
+    assert not chase_eligible("Administrators")
+    assert not chase_eligible("P5x")
+    assert chase_eligible("PROBEcpwZZ123")
+    # Real GPP ciphertext (base64 of whole AES blocks) is chased even without digits.
+    assert chase_eligible("A" * 43)
+    chaser = Chaser(["PROBEcpwZZ123"])
+    assert chaser.sub("x-PROBEcpwZZ123-y") == f"x-{CPASSWORD_MARKER}-y"
+    assert chaser.sub("xPROBEcpwZZ123y") == "xPROBEcpwZZ123y"  # not a whole token
+
+    from gpo_lens.model import Setting
+
+    estate = ingest.load_estate(B.build_probe_export(tmp_path / "export", sysvol=False))
+    gpo = estate.gpos[0]
+    gpo.settings.append(
+        Setting(
+            gpo.id,
+            "Computer",
+            "Synthetic",
+            "w",
+            "w",
+            "x",
+            {"@attr": {"cpassword": "Administrators"}},
+            False,
+        )
+    )
+    before = {g.id: (g.name, g.description) for g in estate.gpos}
+    db = tmp_path / "words.sqlite3"
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        save_estate(conn, estate)
+        stored = {r[0]: (r[1], r[2]) for r in conn.execute("SELECT id, name, description FROM gpo")}
+        trustees = {r[0] for r in conn.execute("SELECT trustee FROM delegation")}
+    assert stored == before
+    assert any("Authenticated Users" in t for t in trustees)
+
+
+def test_copy_in_an_identity_field_refuses_the_save(tmp_path: Path) -> None:
+    from gpo_lens.model import Setting
+    from gpo_lens.redaction import CredentialInIdentityError
+
+    estate = ingest.load_estate(B.build_probe_export(tmp_path / "export", sysvol=False))
+    gpo = estate.gpos[0]
+    gpo.settings.append(
+        Setting(
+            gpo.id,
+            "Computer",
+            "Synthetic",
+            "s",
+            "s",
+            "x",
+            {"@attr": {"cpassword": "PROBEcpwPATH9999"}},
+            False,
+        )
+    )
+    estate.soms[0].path = "OU=PROBEcpwPATH9999,DC=golden,DC=local"
+    db = tmp_path / "refuse.sqlite3"
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        with pytest.raises(CredentialInIdentityError, match=r"Som\.path") as caught:
+            save_estate(conn, estate)
+        assert "PROBEcpwPATH9999" not in str(caught.value)
+        conn.rollback()
+        assert conn.execute("SELECT count(*) FROM snapshot").fetchone() == (0,)
+    assert _file_leaks(db) == {}

@@ -12,15 +12,23 @@ one-way schema migration, so a patch number was not assumed).
   it was a block's first attribute, in the setting's display value, snapshot
   diffs and hash-chained `gpo.modified` event payloads), and kept the first
   four characters of each SYSVOL value in the cpassword finding. Ingest now
-  replaces every value with `[redacted cpassword]` before parsing: the
-  attribute in any casing or namespace, a `<cpassword>` element, an inline
-  `cpassword="…"` (including escaped XML stored as text), and copies of a found
-  value anywhere else in the report or in settings that repeat a SYSVOL value.
-  `save_estate` applies the same redaction as a backstop. The finding detail no
-  longer carries any characters (`mask_cpassword` returns `****`). No hash or
-  fingerprint is stored: trends count hits and the finding lifecycle tracks
-  presence per GPO, and any cpassword is already compromised, so rotation is
-  not a remediation and is not shown as a change.
+  discovers every labelled value (attribute in any casing or namespace,
+  `<cpassword>` element, inline `cpassword="…"` including escaped XML and
+  assignments split across XML nodes) in the report, SYSVOL and other inputs,
+  replaces it with `[redacted cpassword]`, and chases copies through every
+  descriptive field of the estate (GPO names and descriptions, settings, SOM,
+  WMI filter, OU, coverage-gap and principal names) and through finding text.
+  Copies are chased for values of at least 12 characters that look like GPP
+  ciphertext or mix letters and digits (whole tokens below 22 characters), and
+  from 8 characters inside the setting that carries the value; short or
+  word-like values are redacted only where labelled, so unrelated names are
+  never rewritten. A copy in an identity field (GUID, SID, SOM path, CSE name,
+  event type, …) refuses the import with `CredentialInIdentityError` instead
+  of corrupting it. `save_estate` applies the same redaction as a backstop.
+  The finding detail no longer carries any characters (`mask_cpassword`
+  returns `****`). No hash or fingerprint is stored: trends count hits and the
+  finding lifecycle tracks presence per GPO, and any cpassword is already
+  compromised, so rotation is not a remediation and is not shown as a change.
 
 ### Changed
 
@@ -30,13 +38,21 @@ one-way schema migration, so a patch number was not assumed).
 ### Upgrade notes
 
 - **Schema v11.** The first read-write open (`ingest`, `serve`, web upload)
-  scrubs stored cpassword values from every text column (setting raw, identity
-  and display text, finding detail, event payloads, triage notes), records a
-  `maintenance.cpassword_scrub` event, re-hashes the event chain from the
-  first rewritten event, then runs `VACUUM` and truncates the WAL. The version
-  is stamped only after that purge succeeds; if another process holds the
-  database it warns and retries on the next read-write open. Allow free disk
-  space about the size of the database. Read-only commands do not migrate.
+  discovers stored cpassword values in every text column (and in SYSVOL still
+  on disk at a stored path), scrubs labelled values and copies from the
+  descriptive columns (setting raw and display text, GPO names and
+  descriptions, finding text, event payloads, triage notes, …), refuses with
+  `CredentialInIdentityError` and changes nothing if a copy sits in an
+  identity column, re-hashes the event chain from the first rewritten event
+  while keeping any break that existed before, verifies the chain, and records
+  a `maintenance.cpassword_scrub` event (counts and event ids, never a value).
+  It then runs `VACUUM` and truncates the WAL. The version is stamped only
+  after the chain verifies again and no discovered value remains in the
+  database or WAL bytes; otherwise it warns and retries on the next read-write
+  open. A database created by this release is stamped directly (no scrub or
+  `VACUUM`), and `init_db` no longer writes to an up-to-date database. Allow
+  free disk space about the size of the database. Read-only commands do not
+  migrate.
 - Backups and original exports made before upgrading still contain the values.
 - A schema-v11 database cannot be opened by v1.4.0 or earlier.
 

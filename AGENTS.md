@@ -58,12 +58,18 @@ narrates facts the core computed. See `README.md` for the full charter.
 - **BOM-tolerant JSON:** collector JSON may carry a UTF-8 BOM (PowerShell 5.1).
   Always load with `utf-8-sig`.
 - **Import boundary:** Core modules (`model`, `normalize`, `ingest`, `store`, `queries`, `snapshot_diff`, `detection`, `admx_parser`, `display`, `report`, `events`, `sinks`, `query_dispatch`, `authz`, `topology`, `registry_pol`, `paths`, `danger`, `merge`, `trend`, `findings`, `finding_model`, `_legacy_findings`, `redaction`) must never import `narration` or `web`. An architecture test enforces this.
-- **No cpassword value at rest.** GPP `cpassword` values are redacted at
-  ingest (`redaction.redact_element_tree` on the whole report tree, before any
-  field is read) and again at the `save_estate` boundary. Never add a path that
-  stores, hashes or prints one; findings carry `CPASSWORD_FINDING_DETAIL` only.
-  Schema v11 scrubs older databases and purges free pages (`store._scrub_cpassword_at_rest`,
-  `_purge_free_pages`).
+- **No cpassword value at rest.** `redaction.redact_element_tree` redacts
+  labelled GPP `cpassword` values in the whole report tree before any field is
+  read, and `redaction.sanitize_estate` chases the values discovered (report,
+  SYSVOL, any input) through the estate — in `ingest.load_estate`, again in
+  `save_estate`, and through finding text in `evaluate_finding_lifecycle_v2`.
+  Copies are rewritten only in fields listed in `redaction.REWRITABLE_FIELDS`
+  (and `store.REWRITABLE_COLUMNS` for the v11 migration); anywhere else they
+  raise `CredentialInIdentityError`. When you add a model field or a column,
+  classify it there (unlisted means structural). Never add a path that stores,
+  hashes or prints a value; findings carry `CPASSWORD_FINDING_DETAIL` only.
+  Schema v11 scrubs older databases and purges free pages
+  (`store._scrub_cpassword_at_rest`, `_purge_free_pages`).
 
 ## Build / test / lint
 

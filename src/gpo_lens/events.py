@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -104,15 +105,20 @@ def append_events(
     return ids
 
 
-def rehash_event_chain(conn: sqlite3.Connection, from_id: int) -> list[int]:
+def rehash_event_chain(
+    conn: sqlite3.Connection, from_id: int, *, keep_broken: Iterable[int] = ()
+) -> list[int]:
     """Recompute stored hashes from event ``from_id`` onward; return changed ids.
 
     Only for a documented, audited rewrite of stored payloads (the v11
     cpassword scrub). The caller must append an event that records the rewrite,
     so the re-chained history still says it was changed and from where.
     Unhashed (``prev_hash IS NULL``) rows stay unhashed, as in
-    :func:`verify_event_chain`.
+    :func:`verify_event_chain`. Rows in ``keep_broken`` (breaks that existed
+    before the rewrite) keep their stored hash, so the rewrite never blesses
+    earlier tampering: they still fail verification afterwards.
     """
+    keep = set(keep_broken)
     row = conn.execute(
         "SELECT prev_hash FROM events WHERE id < ? ORDER BY id DESC LIMIT 1", (from_id,)
     ).fetchone()
@@ -126,6 +132,9 @@ def rehash_event_chain(conn: sqlite3.Connection, from_id: int) -> list[int]:
     for event_id, timestamp, event_type, payload, stored in rows:
         if stored is None:
             prev_hash = None
+            continue
+        if event_id in keep:
+            prev_hash = stored
             continue
         expected = _compute_hash(prev_hash, timestamp, event_type, payload)
         if expected != stored:
