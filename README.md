@@ -96,6 +96,22 @@ references, unlinked/empty GPOs, disabled but populated sides, coverage gaps
 and cited dangerous configurations. Baseline ZIP comparison uses an optional
 ADMX/ADML crosswalk to turn registry identities into policy names.
 
+**cpassword values are never stored.** A GPP `cpassword` is encrypted with a
+key Microsoft published (MS14-025), so it is a recoverable credential. Ingest
+replaces every value with `[redacted cpassword]` before anything is parsed or
+written: the attribute in any casing, a `<cpassword>` element, an inline
+`cpassword="…"` inside other text, and copies of a found value elsewhere in the
+estate. The finding is computed from the SYSVOL files at ingest and records
+only that a cpassword is present, with no characters of it. No hash is kept, so
+replacing one cpassword with another is not a visible change in diffs or
+events; the finding persists on the GPO until the attribute is removed, which
+is the remediation. The first read-write open by this release (`ingest`,
+`serve` or a web upload) scrubs databases written by earlier releases, then
+runs `VACUUM` and truncates the WAL so the old bytes do not survive in free
+pages. Allow free disk space about the size of the database for that one-time
+`VACUUM`. Read-only commands do not migrate. Original exports and backups made
+before the upgrade still contain the values; keep them restricted or delete them.
+
 For a staged rollout, set `GPO_LENS_LEGACY_NAV=1` before starting the server to
 restore the earlier primary links. Ask stays under Tools. Unset the variable
 and restart to return to the new navigation. This changes presentation;

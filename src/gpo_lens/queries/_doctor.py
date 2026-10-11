@@ -17,7 +17,6 @@ from gpo_lens.detection import (
     empty_gpos,
     enforced_links,
     excessive_writers,
-    mask_cpassword,
     ms16_072_vulnerable,
     scan_ilt,
     unlinked_gpos,
@@ -30,6 +29,7 @@ from gpo_lens.queries._wmi import (
     orphaned_wmi_filters,
     stale_gpos,
 )
+from gpo_lens.redaction import CPASSWORD_FINDING_DETAIL
 
 if TYPE_CHECKING:
     from gpo_lens.model import AdmxResolver, Estate
@@ -148,7 +148,7 @@ def estate_doctor(
                 gpo_id=hit.gpo_id,
                 gpo_name=hit.gpo_name,
                 summary=f"cpassword in {hit.file} <{hit.tag}> (MS14-025)",
-                detail=f"Encrypted password found: {mask_cpassword(hit.cpassword)}",
+                detail=CPASSWORD_FINDING_DETAIL,
             )
         )
 

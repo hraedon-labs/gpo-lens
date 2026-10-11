@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import dataclasses
 import hashlib
 import io
 import json
@@ -48,6 +49,12 @@ from gpo_lens.normalize import (
     children_by_localname as _children_by_localname,
 )
 from gpo_lens.paths import ci_child, ci_path
+from gpo_lens.redaction import (
+    MIN_KNOWN_VALUE_LENGTH,
+    redact_element_tree,
+    redact_text,
+    scrub_known_values,
+)
 from gpo_lens.registry_pol import parse_registry_pol
 
 # Decompression bomb guard: refuse to expand zip contents beyond this total.
@@ -1134,6 +1141,10 @@ def parse_report(xml_path: str | Path) -> list[Gpo]:
     root = tree.getroot()
     if root is None:
         return []
+    # GPP cpassword values (and copies of them) are redacted across the whole
+    # report before any field is extracted, so no setting identity, display
+    # value, raw subtree, diff or event can carry one (gpo_lens.redaction).
+    redact_element_tree(root)
     gpos: list[Gpo] = []
     root_is_gpo = _localname(root.tag) == "GPO"
     has_nested_gpo = any(_localname(child.tag) == "GPO" for child in root)
@@ -1165,6 +1176,7 @@ def parse_report_xml(xml_bytes: bytes) -> list[Gpo]:
     else:
         text = xml_bytes.decode("utf-8")
     root = ET.fromstring(text)
+    redact_element_tree(root)  # as in parse_report: before any field is read
     gpos: list[Gpo] = []
     root_is_gpo = _localname(root.tag) == "GPO"
     has_nested_gpo = any(_localname(child.tag) == "GPO" for child in root)
@@ -1293,6 +1305,9 @@ def _parse_single_gpo(gpo_elem: Element) -> Gpo | None:
 
     Returns ``None`` (with a warning) when the element has no valid
     identifier — callers should skip ``None`` results.
+
+    Callers redact the tree first (``redact_element_tree``), as
+    ``parse_report`` and ``parse_report_xml`` do.
     """
     id_elem = _child_by_localname(gpo_elem, "Identifier")
     raw_id = _text(_child_by_localname(id_elem, "Identifier")) if id_elem is not None else ""
@@ -2132,6 +2147,38 @@ def _try_action(path: Path, fn: Callable[..., None], label: str, *args: Any) -> 
         warnings.warn(f"Skipping {label}: {exc}", stacklevel=2)
 
 
+def redact_sysvol_cpassword_copies(gpos: list[Gpo]) -> None:
+    """Replace copies of SYSVOL cpassword values found in any setting.
+
+    The report tree is already redacted; this covers a SYSVOL value that also
+    appears in report-derived or SYSVOL-derived settings under another name
+    (across the estate, since a password is often reused between GPOs).
+    """
+    from gpo_lens.detection import cpassword_scan
+
+    values = {
+        hit.cpassword
+        for hit in cpassword_scan(Estate(gpos=gpos))
+        if len(hit.cpassword) >= MIN_KNOWN_VALUE_LENGTH
+    }
+    if not values:
+        return
+    for gpo in gpos:
+        for index, setting in enumerate(gpo.settings):
+            fields = (setting.identity, setting.display_name, setting.display_value)
+            blob = json.dumps(setting.raw) + "".join(fields)
+            if not any(v in blob for v in values):
+                continue
+            identity, name, value = (redact_text(f, values) for f in fields)
+            gpo.settings[index] = dataclasses.replace(
+                setting,
+                identity=identity,
+                display_name=name,
+                display_value=value,
+                raw=scrub_known_values(setting.raw, values),
+            )
+
+
 def load_estate(sample_dir: str | Path) -> Estate:
     """Orchestrate loading a full estate from a sample directory."""
     src = Path(sample_dir)
@@ -2184,6 +2231,7 @@ def load_estate(sample_dir: str | Path) -> Estate:
     # SYSVOL is present. No-op when SYSVOL wasn't copied or nothing is blocked.
     augment_blocked_registry_from_pol(gpos)
     augment_audit_from_csv(gpos)
+    redact_sysvol_cpassword_copies(gpos)
 
     wmi_filters = (
         _try_load(

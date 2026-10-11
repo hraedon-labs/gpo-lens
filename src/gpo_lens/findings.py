@@ -1679,7 +1679,7 @@ def evaluation_runs(
 # danger rules share an evaluator/version and their full rule content is hashed.
 INTRINSIC_DETECTOR_VERSIONS = {
     "coverage_gap": "1",
-    "cpassword": "1",
+    "cpassword": "2",
     "ms16_072": "1",
     "version_skew": "1",
     "dangling_link": "1",

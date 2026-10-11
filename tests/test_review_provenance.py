@@ -119,7 +119,8 @@ def test_pipeline_digest_records_checks_with_no_findings(monkeypatch, change):
         estate = Estate(domain="lab.example.com")
         store.save_evaluated_estate(conn, estate)
         if change == "detector_version":
-            monkeypatch.setitem(findings.INTRINSIC_DETECTOR_VERSIONS, "cpassword", "2")
+            current = findings.INTRINSIC_DETECTOR_VERSIONS["cpassword"]
+            monkeypatch.setitem(findings.INTRINSIC_DETECTOR_VERSIONS, "cpassword", current + "r")
         else:
             rules = [replace(rules[0], value="synthetic revised expected value"), *rules[1:]]
         store.save_evaluated_estate(conn, estate)

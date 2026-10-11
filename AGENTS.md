@@ -57,7 +57,13 @@ narrates facts the core computed. See `README.md` for the full charter.
   joins use it (see `normalize.canonical_guid`).
 - **BOM-tolerant JSON:** collector JSON may carry a UTF-8 BOM (PowerShell 5.1).
   Always load with `utf-8-sig`.
-- **Import boundary:** Core modules (`model`, `normalize`, `ingest`, `store`, `queries`, `snapshot_diff`, `detection`, `admx_parser`, `display`, `report`, `events`, `sinks`, `query_dispatch`, `authz`, `topology`, `registry_pol`, `paths`, `danger`, `merge`, `trend`, `findings`, `finding_model`, `_legacy_findings`) must never import `narration` or `web`. An architecture test enforces this.
+- **Import boundary:** Core modules (`model`, `normalize`, `ingest`, `store`, `queries`, `snapshot_diff`, `detection`, `admx_parser`, `display`, `report`, `events`, `sinks`, `query_dispatch`, `authz`, `topology`, `registry_pol`, `paths`, `danger`, `merge`, `trend`, `findings`, `finding_model`, `_legacy_findings`, `redaction`) must never import `narration` or `web`. An architecture test enforces this.
+- **No cpassword value at rest.** GPP `cpassword` values are redacted at
+  ingest (`redaction.redact_element_tree` on the whole report tree, before any
+  field is read) and again at the `save_estate` boundary. Never add a path that
+  stores, hashes or prints one; findings carry `CPASSWORD_FINDING_DETAIL` only.
+  Schema v11 scrubs older databases and purges free pages (`store._scrub_cpassword_at_rest`,
+  `_purge_free_pages`).
 
 ## Build / test / lint
 
@@ -113,6 +119,7 @@ a DC/RSAT box). The tool consumes its output dir.
 | `sinks.py` | Event sinks for NDJSON file export and Splunk HEC |
 | `query_dispatch.py` | Centralized query dispatch table (single source of truth for CLI and web) |
 | `merge.py` | Per-CSE merge-resolution model + principal resultant (Plan 021). Token, security-gate eval, CSE merge modes |
+| `redaction.py` | Ingest-time GPP `cpassword` redaction (element tree, stored JSON, inline text); `CPASSWORD_MARKER`, `CPASSWORD_FINDING_DETAIL` |
 | `trend.py` | Posture-over-time metrics from snapshot history — `compute_trend`, `changes_only`, `sparkline`, `TrendPoint` |
 | `finding_model.py` | Plan 024 — durable finding identity protocol (`FindingCandidate`, `EvidenceRef`, `ClaimLevel`), fingerprint computation, occurrence/observation/triage data types, core query result types |
 | `narration.py` | Tier 3 — LLM narration (`call_llm`, `explain_findings`, `route_question`). Optional; core never imports this |

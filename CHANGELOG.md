@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+Draft **v1.5.0** — release target and date TBD by the owner (it carries a
+one-way schema migration, so a patch number was not assumed).
+
+### Security
+
+- **GPP cpassword values are no longer stored.** v1.4.0 and earlier kept a
+  `cpassword` found in the GPMC report verbatim in `setting.raw` (and, where
+  it was a block's first attribute, in the setting's display value, snapshot
+  diffs and hash-chained `gpo.modified` event payloads), and kept the first
+  four characters of each SYSVOL value in the cpassword finding. Ingest now
+  replaces every value with `[redacted cpassword]` before parsing: the
+  attribute in any casing or namespace, a `<cpassword>` element, an inline
+  `cpassword="…"` (including escaped XML stored as text), and copies of a found
+  value anywhere else in the report or in settings that repeat a SYSVOL value.
+  `save_estate` applies the same redaction as a backstop. The finding detail no
+  longer carries any characters (`mask_cpassword` returns `****`). No hash or
+  fingerprint is stored: trends count hits and the finding lifecycle tracks
+  presence per GPO, and any cpassword is already compromised, so rotation is
+  not a remediation and is not shown as a change.
+
+### Changed
+
+- The cpassword detector matches the attribute name in any casing and a
+  `<cpassword>` element (detector version 2).
+
+### Upgrade notes
+
+- **Schema v11.** The first read-write open (`ingest`, `serve`, web upload)
+  scrubs stored cpassword values from every text column (setting raw, identity
+  and display text, finding detail, event payloads, triage notes), records a
+  `maintenance.cpassword_scrub` event, re-hashes the event chain from the
+  first rewritten event, then runs `VACUUM` and truncates the WAL. The version
+  is stamped only after that purge succeeds; if another process holds the
+  database it warns and retries on the next read-write open. Allow free disk
+  space about the size of the database. Read-only commands do not migrate.
+- Backups and original exports made before upgrading still contain the values.
+- A schema-v11 database cannot be opened by v1.4.0 or earlier.
+
 ## v1.4.0 — 2026-10-06
 
 ### Added

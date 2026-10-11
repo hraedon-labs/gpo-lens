@@ -68,9 +68,13 @@ common security issues: no AU/DC read (MS16-072), too many write principals
 
 ## AC-10: cpassword scan (MS14-025)
 `cpassword_scan(estate) -> list[CpasswordHit]` — scans SYSVOL GPP Preference XML
-for lingering `cpassword` attributes. Each `CpasswordHit` records the GPO, file,
-tag, and cpassword value. Uses the unified GPP XML walker (`_walk_gpp_xml`) with
-`only_known=True` to scan only well-known GPP file names.
+for lingering `cpassword` attributes (attribute name matched in any casing and
+namespace; a `<cpassword>` element's text also counts). Each `CpasswordHit`
+records the GPO, file, tag, and cpassword value, read from the SYSVOL file at
+scan time; the value is never persisted. The persisted finding's detail is the
+fixed `redaction.CPASSWORD_FINDING_DETAIL`, and `mask_cpassword` returns `****`
+with no characters of the value. Uses the unified GPP XML walker
+(`_walk_gpp_xml`) with `only_known=True` to scan only well-known GPP file names.
 
 ## AC-11: Full-text search
 `search(estate, term: str, scope: str = "all") -> list[SearchResult]` — search
