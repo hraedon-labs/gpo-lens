@@ -28,6 +28,7 @@ from gpo_lens import ingest as _ingest
 from gpo_lens import store as _store
 from gpo_lens.collection_zip import collector_root
 from gpo_lens.model import Estate
+from gpo_lens.redaction import describe_error, guarded_diagnostics
 from gpo_lens.web._helpers import get_ro_conn, get_rw_conn, stream_upload_to_file
 
 # _audit and _safe_extract reference module-level state on app.py that tests
@@ -60,6 +61,15 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
         file: UploadFile = File(...),
         principal: Principal = Depends(requires(Permission.INGEST)),
     ) -> HTMLResponse | RedirectResponse:
+        # One diagnostics guard spans the request: values discovered by the
+        # load and save stay known until the response, logs and audit entry
+        # are written (redaction.guarded_diagnostics).
+        with guarded_diagnostics():
+            return await _ingest_post(request, file, principal)
+
+    async def _ingest_post(
+        request: Request, file: UploadFile, principal: Principal
+    ) -> HTMLResponse | RedirectResponse:
         lock = app.state.ingest_lock
         if not lock.acquire(blocking=False):
             _audit("ingest", principal, "failure", "another ingest in progress", request)
@@ -85,6 +95,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                     {"error": "Upload exceeds 500MB limit."},
                     status_code=413,
                 )
+            upload_bytes = zip_path.stat().st_size
             try:
                 extract_dir = Path(tmpdir) / "extracted"
                 extract_dir.mkdir()
@@ -97,12 +108,14 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                 RuntimeError,
                 MemoryError,
             ) as exc:
-                _logger.warning("Malformed zip upload: %s", exc)
+                # Upload names and member names are never echoed.
+                reason = describe_error(exc)
+                _logger.warning("Malformed zip upload: %s", reason)
                 _audit("ingest", principal, "failure", type(exc).__name__, request)
                 return templates.TemplateResponse(
                     request,
                     "ingest.html",
-                    {"error": f"Malformed zip file: {exc}"},
+                    {"error": f"Malformed zip file: {reason}"},
                     status_code=400,
                 )
 
@@ -113,7 +126,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
 
                 estate = await asyncio.to_thread(_load_upload)
             except (FileNotFoundError, ValueError, KeyError) as exc:
-                _logger.warning("Invalid estate data: %s", exc)
+                _logger.warning("Invalid estate data: %s", describe_error(exc))
                 _audit("ingest", principal, "failure", type(exc).__name__, request)
                 return templates.TemplateResponse(
                     request,
@@ -146,7 +159,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             try:
                 await asyncio.to_thread(_persist)
             except Exception as exc:
-                _logger.error("Estate import failed: %s", exc)
+                _logger.error("Estate import failed: %s", describe_error(exc))
                 _audit("ingest", principal, "failure", type(exc).__name__, request)
                 return templates.TemplateResponse(
                     request,
@@ -155,12 +168,12 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                     status_code=500,
                 )
 
-            filename = (file.filename or "unknown")[:256]
+            # The client-supplied upload name is never recorded; the size is.
             _audit(
                 "ingest",
                 principal,
                 "success",
-                f"{filename} ({len(estate.gpos)} GPOs)",
+                f"upload of {upload_bytes} bytes ({len(estate.gpos)} GPOs)",
                 request,
             )
             return RedirectResponse(url=request.url_for("home"), status_code=303)

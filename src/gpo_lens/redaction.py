@@ -72,8 +72,11 @@ import dataclasses
 import json
 import logging
 import re
+import threading
 import warnings
-from collections.abc import Iterable, Iterator
+import zipfile
+import zlib
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, cast
@@ -526,68 +529,134 @@ def _apply_spans(segments: list[list[Any]], texts: list[str], spans: list[tuple[
 
 
 def _element_nodes(obj: Any) -> Iterator[dict[str, Any]]:
-    """``element_to_dict`` nodes with children, deepest first."""
+    """``element_to_dict`` nodes, deepest first."""
     if isinstance(obj, dict):
         for child in obj.get("children", []) or []:
             yield from _element_nodes(child)
-        if "tag" in obj and obj.get("children"):
+        if "tag" in obj:
             yield obj
     elif isinstance(obj, list):
         for item in obj:
             yield from _element_nodes(item)
 
 
-def joined_text(obj: Any) -> str:
-    """All element text of an ``element_to_dict`` structure, in document order.
+def _chase_segments(obj: dict[str, Any]) -> Iterator[list[Any]]:
+    """Value segments of an element subtree for copy chasing, in document
+    order: each element's attribute values, then its text, then its children.
 
-    The joined text of any subtree is a substring of this, so it serves as a
-    superset gate for :func:`chase_joined`.
+    A copy may be split across attribute values, text, and descendants'
+    attributes or text; all of them are descriptive raw data.
+    """
+    attrs = obj.get("@attr")
+    if isinstance(attrs, dict):
+        for key in attrs:
+            yield [attrs, key]
+    yield [obj, "text"]
+    for child in obj.get("children", []) or []:
+        if isinstance(child, dict):
+            yield from _chase_segments(child)
+
+
+def joined_text(obj: Any) -> str:
+    """All attribute values and text of an ``element_to_dict`` structure.
+
+    The joined value text of any subtree is a substring of this, so it serves
+    as a superset gate for :func:`chase_joined`.
     """
     if isinstance(obj, dict) and "tag" in obj:
-        return "".join(_segment_get(seg) for seg in _dict_segments(obj))
+        return "".join(_segment_get(seg) for seg in _chase_segments(obj))
     if isinstance(obj, list):
         return "\x00".join(joined_text(item) for item in obj)
     return ""
 
 
-def _joined_spans(node: dict[str, Any], chaser: Chaser) -> list[tuple[int, int]]:
-    segments = list(_dict_segments(node))
+# Two joins per element: text only (a value split across text nodes stays
+# contiguous even when attributes sit between them), and every value in
+# document order (attribute values too).
+def _joins() -> tuple[Callable[[dict[str, Any]], Iterator[list[Any]]], ...]:
+    return (_dict_segments, _chase_segments)
+
+
+def _joined_spans(
+    node: dict[str, Any], chaser: Chaser, join: Callable[[dict[str, Any]], Iterator[list[Any]]]
+) -> tuple[list[list[Any]], list[str], list[tuple[int, int]]]:
+    segments = list(join(node))
     texts = [_segment_get(seg) for seg in segments]
     if sum(1 for t in texts if t) < 2:
-        return []  # a single text node is covered by the per-string chase
-    return chaser._spans("".join(texts))
+        return segments, texts, []  # a single value is covered by the per-string chase
+    return segments, texts, chaser._spans("".join(texts))
+
+
+def joined_hits(obj: Any, chaser: Chaser) -> bool:
+    """A copy split across an element subtree's values remains."""
+    return bool(chaser.values) and any(
+        _joined_spans(node, chaser, join)[2] for join in _joins() for node in _element_nodes(obj)
+    )
 
 
 def chase_joined(
-    obj: Any, chaser: Chaser, location: str, *, rewritable: bool, field: str = ""
+    obj: Any,
+    chaser: Chaser,
+    location: str,
+    *,
+    rewritable: bool,
+    field: str = "",
+    pieces: set[str] | None = None,
 ) -> Any:
-    """Chase copies split across an element subtree's text nodes.
+    """Chase copies split across an element subtree's attribute values and text.
 
-    ``<P>AAEC…<Span>…Dw==</Span></P>``: the joined text of an element (its text
-    and every descendant's, as stored by ``element_to_dict``) is matched under
-    the same rules, deepest element first, and the spanning pieces are
-    redacted in place. Returns a new structure when anything changed; in a
-    non-rewritable field a match refuses instead.
+    ``<P>AAEC…<Span>…Dw==</Span></P>`` or ``<P a="AAEC…" b="…Dw=="/>``: the
+    joined values of an element (its text and descendants' text; and, as a
+    second join, attribute values, text, then descendants', as stored by
+    ``element_to_dict``) are matched under the same rules, deepest element
+    first, and the spanning pieces are redacted in place. Returns a new
+    structure when anything changed; in a non-rewritable field a match refuses
+    instead.
     """
     if not chaser.values or not isinstance(obj, (dict, list)):
         return obj
-    if not chaser.contains(joined_text(obj)):
+    if not chaser.contains(joined_text(obj)) and not chaser.contains(_text_join(obj)):
         return obj
-    if not any(_joined_spans(node, chaser) for node in _element_nodes(obj)):
+    if not joined_hits(obj, chaser):
         return obj
     if not rewritable:
         raise CredentialInIdentityError(f"{field or 'value'} ({location})")
     new = copy.deepcopy(obj)
-    for node in _element_nodes(new):
-        segments = list(_dict_segments(node))
-        texts = [_segment_get(seg) for seg in segments]
-        _apply_spans(segments, texts, _joined_spans(node, chaser))
+    for join in _joins():
+        for node in _element_nodes(new):
+            segments, texts, spans = _joined_spans(node, chaser, join)
+            if pieces is not None:
+                pieces.update(_span_pieces(texts, spans))
+            _apply_spans(segments, texts, spans)
     return new
 
 
-def joined_hits(obj: Any, chaser: Chaser) -> bool:
-    """A copy split across an element subtree's text nodes remains."""
-    return bool(chaser.values) and any(_joined_spans(node, chaser) for node in _element_nodes(obj))
+def _span_pieces(texts: list[str], spans: list[tuple[int, int]]) -> set[str]:
+    """The parts of each span that fall in each segment (the split pieces).
+
+    A record that derived another field from one piece (a display value taken
+    from an attribute) has that piece chased through it too.
+    """
+    out: set[str] = set()
+    position = 0
+    for text in texts:
+        lo, hi = position, position + len(text)
+        for start, end in spans:
+            a, b = max(start, lo), min(end, hi)
+            if a < b:
+                piece = text[a - lo : b - lo].strip()
+                if piece:
+                    out.add(piece)
+        position = hi
+    return out
+
+
+def _text_join(obj: Any) -> str:
+    if isinstance(obj, dict) and "tag" in obj:
+        return "".join(_segment_get(seg) for seg in _dict_segments(obj))
+    if isinstance(obj, list):
+        return "\x00".join(_text_join(item) for item in obj)
+    return ""
 
 
 # --- JSON-like structures -------------------------------------------------------
@@ -732,6 +801,7 @@ def chase(value: Any, chaser: Chaser, location: str, *, rewritable: bool, field:
         cls = type(value).__name__
         allowed = REWRITABLE_FIELDS.get(cls, frozenset())
         changes: dict[str, Any] = {}
+        pieces: set[str] = set()
         for f in dataclasses.fields(value):
             if f.name.startswith("_"):
                 continue
@@ -739,9 +809,23 @@ def chase(value: Any, chaser: Chaser, location: str, *, rewritable: bool, field:
             label = f"{cls}.{f.name}"
             new = chase(old, chaser, location, rewritable=f.name in allowed, field=label)
             if isinstance(new, (dict, list)) and not chaser.local:
-                new = chase_joined(new, chaser, location, rewritable=f.name in allowed, field=label)
+                new = chase_joined(
+                    new,
+                    chaser,
+                    location,
+                    rewritable=f.name in allowed,
+                    field=label,
+                    pieces=pieces,
+                )
             if new is not old:
                 changes[f.name] = new
+        if pieces and cls == "Setting":
+            # Fields derived from a split piece (display value from an attribute).
+            local = Chaser(pieces, local=True)
+            for name in ("identity", "display_name", "display_value"):
+                current = changes.get(name, getattr(value, name))
+                if local.hits(current):
+                    changes[name] = local.sub(current)
         return dataclasses.replace(value, **changes) if changes else value
     if isinstance(value, (dict, list, tuple)):
         if value and isinstance(value, (dict, list)) and not _needs_walk(_blob(value), chaser):
@@ -837,6 +921,23 @@ def _dedupe_identities(gpo: Gpo) -> None:
 def sanitize_estate(
     estate: Estate, known: Iterable[str] = (), *, retain_serialized: bool = False
 ) -> frozenset[str]:
+    """Redact labelled values, then chase every copy across the estate, in place
+    (see :func:`_sanitize_estate`). The per-run caches are released on any
+    failure, and on success unless *retain_serialized* asks to keep the JSON
+    text for :func:`stored_json`."""
+    try:
+        values = _sanitize_estate(estate, known)
+    except BaseException:
+        _blob_memo.clear()
+        _text_memo.clear()
+        raise
+    if not retain_serialized:
+        _blob_memo.clear()
+    _text_memo.clear()
+    return values
+
+
+def _sanitize_estate(estate: Estate, known: Iterable[str]) -> frozenset[str]:
     """Redact labelled values, then chase every copy across the estate, in place.
 
     *known* adds values discovered elsewhere (the report tree, SYSVOL files).
@@ -898,12 +999,7 @@ def sanitize_estate(
             chased_gpos.append(new_gpo)
         others = chase(dataclasses.replace(estate, gpos=[]), chaser, "estate", rewritable=False)
         _assign(estate, others, gpos=chased_gpos)
-    try:
-        residual = residual_locations(estate, found)
-    finally:
-        if not retain_serialized:
-            _blob_memo.clear()
-        _text_memo.clear()
+    residual = residual_locations(estate, found)
     if residual:
         raise CpasswordResidualError(residual[0])
     values = frozenset(found)
@@ -1035,8 +1131,9 @@ def _gpo_settings_text(gpo: Gpo) -> str:
         if blob is None:
             return ""  # not serializable: callers fall back to per-setting tests
         parts.append(_JSON_ESCAPE.sub(" ", blob) if "\\" in blob else blob)
-        if '"children"' in blob:
-            parts.append(joined_text(setting.raw))  # copies split across nodes
+        if '"children"' in blob or '"@attr"' in blob:
+            parts.append(joined_text(setting.raw))  # copies split across values
+            parts.append(_text_join(setting.raw))
     return "\x00".join(parts)
 
 
@@ -1105,7 +1202,9 @@ def _setting_hits(setting: Any, chaser: Chaser) -> bool:
     blob = _raw_blob(setting.raw)
     if blob is None or chaser.hits_json(blob):
         return True
-    return '"children"' in blob and chaser.contains(joined_text(setting.raw))
+    return ('"children"' in blob or '"@attr"' in blob) and (
+        chaser.contains(joined_text(setting.raw)) or chaser.contains(_text_join(setting.raw))
+    )
 
 
 def _assign(estate: Estate, source: Estate, *, gpos: list[Gpo]) -> None:
@@ -1209,24 +1308,69 @@ def scrub_diagnostic(text: str, values: Iterable[str] | None = None) -> str:
     return chaser.sub(text) if chaser and chaser.hits(text) else text
 
 
+def _scrub_any(value: Any, pool: set[str]) -> Any:
+    if isinstance(value, str):
+        return scrub_diagnostic(value, pool)
+    if isinstance(value, (bytes, bytearray)):
+        return value.__class__(scrub_diagnostic(bytes(value).decode("latin-1"), pool), "latin-1")
+    if isinstance(value, dict):
+        return {_scrub_any(k, pool): _scrub_any(v, pool) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return value.__class__(_scrub_any(v, pool) for v in value)
+    return value
+
+
 def scrub_exception(exc: BaseException | None, values: Iterable[str] | None = None) -> None:
-    """Scrub an exception's message (and chained ones) in place."""
+    """Scrub an exception in place: arguments (also structured ones), the usual
+    message attributes, notes, sub-exceptions of a group, and chained ones."""
     pool = set(_active_values() if values is None else values)
     seen: set[int] = set()
-    while exc is not None and id(exc) not in seen:
-        seen.add(id(exc))
-        exc.args = tuple(scrub_diagnostic(a, pool) if isinstance(a, str) else a for a in exc.args)
-        for attr in ("msg", "filename", "filename2", "strerror", "text"):
-            value = getattr(exc, attr, None)
-            if isinstance(value, str):
+    pending: list[BaseException | None] = [exc]
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        try:
+            current.args = tuple(_scrub_any(a, pool) for a in current.args)
+        except (TypeError, ValueError):
+            pass
+        for attr in ("msg", "filename", "filename2", "strerror", "text", "doc", "object"):
+            value = getattr(current, attr, None)
+            if isinstance(value, (str, bytes, bytearray)):
                 try:
-                    setattr(exc, attr, scrub_diagnostic(value, pool))
+                    setattr(current, attr, _scrub_any(value, pool))
                 except (AttributeError, TypeError):
                     pass
-        notes = getattr(exc, "__notes__", None)
+        notes = getattr(current, "__notes__", None)
         if isinstance(notes, list):
-            notes[:] = [scrub_diagnostic(n, pool) if isinstance(n, str) else n for n in notes]
-        exc = exc.__cause__ or exc.__context__
+            notes[:] = [_scrub_any(n, pool) for n in notes]
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
+        pending.extend((current.__cause__, current.__context__))
+
+
+def describe_error(exc: BaseException) -> str:
+    """A diagnostic for *exc* that never repeats an externally supplied name.
+
+    OS errors give errno and strerror without the file name; ZIP and codec
+    errors (whose messages quote member names) give their kind only; anything
+    else is scrubbed against the active values.
+    """
+    if isinstance(exc, OSError):
+        reason = exc.strerror or type(exc).__name__
+        return f"{reason} (errno {exc.errno})" if exc.errno is not None else reason
+    if isinstance(exc, zipfile.BadZipFile):
+        return "corrupt or unsupported ZIP data"
+    if isinstance(exc, (KeyError, RuntimeError, NotImplementedError, EOFError, zlib.error)):
+        return type(exc).__name__
+    return scrub_diagnostic(str(exc))
+
+
+# Pools of every guard active in any thread, for log records created in a
+# thread that did not inherit the guard's context (scrubbing more is safe).
+_GLOBAL_POOLS: list[set[str]] = []
+_GLOBAL_LOCK = threading.Lock()
 
 
 @contextmanager
@@ -1237,10 +1381,17 @@ def guarded_diagnostics(values: set[str] | None = None) -> Iterator[set[str]]:
     raised inside are re-emitted on exit (also when an exception escapes),
     scrubbed against every value known by then, including those of enclosing
     guards. An escaping exception is scrubbed in place. Log records created
-    inside are scrubbed against the values known at that moment.
+    inside (in any thread) are scrubbed against the values known at that
+    moment. On exit the guard's values are added to the enclosing guard's, so
+    a value set lives for the whole outer operation (CLI command, web
+    request), until its last emission.
     """
     pool: set[str] = set() if values is None else values
-    token = _ACTIVE_VALUES.set((*_ACTIVE_VALUES.get(), pool))
+    enclosing = _ACTIVE_VALUES.get()
+    token = _ACTIVE_VALUES.set((*enclosing, pool))
+    _install_record_factory()
+    with _GLOBAL_LOCK:
+        _GLOBAL_POOLS.append(pool)
     caught: list[warnings.WarningMessage] = []
     try:
         with warnings.catch_warnings(record=True) as recorded:
@@ -1255,27 +1406,84 @@ def guarded_diagnostics(values: set[str] | None = None) -> Iterator[set[str]]:
     finally:
         everything = _active_values()
         _ACTIVE_VALUES.reset(token)
+        with _GLOBAL_LOCK:
+            for i in range(len(_GLOBAL_POOLS) - 1, -1, -1):
+                if _GLOBAL_POOLS[i] is pool:
+                    del _GLOBAL_POOLS[i]
+                    break
+        if enclosing:
+            enclosing[-1].update(pool)
         for item in caught:
-            message = item.message
-            text = scrub_diagnostic(str(message), everything)
+            text = scrub_diagnostic(str(item.message), everything)
             category = item.category if isinstance(item.category, type) else UserWarning
             warnings.warn_explicit(text, category, item.filename, item.lineno or 0)
 
 
-_base_record_factory = logging.getLogRecordFactory()
+def _record_values() -> set[str]:
+    out = _active_values()
+    with _GLOBAL_LOCK:
+        for pool in _GLOBAL_POOLS:
+            out |= pool
+    return out
 
 
-def _scrubbing_record_factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
-    record = _base_record_factory(*args, **kwargs)
-    if _ACTIVE_VALUES.get():
-        message = record.getMessage()
-        clean = scrub_diagnostic(message)
-        if clean != message:
-            record.msg, record.args = clean, None
-        if record.exc_info and record.exc_info[1] is not None:
-            scrub_exception(record.exc_info[1])
-    return record
+def _wrap_factory(base: Callable[..., logging.LogRecord]) -> Callable[..., logging.LogRecord]:
+    def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
+        record = base(*args, **kwargs)
+        if _ACTIVE_VALUES.get() or _GLOBAL_POOLS:
+            values = _record_values()
+            message = record.getMessage()
+            clean = scrub_diagnostic(message, values)
+            if clean != message:
+                record.msg, record.args = clean, None
+            if record.exc_info and record.exc_info[1] is not None:
+                scrub_exception(record.exc_info[1], values)
+        return record
+
+    factory.gpo_lens_scrubbing = True  # type: ignore[attr-defined]
+    return factory
 
 
-if getattr(logging.getLogRecordFactory(), "__name__", "") != "_scrubbing_record_factory":
-    logging.setLogRecordFactory(_scrubbing_record_factory)
+def _install_record_factory() -> None:
+    """(Re)install the scrubbing record factory around whatever is current, so
+    a library that replaced the factory after import does not disable it."""
+    current = logging.getLogRecordFactory()
+    if not getattr(current, "gpo_lens_scrubbing", False):
+        logging.setLogRecordFactory(_wrap_factory(current))
+
+
+_install_record_factory()
+
+
+class ScrubbingStream:
+    """A text stream proxy that scrubs each write while any guard holds values.
+
+    Installed over ``sys.stdout``/``sys.stderr`` for a CLI command so that
+    printed output is scrubbed against the command's discovered values, like
+    warnings, logs and exceptions.
+    """
+
+    def __init__(self, stream: Any) -> None:
+        self._stream = stream
+
+    def write(self, text: str) -> int:
+        if isinstance(text, str) and (_ACTIVE_VALUES.get() and _active_values()):
+            text = scrub_diagnostic(text)
+        return int(self._stream.write(text) or 0)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
+
+
+@contextmanager
+def scrubbed_standard_streams() -> Iterator[None]:
+    """Route ``sys.stdout``/``sys.stderr`` through :class:`ScrubbingStream`."""
+    import sys
+
+    saved = sys.stdout, sys.stderr
+    sys.stdout = cast(Any, ScrubbingStream(saved[0]))
+    sys.stderr = cast(Any, ScrubbingStream(saved[1]))
+    try:
+        yield
+    finally:
+        sys.stdout, sys.stderr = saved

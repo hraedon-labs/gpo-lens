@@ -10,10 +10,13 @@ import logging
 import shutil
 import stat
 import zipfile
+import zlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+from gpo_lens.redaction import describe_error
 
 MAX_ARCHIVE_BYTES = 500 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
@@ -116,21 +119,36 @@ def safe_extract(
                 if key in targets:
                     raise ValueError(f"zip duplicate path blocked (member {index})")
                 targets.add(key)
-                if member.endswith("/"):
-                    target.mkdir(parents=True, exist_ok=True)
-                    continue
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with zf.open(info) as src:
-                    wrapped = SizeLimitedReader(src, max_uncompressed_bytes - total_bytes_read)
-                    with open(target, "wb") as out:
-                        while True:
-                            chunk = wrapped.read(65536)
-                            if not chunk:
-                                break
-                            out.write(chunk)
-                    total_bytes_read += wrapped._total
-                    if total_bytes_read > max_uncompressed_bytes:
-                        raise ValueError("zip uncompressed size exceeds limit")
+                try:
+                    if member.endswith("/"):
+                        target.mkdir(parents=True, exist_ok=True)
+                        continue
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(info) as src:
+                        wrapped = SizeLimitedReader(src, max_uncompressed_bytes - total_bytes_read)
+                        with open(target, "wb") as out:
+                            while True:
+                                chunk = wrapped.read(65536)
+                                if not chunk:
+                                    break
+                                out.write(chunk)
+                        total_bytes_read += wrapped._total
+                except (
+                    OSError,
+                    zipfile.BadZipFile,
+                    EOFError,
+                    RuntimeError,
+                    NotImplementedError,
+                    zlib.error,
+                ) as exc:
+                    # These messages quote the member name or target path
+                    # (attacker-controlled); report the position and the kind
+                    # only, and drop the chained original.
+                    raise ValueError(
+                        f"zip member {index} could not be extracted ({describe_error(exc)})"
+                    ) from None
+                if total_bytes_read > max_uncompressed_bytes:
+                    raise ValueError("zip uncompressed size exceeds limit")
                 if target.is_symlink():
                     raise ValueError(f"zip symlink blocked (member {index})")
                 extracted = target.resolve()

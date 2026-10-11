@@ -35,7 +35,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     if args.baseline:
         baseline_path = Path(args.baseline)
         if not baseline_path.exists():
-            print(f"Baseline file not found: {baseline_path}", file=sys.stderr)
+            print("Baseline file not found (check --baseline)", file=sys.stderr)
             return 1
         try:
             data = json.loads(baseline_path.read_text(encoding="utf-8-sig"))
@@ -61,7 +61,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     if args.since is not None:
         db = Path(args.db)
         if not db.exists():
-            print(f"Database not found: {db}", file=sys.stderr)
+            print("Database not found (check --db)", file=sys.stderr)
             return 1
         conn = sqlite3.connect(str(db))
         try:

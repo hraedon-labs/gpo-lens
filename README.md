@@ -108,8 +108,10 @@ value under another name (a GPO name or description, a path, another setting,
 a SOM or WMI filter field) are replaced too. Values are compared canonically
 — whitespace inside the value, the URL-safe base64 alphabet and `=` padding do
 not matter — and the replacement covers the copy as written, including a copy
-split across the text of nested XML elements (`<P>AAEC…<Span>…Dw==</Span></P>`),
-whose pieces are redacted in place. Two limits keep
+split across the text or attribute values of nested XML elements
+(`<P>AAEC…<Span>…Dw==</Span></P>`, `<P a="AAEC…" b="…Dw=="/>`), whose pieces
+are redacted in place (a field derived from one piece, such as a display value
+taken from an attribute, loses that piece too). Two limits keep
 the redaction from rewriting unrelated facts:
 
 - Copies are chased only for values of at least 12 characters that look like
@@ -132,7 +134,12 @@ database, `-wal`, `-shm` and `-journal`; any remaining value refuses the
 import with nothing stored. Diagnostics follow the same rule: warnings raised
 while loading are held back until every value of the import is known, then
 scrubbed, as are log records and error messages, including those for skipped
-GPOs and rejected inputs; ZIP errors cite a member's position, never its name.
+GPOs and rejected inputs. The guard spans the whole CLI command or web request,
+so the values stay known until its last line of output, log record, HTTP
+response and `audit.log` entry. Externally supplied names are never echoed at
+all: ZIP errors cite a member's position (and the OS error, without the path),
+CLI path arguments are cited by position, and the audit log records an upload's
+size, not its file name.
 The finding is computed from the SYSVOL files at
 ingest and records only that a cpassword is present, with no characters of it.
 No hash is kept, so replacing one cpassword with another is not a visible
@@ -143,8 +150,11 @@ The first read-write open by this release (`ingest`, `serve` or a web upload)
 scrubs databases written by earlier releases: it discovers values in every
 column whatever its declared type or the value's storage class (BLOBs are read
 as Latin-1/UTF-8 and UTF-16), and in SYSVOL still on disk at a stored path,
-rewrites them (one in an identity column refuses the upgrade; one it cannot
-rewrite exactly fails the verification below), re-hashes the event chain from the first
+rewrites them (one in an identity column refuses the upgrade; a BLOB is
+rewritten in place in an exactly round-tripping reading, including misaligned
+or odd-length UTF-16, and a BLOB whose value shows only in a reading that cannot
+be written back exactly is replaced whole, so it can never pin the database at
+schema 10), re-hashes the event chain from the first
 rewritten event, and verifies the result by rediscovering over every column.
 The set of events that fail verification must be exactly the same before and
 after: an earlier break stays a break even if a rewritten payload would match

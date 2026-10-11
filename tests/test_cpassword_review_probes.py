@@ -808,3 +808,91 @@ def test_ds_r3_copy_split_across_xml_elements(tmp_path: Path) -> None:
         raw = conn.execute("SELECT raw FROM setting WHERE raw LIKE '%Span%'").fetchone()[0]
         assert json.loads(raw)["children"][0]["children"][0]["tag"] == "Span"
     assert _file_hits(db, (value, a, b)) == {}
+
+
+# --- Round 5 non-blocking items ---------------------------------------------------
+
+R5_V = base64.b64encode(bytes(range(16, 32))).decode()
+R5_A, R5_B = R5_V[:12], R5_V[12:]
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        f'<Properties path="{R5_A}">{R5_B}</Properties>',
+        f'<Properties p="{R5_A}" q="{R5_B}"/>',
+        f'<Properties p="{R5_A}"><Span q="{R5_B}"/></Properties>',
+        f'<Properties path="q">{R5_A}<Span deep="{R5_B}"/></Properties>',
+        f'<Properties path="a">{R5_A}</Properties><Properties path="b">{R5_B}</Properties>',
+    ],
+    ids=["attr-own-text", "two-attrs", "attr-child-attr", "text-deep-attr", "sibling-text"],
+)
+def test_ds_r5_nb4_copy_split_across_attribute_values(tmp_path: Path, shape: str) -> None:
+    report = (
+        "<GPOs>"
+        + _gpo("{31313131-3131-3131-3131-313131313131}", "source", "d", _drives([("n", R5_V)]))
+        + _gpo(
+            "{32323232-3232-3232-3232-323232323232}",
+            "copy",
+            "d",
+            f'<Drives clsid="x"><Drive uid="C" name="m">{shape}</Drive></Drives>',
+        )
+        + "</GPOs>"
+    )
+    (tmp_path / "e").mkdir()
+    (tmp_path / "e" / "AllGPOs.xml").write_text(report, encoding="utf-8")
+    estate = ingest.load_estate(tmp_path / "e")
+    db = tmp_path / "attr-split.sqlite3"
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        save_estate(conn, estate)
+        conn.commit()
+    assert _file_hits(db, (R5_V, R5_A, R5_B)) == {}
+
+
+@pytest.mark.parametrize("shape", ["misaligned", "odd-trailing", "unpaired-surrogate"])
+def test_ds_r5_nb5_odd_blob_never_pins_schema_10(tmp_path: Path, shape: str) -> None:
+    payload = json.dumps({"cpassword": R5_V}).encode("utf-16-le")
+    if shape == "misaligned":
+        blob = b"\x07" + payload
+    elif shape == "odd-trailing":
+        blob = payload + b"\x07"
+    else:  # not decodable as UTF-16 at any alignment: replaced whole
+        blob = b"\x07" + payload + b"\x00\xd8\x41\x00"
+    db = _v140_copy(tmp_path, "odd-blob.sqlite3")
+    with closing(sqlite3.connect(db)) as conn:
+        rowid = conn.execute("SELECT rowid FROM setting LIMIT 1").fetchone()[0]
+        conn.execute("UPDATE setting SET raw = ? WHERE rowid = ?", (sqlite3.Binary(blob), rowid))
+        conn.commit()
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
+    utf16 = R5_V.encode("utf-16-le")
+    data = b"".join(
+        Path(f"{db}{s}").read_bytes() for s in ("", "-wal") if Path(f"{db}{s}").exists()
+    )
+    assert R5_V.encode() not in data and utf16 not in data and utf16[1:] not in data
+
+
+def test_ds_r5_nb5_caches_released_on_refusal(tmp_path: Path) -> None:
+    from gpo_lens import redaction
+    from gpo_lens.redaction import CredentialInIdentityError
+
+    report = (
+        "<GPOs>"
+        + _gpo("{33333333-3333-3333-3333-333333333333}", "x", "d", _drives([("n", R5_V)]))
+        + "</GPOs>"
+    )
+    (tmp_path / "e").mkdir()
+    (tmp_path / "e" / "AllGPOs.xml").write_text(report, encoding="utf-8")
+    estate = ingest.load_estate(tmp_path / "e")
+    gpo = estate.gpos[0]
+    gpo.owner = R5_V
+    gpo.settings.append(
+        Setting(gpo.id, "Computer", "S", "s", "s", "x", {"@attr": {"cpassword": R5_V}}, False)
+    )
+    with closing(sqlite3.connect(tmp_path / "r.sqlite3")) as conn:
+        init_db(conn)
+        with pytest.raises(CredentialInIdentityError):
+            save_estate(conn, estate)
+    assert redaction._blob_memo == {} and redaction._text_memo == {}

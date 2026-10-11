@@ -231,3 +231,130 @@ def test_guard_scrubs_log_records_and_exceptions(captured) -> None:
         warnings.warn(f"copy {V[:8]}\n{V[8:]}", stacklevel=1)  # whitespace-split copy
         raise RuntimeError(f"failed on {V}") from ValueError(V)
     captured.add(str(caught.value), str(caught.value.__cause__))
+
+
+# --- Round 5: orchestration sinks and extraction errors ---------------------------
+
+
+def _collector_zip(path: Path, extra: list[tuple[str, bytes]]) -> Path:
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as out:
+        out.writestr("AllGPOs.xml", MIXED)
+        for name, data in extra:
+            out.writestr(name, data)
+    return path
+
+
+def _corrupt_crc(path: Path, marker: bytes) -> None:
+    data = path.read_bytes()
+    index = data.index(marker)
+    path.write_bytes(data[:index] + b"j" + data[index + 1 :])
+
+
+@pytest.mark.parametrize("kind", ["name-too-long", "bad-crc", "file-dir-collision"])
+def test_zip_extraction_errors_never_echo_member_names(
+    tmp_path: Path, captured, monkeypatch, kind: str
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from gpo_lens.web.app import create_app
+
+    archive = tmp_path / "hostile.zip"
+    if kind == "name-too-long":
+        _collector_zip(archive, [("A" * 280 + V + "B" * 10, b"x")])
+    elif kind == "bad-crc":
+        _collector_zip(archive, [(V, b"hello crc world")])
+        _corrupt_crc(archive, b"hello crc world")
+    else:
+        _collector_zip(archive, [(V, b"file"), (f"{V}/inner", b"x")])
+    proc = _cli_subprocess(tmp_path, "--db", str(tmp_path / "cli.sqlite3"), "ingest", str(archive))
+    assert proc.returncode != 0 and "could not be extracted" in proc.stderr
+    captured.add(proc.stdout, proc.stderr)
+    audit = tmp_path / "audit.log"
+    monkeypatch.setenv("GPO_LENS_AUDIT_LOG", str(audit))
+    monkeypatch.setenv("GPO_LENS_AUTH_TOKEN", "diagnostics-token")
+    with TestClient(
+        create_app(str(tmp_path / "web.sqlite3")),
+        headers={"Authorization": "Bearer diagnostics-token", "Origin": "http://localhost"},
+    ) as client:
+        response = client.post(
+            "/ingest",
+            files={"file": (f"{V}.zip", archive.read_bytes(), "application/zip")},
+            follow_redirects=False,
+        )
+        assert response.status_code == 400
+        captured.add(response.text)
+    captured.add(audit.read_bytes().decode("latin-1") if audit.exists() else "")
+
+
+def test_cli_path_arguments_are_not_echoed(tmp_path: Path, captured) -> None:
+    export = _export(tmp_path, MIXED)
+    missing = tmp_path / f"admx-{V}"
+    proc = _cli_subprocess(
+        tmp_path,
+        "--db",
+        str(tmp_path / "admx.sqlite3"),
+        "ingest",
+        "--admx-dir",
+        str(missing),
+        str(export),
+    )
+    assert proc.returncode == 0 and "--admx-dir path #1 not found" in proc.stderr
+    captured.add(proc.stdout, proc.stderr)
+    proc = _cli_subprocess(tmp_path, "--db", str(tmp_path / "x.sqlite3"), "ingest", str(missing))
+    captured.add(proc.stdout, proc.stderr)
+
+
+def test_web_upload_filename_never_reaches_audit_log(tmp_path: Path, captured, monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from gpo_lens.web.app import create_app
+
+    archive = _collector_zip(tmp_path / "collector.zip", [])
+    audit = tmp_path / "audit.log"
+    monkeypatch.setenv("GPO_LENS_AUDIT_LOG", str(audit))
+    monkeypatch.setenv("GPO_LENS_AUTH_TOKEN", "diagnostics-token")
+    with TestClient(
+        create_app(str(tmp_path / "web.sqlite3")),
+        headers={"Authorization": "Bearer diagnostics-token", "Origin": "http://localhost"},
+    ) as client:
+        response = client.post(
+            "/ingest",
+            files={"file": (f"{V}.zip", archive.read_bytes(), "application/zip")},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+    data = audit.read_bytes()
+    assert b'"outcome": "success"' in data
+    captured.add(data.decode("latin-1"))
+
+
+def test_exception_groups_and_structured_arguments_are_scrubbed(captured) -> None:
+    from gpo_lens.redaction import guarded_diagnostics
+
+    with pytest.raises(ExceptionGroup) as caught, guarded_diagnostics({V}):
+        raise ExceptionGroup("group", [ValueError(f"inner {V}"), RuntimeError({"field": V})])
+    captured.add(repr(caught.value), *(repr(e) for e in caught.value.exceptions))
+    with pytest.raises(json.JSONDecodeError) as decode, guarded_diagnostics({V}):
+        json.loads(f'{{"copy": "{V}", broken')
+    captured.add(repr(decode.value), decode.value.doc)
+
+
+def test_log_records_scrubbed_after_factory_swap_and_in_threads(captured) -> None:
+    import threading
+
+    from gpo_lens.redaction import guarded_diagnostics
+
+    original = logging.getLogRecordFactory()
+    logging.setLogRecordFactory(lambda *a, **k: logging.LogRecord(*a, **k))
+    try:
+        with guarded_diagnostics({V}):
+            logging.getLogger("gpo_lens.diagnostics_probe").warning("swap %s", V)
+            worker = threading.Thread(
+                target=lambda: logging.getLogger("gpo_lens.diagnostics_probe").warning(
+                    "thread %s", V
+                )
+            )
+            worker.start()
+            worker.join()
+    finally:
+        logging.setLogRecordFactory(original)

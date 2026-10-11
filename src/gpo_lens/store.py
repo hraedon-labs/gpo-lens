@@ -36,11 +36,13 @@ from gpo_lens.normalize import parse_dt
 from gpo_lens.redaction import (
     _JSON_ESCAPE,
     CPASSWORD_FINDING_DETAIL,
+    CPASSWORD_MARKER,
     Chaser,
     CpasswordResidualError,
     CredentialInIdentityError,
     chase,
     chase_joined,
+    describe_error,
     estate_cpassword_values,
     forget_cpassword_values,
     guarded_diagnostics,
@@ -548,26 +550,47 @@ def _detect_views(value: object) -> list[str]:
     return []
 
 
-def _rewrite_views(value: object) -> list[tuple[str, str | None]]:
-    """Readings of a stored value that can be written back exactly, with the
-    encoding to use (``None`` for TEXT)."""
+_Encoding = tuple[str, bytes, bytes] | None
+
+
+def _rewrite_views(value: object) -> list[tuple[str, _Encoding]]:
+    """Readings of a stored value that can be written back exactly, with how to
+    re-encode them (``None`` for TEXT; else encoding plus the bytes before and
+    after the decoded part, so a misaligned or odd-length UTF-16 BLOB keeps
+    its extra byte)."""
     if isinstance(value, str):
         return [(value, None)]
     if not isinstance(value, (bytes, memoryview)):
         return []
     data = bytes(value)
-    views: list[tuple[str, str | None]] = [(data.decode("latin-1"), "latin-1")]
-    if len(data) % 2 == 0:
+    views: list[tuple[str, _Encoding]] = [(data.decode("latin-1"), ("latin-1", b"", b""))]
+    for offset in (0, 1):
+        end = offset + (len(data) - offset) // 2 * 2
+        body = data[offset:end]
         for encoding in ("utf-16-le", "utf-16-be"):
             try:
-                views.append((data.decode(encoding), encoding))
+                text = body.decode(encoding)
             except UnicodeDecodeError:
                 continue
+            views.append((text, (encoding, data[:offset], data[end:])))
     return views
 
 
-def _encode(text: str, encoding: str | None) -> object:
-    return text if encoding is None else text.encode(encoding)
+def _encode(text: str, encoding: _Encoding) -> object:
+    if encoding is None:
+        return text
+    name, prefix, suffix = encoding
+    return prefix + text.encode(name) + suffix
+
+
+# Replacement for a BLOB cell whose value shows only in a reading that cannot
+# be written back exactly: the whole cell goes, so it can never pin the
+# database below v11 (v1.4.0 never wrote BLOBs; such a cell was modified).
+_WHOLE_CELL_JSON = json.dumps({"redacted": CPASSWORD_MARKER})
+
+
+def _whole_cell(table: str, column: str) -> str:
+    return _WHOLE_CELL_JSON if (table, column) in _JSON_COLUMNS else CPASSWORD_MARKER
 
 
 def _labelled_value(table: str, column: str, value: object) -> tuple[object, set[str]]:
@@ -582,10 +605,12 @@ def _labelled_value(table: str, column: str, value: object) -> tuple[object, set
     return value, found
 
 
-def _chased_value(table: str, column: str, value: object, chaser: Chaser) -> object:
+def _chased_value(
+    table: str, column: str, value: object, chaser: Chaser, pieces: set[str] | None = None
+) -> object:
     """``_chased`` for a stored value of any storage class."""
     for view, encoding in _rewrite_views(value):
-        new = _chased(table, column, view, chaser)
+        new = _chased(table, column, view, chaser, pieces)
         if new != view:
             return _encode(new, encoding)
     return value
@@ -626,14 +651,18 @@ def _labelled(table: str, column: str, value: str) -> tuple[str, set[str]]:
     return redact_inline(value)
 
 
-def _chased(table: str, column: str, value: str, chaser: Chaser) -> str:
+def _chased(
+    table: str, column: str, value: str, chaser: Chaser, pieces: set[str] | None = None
+) -> str:
     location = f"{table}.{column}"
     if (table, column) in _JSON_COLUMNS:
         parsed = _json_container(value)
         if parsed is not None:
             new = chase(parsed, chaser, location, rewritable=True, field=location)
             if not chaser.local:
-                new = chase_joined(new, chaser, location, rewritable=True, field=location)
+                new = chase_joined(
+                    new, chaser, location, rewritable=True, field=location, pieces=pieces
+                )
             return value if new is parsed else json.dumps(new, sort_keys=True)
     return chaser.sub(value) if chaser.hits(value) else value
 
@@ -667,11 +696,10 @@ def _register_candidates(conn: sqlite3.Connection, chaser: Chaser) -> None:
 
     conn.create_function("gpo_lens_cpw_text", 1, text, deterministic=True)
     conn.create_function("gpo_lens_cpw_json", 1, json_text, deterministic=True)
-    _CANDIDATE_MODE[id(conn)] = bool(chaser)
-
-
-# Whether the registered candidate functions carry a non-empty chaser.
-_CANDIDATE_MODE: dict[int, bool] = {}
+    # Whether the functions carry a chaser: a constant per statement (SQLite
+    # factors deterministic zero-argument calls), kept on the connection.
+    active = int(bool(chaser))
+    conn.create_function("gpo_lens_cpw_active", 0, lambda: active, deterministic=True)
 
 
 def _candidate_where(conn: sqlite3.Connection, table: str, column: str) -> str:
@@ -687,8 +715,6 @@ def _candidate_where(conn: sqlite3.Connection, table: str, column: str) -> str:
     fn = "gpo_lens_cpw_json" if is_json else "gpo_lens_cpw_text"
     col = f'"{column}"'
     python = f"{fn}({col})"
-    if _CANDIDATE_MODE.get(id(conn), True):
-        return python
     sql_hit = f"instr(lower({col}), 'cpassword') > 0"
     if is_json:
         sql_hit += (
@@ -696,7 +722,8 @@ def _candidate_where(conn: sqlite3.Connection, table: str, column: str) -> str:
             f" OR instr({col}, '\\u') > 0"
         )
     return (
-        f"(CASE WHEN typeof({col}) IN ('integer', 'real', 'null') THEN 0 "
+        f"(CASE WHEN gpo_lens_cpw_active() THEN {python} "
+        f"WHEN typeof({col}) IN ('integer', 'real', 'null') THEN 0 "
         f"WHEN typeof({col}) = 'text' AND {col} NOT GLOB '*[^ -~]*' THEN ({sql_hit}) "
         f"ELSE {python} END)"
     )
@@ -817,9 +844,22 @@ def _scrub_guarded(conn: sqlite3.Connection, pool: set[str]) -> _ScrubResult | N
                 labelled[column], found = _labelled_value("setting", column, text)
                 own |= found
             local = Chaser(own, local=True)
-            for column, text in zip(_SETTING_TEXT, texts, strict=True):
+            pieces: set[str] = set()
+            planned: dict[str, object] = {}
+            # raw first: pieces of a split copy then chase the derived columns.
+            for column in ("raw", "identity", "display_name", "display_value"):
+                text = texts[_SETTING_TEXT.index(column)]
                 new = _chased_value("setting", column, labelled[column], local)
-                stage("setting", column, rowid, text, _chased_value("setting", column, new, chaser))
+                new = _chased_value("setting", column, new, chaser, pieces)
+                if column != "raw" and pieces:
+                    new = _chased_value("setting", column, new, Chaser(pieces, local=True))
+                if isinstance(text, (bytes, memoryview)) and _value_residual(
+                    "setting", column, new, chaser
+                ):
+                    new = _whole_cell("setting", column)
+                planned[column] = new
+            for column, text in zip(_SETTING_TEXT, texts, strict=True):
+                stage("setting", column, rowid, text, planned[column])
     for table in tables:
         rewritable = REWRITABLE_COLUMNS.get(table, frozenset())
         for column in _text_columns(conn, table):
@@ -828,7 +868,12 @@ def _scrub_guarded(conn: sqlite3.Connection, pool: set[str]) -> _ScrubResult | N
             for rowid, value in _candidate_rows(conn, table, column):
                 new, found = _labelled_value(table, column, value)
                 if column in rewritable:
-                    stage(table, column, rowid, value, _chased_value(table, column, new, chaser))
+                    new = _chased_value(table, column, new, chaser)
+                    if isinstance(value, (bytes, memoryview)) and _value_residual(
+                        table, column, new, chaser
+                    ):
+                        new = _whole_cell(table, column)
+                    stage(table, column, rowid, value, new)
                 elif found or _value_hits(value, chaser):
                     refused.add(f"{table}.{column}")
     if refused:
@@ -926,6 +971,13 @@ def _database_path(conn: sqlite3.Connection) -> str:
     return row[2] if row and row[2] else ""
 
 
+def _file_role(path: str) -> str:
+    for suffix in ("-wal", "-shm", "-journal"):
+        if path.endswith(suffix):
+            return f"the database {suffix} file"
+    return "the database file"
+
+
 def cpassword_file_hits(path: str, values: Iterable[str]) -> list[str]:
     """Of a database's files (main, -wal, -shm, -journal), those whose raw bytes
     hold a discovered value."""
@@ -957,7 +1009,8 @@ def verify_committed_estate(conn: sqlite3.Connection, estate: Estate) -> None:
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                 remaining = cpassword_bytes_present(conn, values)
                 if remaining:
-                    raise CpasswordResidualError(", ".join(remaining))
+                    # Name the files by role; the database path is operator input.
+                    raise CpasswordResidualError(", ".join(_file_role(path) for path in remaining))
     finally:
         forget_cpassword_values(estate)
 
@@ -1226,7 +1279,10 @@ def restrict_db_permissions(conn: sqlite3.Connection) -> None:
     try:
         os.chmod(path, 0o600)
     except (OSError, ValueError) as exc:
-        warnings.warn(f"Could not restrict DB permissions on {path}: {exc}", stacklevel=1)
+        warnings.warn(
+            f"Could not restrict permissions on the database file: {describe_error(exc)}",
+            stacklevel=1,
+        )
     for suffix in ("-wal", "-shm"):
         sidecar = f"{path}{suffix}"
         if os.path.exists(sidecar):
@@ -1234,7 +1290,8 @@ def restrict_db_permissions(conn: sqlite3.Connection) -> None:
                 os.chmod(sidecar, 0o600)
             except (OSError, ValueError) as exc:
                 warnings.warn(
-                    f"Could not restrict DB permissions on {sidecar}: {exc}",
+                    f"Could not restrict permissions on the database {suffix} file: "
+                    f"{describe_error(exc)}",
                     stacklevel=1,
                 )
 

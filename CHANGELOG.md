@@ -20,7 +20,7 @@ one-way schema migration, so a patch number was not assumed).
   chases copies through every descriptive field of the estate and through
   finding text. Copies are compared canonically (whitespace inside a value,
   URL-safe base64 and `=` padding do not matter), including copies split
-  across the text of nested XML elements. They are chased for values
+  across the text or attribute values of nested XML elements. They are chased for values
   of at least 12 characters that look like GPP ciphertext or mix letters and
   digits (whole tokens below 22 characters), and from 8 characters inside the
   setting that carries the value; short or word-like values are redacted only
@@ -33,8 +33,12 @@ one-way schema migration, so a patch number was not assumed).
   `CpasswordResidualError`, nothing stored. Warnings, log records and error
   messages raised during ingest, save and migration (including for skipped
   GPOs and rejected inputs) are scrubbed against every value the run
-  discovers; warnings are held back until all values are known. ZIP
-  rejections cite the member's position instead of its name. Mixed-content
+  discovers; warnings are held back until all values are known, and the guard
+  spans the whole CLI command or web ingest request (output, logs, HTTP
+  responses and `audit.log` included). Externally supplied names are never
+  echoed: ZIP errors cite the member's position and the OS error without the
+  path, CLI path arguments are cited by position, and `audit.log` records an
+  upload's size instead of its client-supplied file name. Mixed-content
   redaction keeps child elements. The finding detail no longer carries any
   characters (`mask_cpassword` returns `****`). No hash or fingerprint is stored: trends
   count hits and the finding lifecycle tracks presence per GPO, and any
@@ -54,8 +58,9 @@ one-way schema migration, so a patch number was not assumed).
   no prefilter that could miss a form) and in SYSVOL still on disk at a
   stored path, scrubs labelled values and copies from the descriptive
   columns, refuses with `CredentialInIdentityError` and changes nothing if a
-  copy sits in an identity column (a value it cannot rewrite exactly fails
-  verification, below), re-hashes the event chain from the first rewritten event, requires the set
+  copy sits in an identity column (a BLOB whose value shows only in a reading
+  that cannot be written back exactly is replaced whole, so it never pins the
+  schema at 10), re-hashes the event chain from the first rewritten event, requires the set
   of events failing verification to be exactly the same afterwards (an
   earlier break is never healed, even by a payload crafted to match its
   stored hash), and verifies the result by rediscovering over every column. A residual rolls the whole scrub back (the

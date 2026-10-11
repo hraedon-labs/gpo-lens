@@ -49,6 +49,7 @@ from gpo_lens.normalize import (
 )
 from gpo_lens.paths import ci_child, ci_path
 from gpo_lens.redaction import (
+    describe_error,
     guarded_diagnostics,
     redact_element_tree,
     sanitize_estate,
@@ -159,7 +160,8 @@ def _load_json_records(path: str | Path) -> list[dict[str, Any]]:
         return [data]
     if not isinstance(data, list):
         warnings.warn(
-            f"Unexpected top-level {type(data).__name__} in {path}; expected object or array",
+            f"Unexpected top-level {type(data).__name__} in {Path(path).name}; "
+            "expected object or array",
             stacklevel=2,
         )
         return []
@@ -167,7 +169,7 @@ def _load_json_records(path: str | Path) -> list[dict[str, Any]]:
     skipped = len(data) - len(records)
     if skipped:
         warnings.warn(
-            f"Skipped {skipped} non-dict entr{'y' if skipped == 1 else 'ies'} in {path}",
+            f"Skipped {skipped} non-dict entr{'y' if skipped == 1 else 'ies'} in {Path(path).name}",
             stacklevel=2,
         )
     return records
@@ -1254,7 +1256,7 @@ def _load_baseline_from_zip(zip_path: str | Path, pool: set[str]) -> list[Gpo]:
     values: set[str] = set()
     total_bytes = [0]
     with zipfile.ZipFile(str(zip_path)) as outer:
-        for name in outer.namelist():
+        for position, name in enumerate(outer.namelist(), 1):
             if name.endswith(".zip"):
                 try:
                     inner_data = _streaming_zip_read(
@@ -1273,7 +1275,10 @@ def _load_baseline_from_zip(zip_path: str | Path, pool: set[str]) -> list[Gpo]:
                             )
                         )
                 except (ValueError, zipfile.BadZipFile, KeyError) as exc:
-                    warnings.warn(f"Skipping inner zip {name}: {exc}", stacklevel=1)
+                    warnings.warn(
+                        f"Skipping inner zip (entry {position}): {describe_error(exc)}",
+                        stacklevel=1,
+                    )
             elif name.endswith("gpreport.xml"):
                 try:
                     raw = _streaming_zip_read(
@@ -1289,7 +1294,10 @@ def _load_baseline_from_zip(zip_path: str | Path, pool: set[str]) -> list[Gpo]:
                     gpos.extend(report_gpos)
                     values |= found
                 except (ET.ParseError, KeyError, ValueError, UnicodeDecodeError) as exc:
-                    warnings.warn(f"Skipping entry in zip: {exc}", stacklevel=1)
+                    warnings.warn(
+                        f"Skipping entry in zip (entry {position}): {describe_error(exc)}",
+                        stacklevel=1,
+                    )
 
         if not gpos:
             gpos.extend(
@@ -1320,7 +1328,7 @@ def _extract_gpos_from_zip(
     """
     _total = total_counter if total_counter is not None else [0]
     gpos: list[Gpo] = []
-    for name in zf.namelist():
+    for position, name in enumerate(zf.namelist(), 1):
         if name.endswith("gpreport.xml"):
             try:
                 raw = _streaming_zip_read(zf, name, _total, max_bytes=max_bytes)
@@ -1332,7 +1340,10 @@ def _extract_gpos_from_zip(
                 if values is not None:
                     values |= found
             except (ET.ParseError, KeyError, ValueError, UnicodeDecodeError) as exc:
-                warnings.warn(f"Skipping entry in zip: {exc}", stacklevel=1)
+                warnings.warn(
+                    f"Skipping entry in zip (entry {position}): {describe_error(exc)}",
+                    stacklevel=1,
+                )
                 continue
     return gpos
 
@@ -2182,7 +2193,7 @@ def _try_load[T](
     try:
         return fn(path, *args)
     except (OSError, ValueError) as exc:
-        warnings.warn(f"Skipping {label}: {exc}", stacklevel=2)
+        warnings.warn(f"Skipping {label}: {describe_error(exc)}", stacklevel=2)
         return None
 
 
@@ -2193,7 +2204,7 @@ def _try_action(path: Path, fn: Callable[..., None], label: str, *args: Any) -> 
     try:
         fn(path, *args)
     except (OSError, ValueError) as exc:
-        warnings.warn(f"Skipping {label}: {exc}", stacklevel=2)
+        warnings.warn(f"Skipping {label}: {describe_error(exc)}", stacklevel=2)
 
 
 def load_estate(sample_dir: str | Path) -> Estate:
@@ -2211,7 +2222,7 @@ def load_estate(sample_dir: str | Path) -> Estate:
 def _load_estate(src: Path, pool: set[str]) -> Estate:
     report_path = src / "AllGPOs.xml"
     if not report_path.exists():
-        raise FileNotFoundError(f"AllGPOs.xml not found in {src}")
+        raise FileNotFoundError("AllGPOs.xml not found in the export directory")
     gpos: list[Gpo] = []
     # A missing AllGPOs.xml raised above. A *corrupt* primary input is a
     # different failure: the charter promises coverage honesty, and silently
@@ -2222,9 +2233,9 @@ def _load_estate(src: Path, pool: set[str]) -> Estate:
         gpos, cpassword_values = _parse_report_file(report_path, sanitize=False)
         pool |= cpassword_values
     except (ET.ParseError, UnicodeDecodeError) as exc:
-        raise ValueError(f"AllGPOs.xml in {src} is not parseable: {exc}") from exc
+        raise ValueError(f"AllGPOs.xml is not parseable: {describe_error(exc)}") from None
     except OSError as exc:
-        raise OSError(f"AllGPOs.xml in {src} could not be read: {exc}") from exc
+        raise OSError(f"AllGPOs.xml could not be read: {describe_error(exc)}") from None
     domain = gpos[0].domain if gpos else ""
 
     soms = (
