@@ -120,9 +120,11 @@ references, AST node types, local functions, exact scheduled-task argument
 vectors), exact pinning of every binding of every write/receiver/exec variable
 and its dependencies (`PINNED_VARS`), refusal of provider/global/automatic-
 variable writes, the exact text plus control-flow context of every
-write/delete/exec/handle-lifetime operation and write-helper call
-(`GUARDED_OPS`), and a digest of every local function body
-(`LOCAL_FUNCTION_BODIES`). These tables are hand-maintained; the generator never
+command invocation and write/delete/exec/handle-lifetime .NET call
+(`GUARDED_OPS`), a digest of every local function body
+(`LOCAL_FUNCTION_BODIES`) and of each script's param block
+(`SCRIPT_HEADERS`), and the exact uses of secret-bearing variables
+(`SECRET_USES`). These tables are hand-maintained; the generator never
 writes them. A collector change that touches a
 write, a guard, a function body or a pinned variable therefore also needs a hand
 edit to those tables, with a reason. Every reviewer bypass probe is a regression case in

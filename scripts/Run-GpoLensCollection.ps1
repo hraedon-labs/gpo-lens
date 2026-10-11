@@ -10,7 +10,7 @@
 [CmdletBinding()]
 param(
     [string]$OutputRoot,
-    [ValidateScript({ -not [string]::IsNullOrWhiteSpace($_) })]
+    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9 ._-]{0,199}$')]
     [string]$TaskName = 'GpoLensCollection',
     [string]$CollectorPath = (Join-Path $PSScriptRoot 'Export-GpoEstate.ps1'),
     [ValidateRange(1, 1000)]
@@ -86,7 +86,7 @@ function Assert-GpoLensRegularTree {
 }
 
 function Assert-GpoLensCollectionOwner {
-    param([string]$OutputRoot, [string]$TaskName)
+    param([string]$OutputRoot, [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9 ._-]{0,199}$')][string]$TaskName)
     $marker = Join-Path $OutputRoot '.gpo-lens-collection-owner'
     if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
         throw 'Collection refuses an output root without an owner marker. Re-register the task.'
@@ -103,7 +103,7 @@ function Invoke-GpoLensCollection {
     param(
         [Parameter(Mandatory)][string]$OutputRoot,
         [Parameter(Mandatory)][string]$CollectorPath,
-        [ValidateScript({ -not [string]::IsNullOrWhiteSpace($_) })]
+        [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9 ._-]{0,199}$')]
         [string]$TaskName = 'GpoLensCollection',
         [ValidateRange(1, 1000)][int]$Retention = 14,
         [string]$CopyTo,

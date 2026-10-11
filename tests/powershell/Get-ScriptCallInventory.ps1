@@ -580,6 +580,12 @@ foreach ($file in $Path) {
         continue
     }
 
+    # The script's own attributes and param block ([CmdletBinding(...)],
+    # parameters and their validators), pinned by digest in the gate.
+    $headerRows = [System.Collections.Generic.List[object]]::new()
+    foreach ($attr in $ast.Attributes) { Add-AstRows -Node $attr -Depth 0 -Role 'Attributes' -Rows $headerRows -Unsupported $unsupported }
+    if ($null -ne $ast.ParamBlock) { Add-AstRows -Node $ast.ParamBlock -Depth 0 -Role 'ParamBlock' -Rows $headerRows -Unsupported $unsupported }
+
     $functionDefs = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true))
     $functions = @($functionDefs | ForEach-Object { $_.Name })
     $functionParams = @()
@@ -786,6 +792,32 @@ foreach ($file in $Path) {
         }
     }
 
+    # Every variable reference with the statement it occurs in (for the
+    # secret-variable use pins) and every parameter declaration's attributes.
+    $variableUses = @()
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.VariableExpressionAst] }, $true)) {
+        $owner = $node.Parent
+        while ($null -ne $owner -and -not ($owner -is [System.Management.Automation.Language.StatementAst]) -and
+            -not ($owner -is [System.Management.Automation.Language.ParameterAst])) { $owner = $owner.Parent }
+        # The right-hand side of an assignment is reported as the assignment, so
+        # the gate can see where a value flows.
+        while ($null -ne $owner -and $owner.Parent -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+            [object]::ReferenceEquals($owner.Parent.Right, $owner)) { $owner = $owner.Parent }
+        $variableUses += [pscustomobject][ordered]@{
+            name = $node.VariablePath.UserPath
+            function = (Get-EnclosingFunction $node)
+            statement = (Get-NormText (Get-Text $owner))
+        }
+    }
+    $parameterDecls = @()
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ParameterAst] }, $true)) {
+        $parameterDecls += [pscustomobject][ordered]@{
+            name = $node.Name.VariablePath.UserPath
+            function = (Get-EnclosingFunction $node)
+            attributes = @($node.Attributes | ForEach-Object { Get-NormText $_.Extent.Text })
+        }
+    }
+
     # Set-Variable / New-Variable / [ref] indirections name a variable in a
     # string, invisible to the assignment AST; record them as assignments too.
     $indirectWrites = @()
@@ -837,6 +869,7 @@ foreach ($file in $Path) {
         source_cr_bytes = $facts[2]
         parse_errors = $parseErrorText
         ast_rows = $rows.ToArray()
+        header_rows = $headerRows.ToArray()
         unsupported_nodes = @($unsupported | Sort-Object -Unique)
         script_requirements = ($null -ne $ast.ScriptRequirements)
         node_types = @($ast.FindAll({ $true }, $true) | ForEach-Object { $_.GetType().Name } | Sort-Object -Unique)
@@ -852,6 +885,8 @@ foreach ($file in $Path) {
         other_assignments = $otherAssignments
         variable_assignments = $variableAssignments
         variable_refs = $variableRefs
+        variable_uses = $variableUses
+        parameter_decls = $parameterDecls
         indirect_writes = $indirectWrites
         redirections = $redirections
         using_statements = $usings
