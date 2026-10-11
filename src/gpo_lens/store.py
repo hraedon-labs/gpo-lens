@@ -43,6 +43,7 @@ from gpo_lens.redaction import (
     chase_joined,
     estate_cpassword_values,
     forget_cpassword_values,
+    guarded_diagnostics,
     iter_strings,
     joined_hits,
     mentions_cpassword,
@@ -786,9 +787,15 @@ def _scrub_cpassword_at_rest(conn: sqlite3.Connection) -> _ScrubResult | None:
        open. Otherwise record a ``maintenance.cpassword_scrub`` event (counts
        and event ids, never a value).
     """
+    with guarded_diagnostics() as pool:
+        return _scrub_guarded(conn, pool)
+
+
+def _scrub_guarded(conn: sqlite3.Connection, pool: set[str]) -> _ScrubResult | None:
     tables = _user_tables(conn)
     broken_before = frozenset(verify_event_chain(conn)[1]) if "events" in tables else frozenset()
     values = _discover_at_rest(conn, tables)
+    pool |= values
     chaser = Chaser(values)
     _register_candidates(conn, chaser)
     plan: dict[tuple[str, str], list[tuple[object, int]]] = {}
@@ -943,13 +950,14 @@ def verify_committed_estate(conn: sqlite3.Connection, estate: Estate) -> None:
     """
     values = estate_cpassword_values(estate)
     try:
-        if cpassword_bytes_present(conn, values):
-            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            conn.execute("VACUUM")
-            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            remaining = cpassword_bytes_present(conn, values)
-            if remaining:
-                raise CpasswordResidualError(", ".join(remaining))
+        with guarded_diagnostics(set(values)):
+            if cpassword_bytes_present(conn, values):
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.execute("VACUUM")
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                remaining = cpassword_bytes_present(conn, values)
+                if remaining:
+                    raise CpasswordResidualError(", ".join(remaining))
     finally:
         forget_cpassword_values(estate)
 
@@ -1255,7 +1263,20 @@ def save_estate(
     independently (``_verify_snapshot_rows``); a residual raises
     ``CpasswordResidualError`` and the caller must roll back.
     """
+    with guarded_diagnostics() as pool:
+        return _save_estate(conn, estate, taken_at, commit, _cpassword_values, pool)
+
+
+def _save_estate(
+    conn: sqlite3.Connection,
+    estate: Estate,
+    taken_at: datetime | None,
+    commit: bool,
+    _cpassword_values: frozenset[str] | None,
+    pool: set[str],
+) -> int:
     values = sanitize_for_storage(estate) if _cpassword_values is None else _cpassword_values
+    pool |= values
     if taken_at is None:
         taken_at = datetime.now(UTC)
     cursor = conn.execute(
@@ -1763,6 +1784,17 @@ def save_evaluated_estate(
     Call after init_db. With commit=False the caller owns the transaction and
     can include required audit/events before committing. Failures roll back.
     """
+    with guarded_diagnostics() as pool:
+        return _save_evaluated_estate(conn, estate, admx, commit, pool)
+
+
+def _save_evaluated_estate(
+    conn: sqlite3.Connection,
+    estate: Estate,
+    admx: AdmxResolver | None,
+    commit: bool,
+    pool: set[str],
+) -> int:
     from gpo_lens import __version__
     from gpo_lens.findings import evaluate_finding_lifecycle_v2
 
@@ -1770,6 +1802,7 @@ def save_evaluated_estate(
         if not conn.in_transaction:
             conn.execute("BEGIN IMMEDIATE")
         values = sanitize_for_storage(estate)
+        pool |= values
         sid = save_estate(conn, estate, commit=False, _cpassword_values=values)
         evaluate_finding_lifecycle_v2(
             conn,

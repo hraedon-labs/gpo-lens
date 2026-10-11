@@ -30,9 +30,13 @@ one-way schema migration, so a patch number was not assumed).
   is verified independently — rediscovery over the sanitized estate, over the
   rows as written, and after commit over the database, `-wal`, `-shm` and
   `-journal` bytes — and a residual refuses the import with
-  `CpasswordResidualError`, nothing stored. Mixed-content redaction keeps
-  child elements. The finding detail no longer carries any characters
-  (`mask_cpassword` returns `****`). No hash or fingerprint is stored: trends
+  `CpasswordResidualError`, nothing stored. Warnings, log records and error
+  messages raised during ingest, save and migration (including for skipped
+  GPOs and rejected inputs) are scrubbed against every value the run
+  discovers; warnings are held back until all values are known. ZIP
+  rejections cite the member's position instead of its name. Mixed-content
+  redaction keeps child elements. The finding detail no longer carries any
+  characters (`mask_cpassword` returns `****`). No hash or fingerprint is stored: trends
   count hits and the finding lifecycle tracks presence per GPO, and any
   cpassword is already compromised, so rotation is not a remediation and is
   not shown as a change.

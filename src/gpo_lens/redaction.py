@@ -55,6 +55,12 @@ so a copy wrapped across lines or written URL-safe is still a copy.
    :class:`CpasswordResidualError` (nothing stored) or, in the migration, rolls
    the scrub back so the next open can rediscover the labelled sources.
 
+4. **Diagnostics.** Inside :func:`guarded_diagnostics` (every ingest, save and
+   migration path) warnings are held back and re-emitted only once every value
+   of the run is known, then scrubbed like stored text; exceptions leaving the
+   guard and log records created inside it are scrubbed too. A skipped or
+   rejected input therefore cannot echo a value it shares with a labelled one.
+
 This is a core module: stdlib only, and it must not import ``narration`` or
 ``web``.
 """
@@ -64,8 +70,12 @@ from __future__ import annotations
 import copy
 import dataclasses
 import json
+import logging
 import re
+import warnings
 from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, cast
 from xml.etree.ElementTree import Element
 
@@ -930,7 +940,7 @@ def residual_locations(estate: Estate, values: Iterable[str]) -> list[str]:
     for gpo in estate.gpos:
         may_label = _gpo_may_label(gpo)
         may_hit = any_setting_hit and _gpo_may_hit(gpo, chaser)
-        for setting in gpo.settings if (may_label or may_hit) else ():
+        for index, setting in enumerate(gpo.settings if (may_label or may_hit) else ()):
             found: set[str] = set()
             if may_label and _setting_mentions(setting):
                 _label_pass(setting, found)
@@ -942,7 +952,8 @@ def residual_locations(estate: Estate, values: Iterable[str]) -> list[str]:
                     or joined_hits(setting.raw, chaser)
                 )
             ):
-                out.append(f"Setting {setting.identity!r} (GPO {gpo.id})")
+                # Positions only: the setting's own text may be the residual.
+                out.append(f"setting #{index + 1} (GPO {gpo.id})")
         stripped = dataclasses.replace(gpo, settings=[])
         found = set()
         _label_pass(stripped, found)
@@ -1174,3 +1185,97 @@ def scrub_records(records: Iterable[Any], values: Iterable[str], location: str) 
 def iter_strings(obj: Any) -> Iterator[str]:
     """Every string (values and mapping keys) in a model object or structure."""
     return _strings(obj)
+
+
+# --- Diagnostics ---------------------------------------------------------------
+
+# Values discovered by the innermost active guard and every guard around it.
+_ACTIVE_VALUES: ContextVar[tuple[set[str], ...]] = ContextVar(
+    "gpo_lens_cpassword_diagnostic_values", default=()
+)
+
+
+def _active_values() -> set[str]:
+    out: set[str] = set()
+    for values in _ACTIVE_VALUES.get():
+        out |= values
+    return out
+
+
+def scrub_diagnostic(text: str, values: Iterable[str] | None = None) -> str:
+    """A human-facing message with labelled forms and discovered copies redacted."""
+    text = redact_text(text)
+    chaser = Chaser(_active_values() if values is None else values)
+    return chaser.sub(text) if chaser and chaser.hits(text) else text
+
+
+def scrub_exception(exc: BaseException | None, values: Iterable[str] | None = None) -> None:
+    """Scrub an exception's message (and chained ones) in place."""
+    pool = set(_active_values() if values is None else values)
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        exc.args = tuple(scrub_diagnostic(a, pool) if isinstance(a, str) else a for a in exc.args)
+        for attr in ("msg", "filename", "filename2", "strerror", "text"):
+            value = getattr(exc, attr, None)
+            if isinstance(value, str):
+                try:
+                    setattr(exc, attr, scrub_diagnostic(value, pool))
+                except (AttributeError, TypeError):
+                    pass
+        notes = getattr(exc, "__notes__", None)
+        if isinstance(notes, list):
+            notes[:] = [scrub_diagnostic(n, pool) if isinstance(n, str) else n for n in notes]
+        exc = exc.__cause__ or exc.__context__
+
+
+@contextmanager
+def guarded_diagnostics(values: set[str] | None = None) -> Iterator[set[str]]:
+    """Hold back warnings and scrub diagnostics against the run's values.
+
+    Yields a mutable set; callers add values as they discover them. Warnings
+    raised inside are re-emitted on exit (also when an exception escapes),
+    scrubbed against every value known by then, including those of enclosing
+    guards. An escaping exception is scrubbed in place. Log records created
+    inside are scrubbed against the values known at that moment.
+    """
+    pool: set[str] = set() if values is None else values
+    token = _ACTIVE_VALUES.set((*_ACTIVE_VALUES.get(), pool))
+    caught: list[warnings.WarningMessage] = []
+    try:
+        with warnings.catch_warnings(record=True) as recorded:
+            warnings.simplefilter("always")
+            try:
+                yield pool
+            finally:
+                caught = list(recorded)
+    except BaseException as exc:
+        scrub_exception(exc, _active_values())
+        raise
+    finally:
+        everything = _active_values()
+        _ACTIVE_VALUES.reset(token)
+        for item in caught:
+            message = item.message
+            text = scrub_diagnostic(str(message), everything)
+            category = item.category if isinstance(item.category, type) else UserWarning
+            warnings.warn_explicit(text, category, item.filename, item.lineno or 0)
+
+
+_base_record_factory = logging.getLogRecordFactory()
+
+
+def _scrubbing_record_factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
+    record = _base_record_factory(*args, **kwargs)
+    if _ACTIVE_VALUES.get():
+        message = record.getMessage()
+        clean = scrub_diagnostic(message)
+        if clean != message:
+            record.msg, record.args = clean, None
+        if record.exc_info and record.exc_info[1] is not None:
+            scrub_exception(record.exc_info[1])
+    return record
+
+
+if getattr(logging.getLogRecordFactory(), "__name__", "") != "_scrubbing_record_factory":
+    logging.setLogRecordFactory(_scrubbing_record_factory)

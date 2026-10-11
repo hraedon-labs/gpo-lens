@@ -86,13 +86,14 @@ def safe_extract(
                     directories.add("/".join(parts[:depth]).casefold())
                 if len(directories) > MAX_DIRECTORIES:
                     raise ValueError("zip directory count exceeds limit")
-            for info in members:
+            for index, info in enumerate(members, 1):
+                # Member names are attacker-controlled: errors cite the index.
                 # Normalize before checking paths: Compress-Archive on PS 5.1
                 # emits backslashes. Reject Windows drives, UNC and ADS paths
                 # on every platform, including Linux.
                 member = info.filename.replace("\\", "/")
                 if member.startswith("/") or ":" in member or ".." in member.split("/"):
-                    raise ValueError(f"zip-slip blocked: {info.filename}")
+                    raise ValueError(f"zip-slip blocked (member {index})")
                 components = member.removesuffix("/").split("/")
                 if any(
                     not part
@@ -102,18 +103,18 @@ def safe_extract(
                     or any(ord(char) < 32 or char in '<>"|?*' for char in part)
                     for part in components
                 ):
-                    raise ValueError(f"zip-slip blocked: {info.filename}")
+                    raise ValueError(f"zip-slip blocked (member {index})")
                 mode = info.external_attr >> 16
                 if stat.S_ISLNK(mode):
-                    raise ValueError(f"zip symlink blocked: {member}")
+                    raise ValueError(f"zip symlink blocked (member {index})")
                 if info.file_size > max_ratio * max(1, info.compress_size):
                     raise ValueError("zip compression ratio exceeds limit")
                 target = (dest / member).resolve()
                 if not target.is_relative_to(dest_root):
-                    raise ValueError(f"zip-slip blocked: {member}")
+                    raise ValueError(f"zip-slip blocked (member {index})")
                 key = target.relative_to(dest_root).as_posix().casefold()
                 if key in targets:
-                    raise ValueError(f"zip duplicate path blocked: {member}")
+                    raise ValueError(f"zip duplicate path blocked (member {index})")
                 targets.add(key)
                 if member.endswith("/"):
                     target.mkdir(parents=True, exist_ok=True)
@@ -131,10 +132,10 @@ def safe_extract(
                     if total_bytes_read > max_uncompressed_bytes:
                         raise ValueError("zip uncompressed size exceeds limit")
                 if target.is_symlink():
-                    raise ValueError(f"zip symlink blocked: {member}")
+                    raise ValueError(f"zip symlink blocked (member {index})")
                 extracted = target.resolve()
                 if not extracted.is_relative_to(dest_root):
-                    raise ValueError(f"zip-slip blocked: {member}")
+                    raise ValueError(f"zip-slip blocked (member {index})")
     except BaseException:
         # Clean up any partially extracted files/dirs before re-raising.
         # Cleanup errors are warned, not raised, so the *original* extraction
@@ -151,10 +152,10 @@ def safe_extract(
                     else:
                         shutil.rmtree(child)
                 except OSError as cleanup_exc:
+                    # Member names are attacker-controlled: never logged.
                     _logger.warning(
-                        "cleanup of %s after extraction failure failed: %s",
-                        child,
-                        cleanup_exc,
+                        "cleanup after extraction failure failed (%s)",
+                        type(cleanup_exc).__name__,
                     )
         raise
 

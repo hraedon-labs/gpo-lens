@@ -49,6 +49,7 @@ from gpo_lens.normalize import (
 )
 from gpo_lens.paths import ci_child, ci_path
 from gpo_lens.redaction import (
+    guarded_diagnostics,
     redact_element_tree,
     sanitize_estate,
     sysvol_cpassword_values,
@@ -1178,8 +1179,16 @@ def _parse_report_root(
     union of every input's values (``load_estate``, ``load_baseline_from_zip``),
     so a value labelled in one input is chased through all of them.
     """
+    with guarded_diagnostics() as pool:
+        return _parse_report_root_guarded(root, sanitize=sanitize, source=source, pool=pool)
+
+
+def _parse_report_root_guarded(
+    root: Element, *, sanitize: bool, source: str | None, pool: set[str]
+) -> tuple[list[Gpo], set[str]]:
     mentions = tree_mentions(root, source)
     values = redact_element_tree(root, gate=False) if mentions else set()
+    pool |= values  # before any GPO is parsed: diagnostics are scrubbed against it
     gpos: list[Gpo] = []
     root_is_gpo = _localname(root.tag) == "GPO"
     has_nested_gpo = any(_localname(child.tag) == "GPO" for child in root)
@@ -1206,10 +1215,19 @@ def _parse_report_root(
         return gpos, values
     estate = Estate(gpos=gpos)
     values |= sanitize_estate(estate, values)
+    pool |= values
     return estate.gpos, values
 
 
 def load_baseline_from_zip(zip_path: str | Path) -> list[Gpo]:
+    """Load baseline GPOs from a Microsoft Security Baseline zip (see
+    ``_load_baseline_from_zip``); diagnostics are scrubbed against every
+    cpassword value found in the archive (``redaction.guarded_diagnostics``)."""
+    with guarded_diagnostics() as pool:
+        return _load_baseline_from_zip(zip_path, pool)
+
+
+def _load_baseline_from_zip(zip_path: str | Path, pool: set[str]) -> list[Gpo]:
     """Load baseline GPOs from a Microsoft Security Baseline zip.
 
     Microsoft ships baselines as nested zips.  This function handles both:
@@ -1283,8 +1301,9 @@ def load_baseline_from_zip(zip_path: str | Path) -> list[Gpo]:
                 )
             )
 
+    pool |= values
     estate = Estate(gpos=gpos)
-    sanitize_estate(estate, values)
+    pool |= sanitize_estate(estate, values)
     return estate.gpos
 
 
@@ -2178,8 +2197,18 @@ def _try_action(path: Path, fn: Callable[..., None], label: str, *args: Any) -> 
 
 
 def load_estate(sample_dir: str | Path) -> Estate:
-    """Orchestrate loading a full estate from a sample directory."""
-    src = Path(sample_dir)
+    """Orchestrate loading a full estate from a sample directory.
+
+    Every warning, log record and exception raised while loading (including for
+    skipped or malformed inputs) is scrubbed against every cpassword value the
+    load discovers, report, SYSVOL and other inputs together
+    (``redaction.guarded_diagnostics``).
+    """
+    with guarded_diagnostics() as pool:
+        return _load_estate(Path(sample_dir), pool)
+
+
+def _load_estate(src: Path, pool: set[str]) -> Estate:
     report_path = src / "AllGPOs.xml"
     if not report_path.exists():
         raise FileNotFoundError(f"AllGPOs.xml not found in {src}")
@@ -2191,6 +2220,7 @@ def load_estate(sample_dir: str | Path) -> Estate:
     # previously this caught ParseError/OSError/UnicodeDecodeError and warned.
     try:
         gpos, cpassword_values = _parse_report_file(report_path, sanitize=False)
+        pool |= cpassword_values
     except (ET.ParseError, UnicodeDecodeError) as exc:
         raise ValueError(f"AllGPOs.xml in {src} is not parseable: {exc}") from exc
     except OSError as exc:
@@ -2230,6 +2260,7 @@ def load_estate(sample_dir: str | Path) -> Estate:
     augment_blocked_registry_from_pol(gpos)
     augment_audit_from_csv(gpos)
     cpassword_values |= sysvol_cpassword_values(gpos)
+    pool |= cpassword_values
 
     wmi_filters = (
         _try_load(
@@ -2285,5 +2316,5 @@ def load_estate(sample_dir: str | Path) -> Estate:
     # Report and SYSVOL cpassword values, and labelled values in any other
     # input, are chased through every descriptive field of the whole estate;
     # a copy in an identity field refuses the import (gpo_lens.redaction).
-    sanitize_estate(estate, cpassword_values)
+    pool |= sanitize_estate(estate, cpassword_values)
     return estate

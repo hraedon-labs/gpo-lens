@@ -129,7 +129,11 @@ The result is verified independently before it is kept: discovery and the
 copy search run again over the sanitized data, then over the rows as written
 (read back from the database), and after commit over the raw bytes of the
 database, `-wal`, `-shm` and `-journal`; any remaining value refuses the
-import with nothing stored. The finding is computed from the SYSVOL files at
+import with nothing stored. Diagnostics follow the same rule: warnings raised
+while loading are held back until every value of the import is known, then
+scrubbed, as are log records and error messages, including those for skipped
+GPOs and rejected inputs; ZIP errors cite a member's position, never its name.
+The finding is computed from the SYSVOL files at
 ingest and records only that a cpassword is present, with no characters of it.
 No hash is kept, so replacing one cpassword with another is not a visible
 change in diffs or events; the finding persists on the GPO until the attribute
