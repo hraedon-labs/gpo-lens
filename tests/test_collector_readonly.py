@@ -430,7 +430,22 @@ WRITE_ROOTS: dict[str, dict[str, str]] = {
 # variable is required.
 PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
     "Export-GpoEstate.ps1": {
-        # read by a binding of $gpc
+        # argument of write-progress
+        "activity": frozenset(
+            {
+                '[set-sectionprogress] arg "AD sites"',
+                '[set-sectionprogress] arg "GPO metadata"',
+                '[set-sectionprogress] arg "GPO settings (XML reports)"',
+                '[set-sectionprogress] arg "Group membership"',
+                '[set-sectionprogress] arg "Inheritance (gp-inheritance)"',
+                '[set-sectionprogress] arg "OU tree"',
+                '[set-sectionprogress] arg "Principals (SID -> name)"',
+                '[set-sectionprogress] arg "SYSVOL copy"',
+                '[set-sectionprogress] arg "WMI filters"',
+                "[set-sectionprogress] param",
+            }
+        ),
+        # condition $allGpc
         "allgpc": frozenset(
             {
                 (
@@ -440,7 +455,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # read by a binding of $gpo
+        # condition $allGpos
         "allgpos": frozenset(
             {
                 "[script] = Get-GPO -All",
@@ -456,7 +471,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # read by a binding of $xmlfiles
+        # argument of test-path
         "allxmlpath": frozenset(
             {
                 "[script] = Join-Path $out 'AllGPOs.xml'",
@@ -474,13 +489,45 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] = [System.Collections.Generic.List[object]]::new()",
             }
         ),
+        # argument of get-adobject
+        "confignc": frozenset(
+            {
+                "[script] = (Get-ADRootDSE).configurationNamingContext",
+            }
+        ),
+        # argument of .matches()
+        "content": frozenset(
+            {
+                "[script] = Get-Content -LiteralPath $f.FullName -Raw -ErrorAction Stop",
+                "[script] = Get-Content -LiteralPath $metaPath -Raw",
+            }
+        ),
+        # argument of .add()
+        "copiedcount": frozenset(
+            {
+                (
+                    "[script] = @(Get-ChildItem -LiteralPath $dest -Recurse -File -ErrorAction "
+                    "SilentlyContinue).Count"
+                ),
+            }
+        ),
         # write root
         "dest": frozenset(
             {
                 "[script] = Join-Path $out 'SYSVOL-Policies'",
             }
         ),
-        # read by a binding of $f
+        # argument of write-warning
+        "detail": frozenset(
+            {
+                (
+                    '[script] = if ($policyFolders.Count -eq 0) { "enumerated 0 policy folders '
+                    'at $src" + $(if ($srcErr) { " ($($srcErr[0].Exception.Message))" } else { '
+                    '"" }) } else { "copy wrote 0 files to SYSVOL-Policies" }'
+                ),
+            }
+        ),
+        # argument of write-host
         "diskfiles": frozenset(
             {
                 (
@@ -495,7 +542,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] = Get-ADDomain",
             }
         ),
-        # read by a binding of $sid
+        # argument of write-host
         "domainsids": frozenset(
             {
                 (
@@ -504,7 +551,19 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # read by a binding of $diskfiles
+        # condition $DryRun
+        "dryrun": frozenset(
+            {
+                "[script] param",
+            }
+        ),
+        # argument of .createentryfromfile()
+        "entryname": frozenset(
+            {
+                "[new-gpoexportzip] = $f.FullName.Substring($rootLen).Replace('\\', '/')",
+            }
+        ),
+        # argument of get-childitem
         "exportpath": frozenset(
             {
                 "[new-gpoexportzip] arg $out",
@@ -524,6 +583,13 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] = [System.Collections.Generic.List[string]]::new()",
             }
         ),
+        # argument of .add()
+        "g": frozenset(
+            {
+                "[script] = Get-GPInheritance -Target $t",
+                "[script] foreach $allGpos",
+            }
+        ),
         # receiver of .trim()
         "gpc": frozenset(
             {
@@ -536,6 +602,12 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] foreach $allGpos",
             }
         ),
+        # argument of write-host
+        "gpocount": frozenset(
+            {
+                "[script] = $allGpos.Count",
+            }
+        ),
         # index write $groupMembers[$gSid]
         "groupmembers": frozenset(
             {
@@ -545,7 +617,21 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] index $groupMembers['s-1-5-11']",
             }
         ),
-        # read by a binding of $gsid
+        # argument of write-host
+        "groupsexpanded": frozenset(
+            {
+                "[script] = 0",
+                "[script] incdec PostfixPlusPlus",
+            }
+        ),
+        # argument of write-host
+        "groupsfailed": frozenset(
+            {
+                "[script] = 0",
+                "[script] incdec PostfixPlusPlus",
+            }
+        ),
+        # argument of write-host
         "groupsids": frozenset(
             {
                 (
@@ -554,10 +640,23 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # read by a binding of $groupmembers
+        # argument of get-adgroupmember
         "gsid": frozenset(
             {
                 "[script] foreach $groupSids",
+            }
+        ),
+        # argument of write-warning
+        "guid": frozenset(
+            {
+                "[script] = $gpc.Name.Trim('{}')",
+            }
+        ),
+        # argument of write-progress
+        "i": frozenset(
+            {
+                "[script] = 0",
+                "[script] incdec PostfixPlusPlus",
             }
         ),
         # receiver of .add()
@@ -568,6 +667,51 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                     "[System.Collections.Generic.HashSet[string]]::new([System.StringComparer]:"
                     ":OrdinalIgnoreCase)"
                 ),
+            }
+        ),
+        # argument of .add()
+        "m": frozenset(
+            {
+                "[script] foreach [regex]::Matches($content, 'S-1-[0-9]+-[0-9-]+')",
+            }
+        ),
+        # argument of test-path
+        "metapath": frozenset(
+            {
+                "[script] = Join-Path $out 'gpo-metadata.json'",
+            }
+        ),
+        # argument of get-module
+        "mod": frozenset(
+            {
+                "[script] foreach @('GroupPolicy','ActiveDirectory')",
+            }
+        ),
+        # argument of write-host
+        "nozip": frozenset(
+            {
+                "[script] param",
+            }
+        ),
+        # condition $obj
+        "obj": frozenset(
+            {
+                (
+                    "[script] = Get-ADObject -Filter \"objectSid -eq '$sid'\" -Properties "
+                    "objectClass, sAMAccountName, name -ErrorAction Stop"
+                ),
+            }
+        ),
+        # condition $objClass
+        "objclass": frozenset(
+            {
+                "[script] = $obj.objectClass[-1]",
+            }
+        ),
+        # argument of write-host
+        "oucount": frozenset(
+            {
+                "[script] = @(Get-ADOrganizationalUnit -Filter *).Count",
             }
         ),
         # write root
@@ -582,19 +726,25 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 '[script] param "C:\\gpo-export"',
             }
         ),
+        # argument of write-progress
+        "pct": frozenset(
+            {
+                "[set-sectionprogress] = [math]::Round(($Section / $totalSections) * 100)",
+            }
+        ),
         # receiver of .trim()
         "pf": frozenset(
             {
                 "[script] foreach $policyFolders",
             }
         ),
-        # read by a binding of $allgpc
+        # argument of get-adobject
         "policiesdn": frozenset(
             {
                 '[script] = "CN=Policies,CN=System,$($dom.DistinguishedName)"',
             }
         ),
-        # read by a binding of $pf
+        # condition $policyFolders
         "policyfolders": frozenset(
             {
                 (
@@ -610,13 +760,57 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] index $principals[$sid]",
             }
         ),
+        # argument of write-host
+        "resolved": frozenset(
+            {
+                "[script] = 0",
+                "[script] incdec PostfixPlusPlus",
+            }
+        ),
+        # argument of .substring()
+        "rootlen": frozenset(
+            {
+                "[new-gpoexportzip] = $ExportPath.Length + 1",
+            }
+        ),
+        # argument of write-host
+        "s": frozenset(
+            {
+                "[script] foreach $failedSections",
+                "[script] foreach $successSections",
+            }
+        ),
         # write target (Join-Path $out "reports\${safe}__$($gpo.Id).xml")
         "safe": frozenset(
             {
                 "[script] = ($gpo.DisplayName -replace '[\\\\/:*?\"<>|\\[\\]]', '_')",
             }
         ),
-        # read by a binding of $principals
+        # condition $sam -match '\$$'
+        "sam": frozenset(
+            {
+                '[script] = ""',
+                "[script] = $matches[1]",
+                "[script] = $matches[2]",
+                "[script] = $translated",
+                "[script] = if ($obj.sAMAccountName) { $obj.sAMAccountName } else { $obj.Name }",
+            }
+        ),
+        # argument of .round()
+        "section": frozenset(
+            {
+                "[set-sectionprogress] arg $sectionNum",
+                "[set-sectionprogress] param",
+            }
+        ),
+        # argument of set-sectionprogress
+        "sectionnum": frozenset(
+            {
+                "[script] = 0",
+                "[script] incdec PostfixPlusPlus",
+            }
+        ),
+        # argument of new-object
         "sid": frozenset(
             {
                 "[script] foreach $domainSids",
@@ -629,13 +823,36 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] = New-Object System.Security.Principal.SecurityIdentifier($sid)",
             }
         ),
-        # read by a binding of $policyfolders
+        # argument of write-host
+        "sitecount": frozenset(
+            {
+                (
+                    "[script] = @(Get-ADObject -SearchBase "
+                    '"CN=Sites,$((Get-ADRootDSE).configurationNamingContext)" -LDAPFilter '
+                    '"(objectClass=site)" -ErrorAction SilentlyContinue).Count'
+                ),
+            }
+        ),
+        # argument of write-host
+        "skipsysvol": frozenset(
+            {
+                "[script] param",
+            }
+        ),
+        # argument of get-childitem
         "src": frozenset(
             {
                 '[script] = "\\\\$($dom.DNSRoot)\\SYSVOL\\$($dom.DNSRoot)\\Policies"',
             }
         ),
-        # read by a binding of $out
+        # condition $srcErr
+        "srcerr": frozenset(
+            {
+                "[script] = $null",
+                "[script] common -errorvariable",
+            }
+        ),
+        # argument of join-path
         "stamp": frozenset(
             {
                 '[script] = Get-Date -Format "yyyyMMdd-HHmmss"',
@@ -647,13 +864,80 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] = [System.Collections.Generic.List[string]]::new()",
             }
         ),
+        # argument of .add()
+        "sysvolerrors": frozenset(
+            {
+                "[script] = 0",
+                "[script] incdec PostfixPlusPlus",
+            }
+        ),
+        # argument of .round()
+        "sysvolsize": frozenset(
+            {
+                (
+                    "[script] = (Get-ChildItem $src -Recurse -File -ErrorAction "
+                    "SilentlyContinue | Measure-Object -Property Length -Sum).Sum"
+                ),
+            }
+        ),
+        # argument of write-host
+        "sysvolsizestr": frozenset(
+            {
+                '[script] = "$([math]::Round($sysvolSize / 1MB, 2)) MB"',
+                '[script] = "skipped"',
+            }
+        ),
+        # argument of get-gpinheritance
+        "t": frozenset(
+            {
+                "[script] foreach $targets",
+            }
+        ),
+        # condition $targets
+        "targets": frozenset(
+            {
+                (
+                    "[script] = @($dom.DistinguishedName) + (Get-ADOrganizationalUnit -Filter "
+                    "* | Select-Object -Expand DistinguishedName)"
+                ),
+            }
+        ),
         # write root
         "testfile": frozenset(
             {
                 '[script] = Join-Path $OutputRoot "_writetest_.tmp"',
             }
         ),
-        # read by a binding of $f
+        # argument of write-progress
+        "totalsections": frozenset(
+            {
+                "[script] = 9",
+            }
+        ),
+        # condition $translated -match '^(.+?)\\(.+)$'
+        "translated": frozenset(
+            {
+                "[script] = $sidObj.Translate([System.Security.Principal.NTAccount]).Value",
+            }
+        ),
+        # argument of write-host
+        "unresolved": frozenset(
+            {
+                "[script] = 0",
+                "[script] incdec PostfixMinusMinus",
+                "[script] incdec PostfixPlusPlus",
+            }
+        ),
+        # argument of write-host
+        "wmicount": frozenset(
+            {
+                (
+                    "[script] = @(Get-ADObject -Filter \"objectClass -eq 'msWMI-Som'\" "
+                    "-Properties 'msWMI-Name' -ErrorAction SilentlyContinue).Count"
+                ),
+            }
+        ),
+        # condition $xmlFiles
         "xmlfiles": frozenset(
             {
                 "[script] += Get-Item -LiteralPath $allXmlPath",
@@ -669,6 +953,13 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[new-gpoexportzip] = [System.IO.Compression.ZipFile]::Open($archive, 'Create')",
             }
         ),
+        # condition $zipEnumErr
+        "zipenumerr": frozenset(
+            {
+                "[new-gpoexportzip] = $null",
+                "[new-gpoexportzip] common -errorvariable",
+            }
+        ),
     },
     "Export-GroupMembers.ps1": {
         # property write $adParams.Credential
@@ -676,6 +967,26 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
             {
                 "[script] = @{}",
                 "[script] member $adParams.Credential",
+            }
+        ),
+        # condition $Credential
+        "credential": frozenset(
+            {
+                "[script] param",
+            }
+        ),
+        # argument of write-host
+        "expanded": frozenset(
+            {
+                "[script] = 0",
+                "[script] incdec PostfixPlusPlus",
+            }
+        ),
+        # argument of write-host
+        "failed": frozenset(
+            {
+                "[script] = 0",
+                "[script] incdec PostfixPlusPlus",
             }
         ),
         # index write $groupMembers[$sid]
@@ -687,7 +998,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] index $groupMembers[$sid]",
             }
         ),
-        # read by a binding of $grp
+        # argument of write-host
         "groups": frozenset(
             {
                 (
@@ -702,6 +1013,34 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] foreach $groups",
             }
         ),
+        # condition $m.SID
+        "m": frozenset(
+            {
+                "[script] foreach $members",
+            }
+        ),
+        # condition $members
+        "members": frozenset(
+            {
+                (
+                    "[script] = Get-ADGroupMember -Identity $sid -Recursive @adParams "
+                    "-ErrorAction Stop"
+                ),
+            }
+        ),
+        # argument of write-host
+        "membersids": frozenset(
+            {
+                "[script] += $m.SID.Value",
+                "[script] = @()",
+            }
+        ),
+        # argument of write-host
+        "name": frozenset(
+            {
+                "[script] = $grp.Value.name",
+            }
+        ),
         # write root
         "outputpath": frozenset(
             {
@@ -714,13 +1053,13 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] = Get-Content $PrincipalsPath -Raw -Encoding UTF8 | ConvertFrom-Json",
             }
         ),
-        # read by a binding of $principalsdata
+        # argument of get-content
         "principalspath": frozenset(
             {
                 '[script] param "principals.json"',
             }
         ),
-        # read by a binding of $groupmembers
+        # argument of write-host
         "sid": frozenset(
             {
                 "[script] = $grp.Name",
@@ -745,14 +1084,33 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # read by a binding of $policiesdn
+        # argument of test-path
+        "allxml": frozenset(
+            {
+                '[script] = Join-Path $SddlSource "AllGPOs.xml"',
+            }
+        ),
+        # argument of .matches()
+        "content": frozenset(
+            {
+                "[script] = Get-Content $f -Raw -ErrorAction Stop",
+                "[script] = Get-Content $metaFile -Raw",
+            }
+        ),
+        # condition $Credential
+        "credential": frozenset(
+            {
+                "[script] param",
+            }
+        ),
+        # condition -not $dom
         "dom": frozenset(
             {
                 "[script] = $null",
                 "[script] = Get-ADDomain @adParams",
             }
         ),
-        # read by a binding of $sid
+        # argument of write-host
         "domainsids": frozenset(
             {
                 (
@@ -761,13 +1119,19 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
+        # argument of get-content
+        "f": frozenset(
+            {
+                "[script] foreach $xmlFiles",
+            }
+        ),
         # read by a binding of $sd
         "gpc": frozenset(
             {
                 "[script] foreach $gpcObjs",
             }
         ),
-        # read by a binding of $gpc
+        # condition $gpcObjs
         "gpcobjs": frozenset(
             {
                 (
@@ -777,13 +1141,40 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
+        # argument of .add()
+        "m": frozenset(
+            {
+                "[script] foreach $matches",
+            }
+        ),
+        # argument of test-path
+        "metafile": frozenset(
+            {
+                '[script] = Join-Path $SddlSource "gpo-metadata.json"',
+            }
+        ),
+        # condition $obj
+        "obj": frozenset(
+            {
+                (
+                    "[script] = Get-ADObject -Filter \"objectSid -eq '$sid'\" -Properties "
+                    "objectClass, sAMAccountName, name @adParams -ErrorAction Stop"
+                ),
+            }
+        ),
+        # condition $objClass
+        "objclass": frozenset(
+            {
+                "[script] = $obj.objectClass[-1]",
+            }
+        ),
         # write root
         "outputpath": frozenset(
             {
                 '[script] param "principals.json"',
             }
         ),
-        # read by a binding of $gpcobjs
+        # argument of get-adobject
         "policiesdn": frozenset(
             {
                 '[script] = "CN=Policies,CN=System,$($dom.DistinguishedName)"',
@@ -796,13 +1187,57 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] index $principals[$sid]",
             }
         ),
+        # argument of write-host
+        "ptype": frozenset(
+            {
+                (
+                    "[script] = switch ($objClass) { 'group' { 'Group' } 'computer' { "
+                    "'Computer' } default { 'User' } }"
+                ),
+            }
+        ),
+        # argument of test-path
+        "reportsdir": frozenset(
+            {
+                '[script] = Join-Path $SddlSource "reports"',
+            }
+        ),
+        # argument of write-host
+        "resolved": frozenset(
+            {
+                "[script] = 0",
+                "[script] incdec PostfixPlusPlus",
+            }
+        ),
+        # argument of write-host
+        "sam": frozenset(
+            {
+                '[script] = ""',
+                "[script] = $matches[1]",
+                "[script] = $matches[2]",
+                "[script] = $translated",
+                "[script] = if ($obj.sAMAccountName) { $obj.sAMAccountName } else { $obj.Name }",
+            }
+        ),
         # receiver of .getsecuritydescriptorsddlform()
         "sd": frozenset(
             {
                 "[script] = $gpc.nTSecurityDescriptor",
             }
         ),
-        # read by a binding of $principals
+        # argument of .matches()
+        "sddl": frozenset(
+            {
+                "[script] = $sd.GetSecurityDescriptorSddlForm()",
+            }
+        ),
+        # argument of test-path
+        "sddlsource": frozenset(
+            {
+                '[script] param ""',
+            }
+        ),
+        # argument of new-object
         "sid": frozenset(
             {
                 "[script] foreach $allSids | Sort-Object",
@@ -815,6 +1250,30 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] = New-Object System.Security.Principal.SecurityIdentifier($sid)",
             }
         ),
+        # argument of write-host
+        "translated": frozenset(
+            {
+                "[script] = $sidObj.Translate([System.Security.Principal.NTAccount]).Value",
+            }
+        ),
+        # argument of write-host
+        "unresolved": frozenset(
+            {
+                "[script] = 0",
+                "[script] incdec PostfixPlusPlus",
+            }
+        ),
+        # condition $xmlFiles
+        "xmlfiles": frozenset(
+            {
+                "[script] += $allXml",
+                (
+                    '[script] += (Get-ChildItem $reportsDir -Filter "*.xml" -ErrorAction '
+                    "SilentlyContinue).FullName"
+                ),
+                "[script] = @()",
+            }
+        ),
     },
     "Run-GpoLensCollection.ps1": {
         # write root
@@ -824,14 +1283,14 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[invoke-gpolenscollection] foreach $expired",
             }
         ),
-        # parameter of write-gpolensownermarkerbytes (pinned in GpoLensCollectionMarker.ps1)
+        # argument of .getstring()
         "bytes": frozenset(
             {
                 "[assert-gpolenscollectionowner] = Read-GpoLensOwnerMarkerBytes -Marker $marker",
                 "[write-gpolenscollectionlog] = $encoding.GetByteCount($line)",
             }
         ),
-        # read by a binding of $archive
+        # condition $candidates
         "candidates": frozenset(
             {
                 (
@@ -841,6 +1300,15 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                     "(Join-Path $OutputRoot $_.BaseName) 'AllGPOs.xml') -PathType Leaf) } | "
                     "Sort-Object @{ Expression = { $_.BaseName.Substring($_.BaseName.Length - "
                     "15) }; Descending = $true }, Name)"
+                ),
+            }
+        ),
+        # argument of .push()
+        "child": frozenset(
+            {
+                (
+                    "[assert-gpolensregulartree] foreach @(Get-ChildItem -LiteralPath "
+                    "$directory -Force)"
                 ),
             }
         ),
@@ -860,7 +1328,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] param",
             }
         ),
-        # read by a binding of $newest
+        # condition $created.Count -ne 1
         "created": frozenset(
             {
                 (
@@ -873,6 +1341,12 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         "delivery": frozenset(
             {
                 "[invoke-gpolenscollection] = Join-Path $CopyTo $newest.Name",
+            }
+        ),
+        # argument of get-item
+        "directory": frozenset(
+            {
+                "[assert-gpolensregulartree] = $pending.Pop()",
             }
         ),
         # receiver of .getbytecount()
@@ -889,7 +1363,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[invoke-gpolenscollection] foreach @($inventory)",
             }
         ),
-        # read by a binding of $archive
+        # condition $expired
         "expired": frozenset(
             {
                 (
@@ -906,7 +1380,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[invoke-gpolenscollection] = Join-Path $OutputRoot $newest.BaseName",
             }
         ),
-        # read by a binding of $message
+        # argument of write-gpolenscollectionlog
         "failure": frozenset(
             {
                 "[invoke-gpolenscollection] = $_",
@@ -918,11 +1392,18 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[invoke-gpolenscollection] = Join-Path $OutputRoot $archive.BaseName",
             }
         ),
-        # read by a binding of $next
+        # condition $i -ge 1
         "i": frozenset(
             {
                 "[write-gpolenscollectionlog] = $LogFiles",
                 "[write-gpolenscollectionlog] incdec PostfixMinusMinus",
+            }
+        ),
+        # argument of .tryparse()
+        "id": frozenset(
+            {
+                "[invoke-gpolenscollection] = [guid]::Empty",
+                "[invoke-gpolenscollection] ref [guid]::TryParse([string]$entry.Id, [ref]$id)",
             }
         ),
         # receiver of .add()
@@ -931,7 +1412,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[invoke-gpolenscollection] = [Collections.Generic.HashSet[guid]]::new()",
             }
         ),
-        # read by a binding of $entry
+        # condition -not $inventory
         "inventory": frozenset(
             {
                 (
@@ -941,7 +1422,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # read by a binding of $inventory
+        # argument of .getstring()
         "inventorybytes": frozenset(
             {
                 (
@@ -950,12 +1431,18 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # read by a binding of $inventorybytes
+        # argument of resolve-path
         "inventorypath": frozenset(
             {
                 "[invoke-gpolenscollection] arg $InventoryPath",
                 "[invoke-gpolenscollection] param",
                 "[script] param",
+            }
+        ),
+        # condition $item.Attributes -band [IO.FileAttributes]::ReparsePoint
+        "item": frozenset(
+            {
+                "[assert-gpolensregulartree] = Get-Item -LiteralPath $directory -Force",
             }
         ),
         # receiver of .substring()
@@ -987,7 +1474,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # read by a binding of $logargs
+        # argument of invoke-gpolenscollection
         "logfiles": frozenset(
             {
                 "[invoke-gpolenscollection] arg $LogFiles",
@@ -997,7 +1484,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[write-gpolenscollectionlog] splat @logArgs",
             }
         ),
-        # read by a binding of $logargs
+        # argument of invoke-gpolenscollection
         "logmaxbytes": frozenset(
             {
                 "[invoke-gpolenscollection] arg $LogMaxBytes",
@@ -1014,7 +1501,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[write-gpolenscollectionlog] splat @logArgs",
             }
         ),
-        # parameter of read-gpolensownermarkerbytes (pinned in GpoLensCollectionMarker.ps1)
+        # argument of test-path
         "marker": frozenset(
             {
                 (
@@ -1024,7 +1511,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[read-gpolensownermarkerbytes] arg $marker",
             }
         ),
-        # read by a binding of $line
+        # argument of .substring()
         "maxchars": frozenset(
             {
                 "[write-gpolenscollectionlog] = [math]::Max(1, [int]($LogMaxBytes / 4) - 40)",
@@ -1080,6 +1567,16 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] param",
             }
         ),
+        # argument of .equals()
+        "owner": frozenset(
+            {
+                (
+                    "[assert-gpolenscollectionowner] = "
+                    "[Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF).TrimEnd([c"
+                    'har[]]"`r`n")'
+                ),
+            }
+        ),
         # write root
         "partial": frozenset(
             {
@@ -1102,7 +1599,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[invoke-gpolenscollection] index $previous[$_.FullName]",
             }
         ),
-        # read by a binding of $expired
+        # argument of where-object
         "producerprefix": frozenset(
             {
                 (
@@ -1111,7 +1608,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # read by a binding of $message
+        # argument of select-object
         "retention": frozenset(
             {
                 "[invoke-gpolenscollection] arg $Retention",
@@ -1119,10 +1616,27 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] param 14",
             }
         ),
+        # argument of .push()
+        "root": frozenset(
+            {
+                "[assert-gpolensregulartree] arg $folder",
+                "[assert-gpolensregulartree] param",
+            }
+        ),
         # receiver of .write()
         "stream": frozenset(
             {
                 "[invoke-gpolenscollection] = $entry.Open()",
+            }
+        ),
+        # argument of assert-gpolenscollectionowner
+        "taskname": frozenset(
+            {
+                "[assert-gpolenscollectionowner] arg $TaskName",
+                "[assert-gpolenscollectionowner] param",
+                "[invoke-gpolenscollection] arg $TaskName",
+                "[invoke-gpolenscollection] param 'GpoLensCollection'",
+                "[script] param 'GpoLensCollection'",
             }
         ),
         # receiver of .getentry()
@@ -1149,6 +1663,35 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[write-gpolensownermarkerbytes] param",
             }
         ),
+        # argument of .tryparse()
+        "count": frozenset(
+            {
+                "[read-gpolensownermarkerbytes] = & stat -L --format=%h -- $opened 2>$null",
+            }
+        ),
+        # read by a binding of $opened
+        "fd": frozenset(
+            {
+                (
+                    "[read-gpolensownermarkerbytes] = "
+                    "$stream.SafeFileHandle.DangerousGetHandle().ToInt64()"
+                ),
+            }
+        ),
+        # argument of .tryparse()
+        "links": frozenset(
+            {
+                "[read-gpolensownermarkerbytes] = 0",
+                (
+                    "[read-gpolensownermarkerbytes] = "
+                    "[GpoLens.MarkerFileInfo]::LinkCount($stream.SafeFileHandle)"
+                ),
+                (
+                    "[read-gpolensownermarkerbytes] ref [uint32]::TryParse([string]$count, "
+                    "[ref]$links)"
+                ),
+            }
+        ),
         # write root
         "marker": frozenset(
             {
@@ -1159,13 +1702,19 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # read by a binding of $root
+        # argument of test-path
+        "opened": frozenset(
+            {
+                '[read-gpolensownermarkerbytes] = "/proc/$PID/fd/$fd"',
+            }
+        ),
+        # argument of get-item
         "outputroot": frozenset(
             {
                 "[write-gpolensownermarkerbytes] param",
             }
         ),
-        # read by a binding of $marker
+        # argument of join-path
         "root": frozenset(
             {
                 (
@@ -1189,13 +1738,13 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         ),
     },
     "Register-GpoLensCollection.ps1": {
-        # new-scheduledtaskprincipal argument
+        # argument of new-scheduledtaskprincipal
         "account": frozenset(
             {
                 "[script] = if ($GmsaAccount) { $GmsaAccount } else { $ServiceAccount }",
             }
         ),
-        # new-scheduledtask argument
+        # argument of new-scheduledtask
         "action": frozenset(
             {
                 (
@@ -1205,7 +1754,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # read by a binding of $scheduletime
+        # argument of write-host
         "at": frozenset(
             {
                 "[script] param '02:00'",
@@ -1221,14 +1770,14 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # read by a binding of $taskargs
+        # argument of resolve-path
         "collectorpath": frozenset(
             {
                 "[script] = (Resolve-Path -LiteralPath $CollectorPath).ProviderPath",
                 "[script] param (Join-Path $PSScriptRoot 'Export-GpoEstate.ps1')",
             }
         ),
-        # read by a binding of $taskargs
+        # argument of convertto-gpolenstaskargument
         "copyto": frozenset(
             {
                 "[script] param",
@@ -1245,25 +1794,33 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[script] param",
             }
         ),
-        # new-scheduledtasktrigger argument
+        # argument of new-scheduledtasktrigger
         "everydays": frozenset(
             {
                 "[script] param 1",
             }
         ),
-        # new-scheduledtasksettingsset argument
+        # argument of new-scheduledtasksettingsset
         "executiontimelimit": frozenset(
             {
                 "[script] param [timespan]::FromHours(2)",
             }
         ),
-        # read by a binding of $account
+        # argument of set-gpolenscollectionowner
+        "force": frozenset(
+            {
+                "[script] param",
+                "[set-gpolenscollectionowner] arg $Force",
+                "[set-gpolenscollectionowner] param",
+            }
+        ),
+        # argument of set-gpolenscollectionowner
         "gmsaaccount": frozenset(
             {
                 "[script] param",
             }
         ),
-        # read by a binding of $taskargs
+        # argument of convertto-gpolenstaskargument
         "inventorypath": frozenset(
             {
                 "[script] param",
@@ -1311,14 +1868,24 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[write-gpolensownermarkerbytes] arg $OutputRoot",
             }
         ),
-        # read by a binding of $bytes
+        # argument of write-warning
+        "owner": frozenset(
+            {
+                (
+                    "[set-gpolenscollectionowner] = "
+                    "[Text.Encoding]::UTF8.GetString($previousBytes).TrimStart([char]0xFEFF).Tr"
+                    'imEnd([char[]]"`r`n")'
+                ),
+            }
+        ),
+        # argument of write-gpolensownermarkerbytes
         "previousbytes": frozenset(
             {
                 "[set-gpolenscollectionowner] = $null",
                 "[set-gpolenscollectionowner] = Read-GpoLensOwnerMarkerBytes -Marker $marker",
             }
         ),
-        # new-scheduledtask argument
+        # argument of new-scheduledtask
         "principal": frozenset(
             {
                 (
@@ -1339,13 +1906,13 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[set-gpolenscollectionowner] param",
             }
         ),
-        # read by a binding of $taskargs
+        # argument of write-host
         "retention": frozenset(
             {
                 "[script] param 14",
             }
         ),
-        # read by a binding of $taskargs
+        # argument of convertto-gpolenstaskargument
         "runner": frozenset(
             {
                 (
@@ -1354,7 +1921,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # new-scheduledtasktrigger argument
+        # argument of new-scheduledtasktrigger
         "scheduletime": frozenset(
             {
                 "[script] = [datetime]::MinValue",
@@ -1365,13 +1932,13 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # register-scheduledtask argument
+        # argument of get-credential
         "serviceaccount": frozenset(
             {
                 "[script] param",
             }
         ),
-        # new-scheduledtask argument
+        # argument of new-scheduledtask
         "settings": frozenset(
             {
                 (
@@ -1380,7 +1947,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # register-scheduledtask argument
+        # argument of set-gpolenscollectionowner
         "task": frozenset(
             {
                 (
@@ -1390,7 +1957,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # new-scheduledtaskaction argument
+        # argument of new-scheduledtaskaction
         "taskargs": frozenset(
             {
                 (
@@ -1411,7 +1978,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # unregister-scheduledtask argument
+        # argument of write-warning
         "taskname": frozenset(
             {
                 "[script] param 'GpoLensCollection'",
@@ -1419,14 +1986,14 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 "[set-gpolenscollectionowner] param",
             }
         ),
-        # register-scheduledtask argument
+        # argument of set-gpolenscollectionowner
         "taskpassword": frozenset(
             {
                 "[script] = $Credential.GetNetworkCredential().Password",
                 "[script] = $null",
             }
         ),
-        # new-scheduledtask argument
+        # argument of new-scheduledtask
         "trigger": frozenset(
             {
                 (
@@ -1435,7 +2002,31 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
                 ),
             }
         ),
-        # new-scheduledtaskaction argument
+        # condition $Unregister
+        "unregister": frozenset(
+            {
+                "[script] param",
+            }
+        ),
+        # argument of .getfullpath()
+        "value": frozenset(
+            {
+                "[convertto-gpolensabsolutepath] arg $CopyTo",
+                "[convertto-gpolensabsolutepath] arg $InventoryPath",
+                "[convertto-gpolensabsolutepath] param",
+                "[convertto-gpolenstaskargument] arg $CollectorPath",
+                "[convertto-gpolenstaskargument] arg $OutputRoot",
+                "[convertto-gpolenstaskargument] arg $TaskName",
+                "[convertto-gpolenstaskargument] arg $runner",
+                "[convertto-gpolenstaskargument] arg (ConvertTo-GpoLensAbsolutePath $CopyTo)",
+                (
+                    "[convertto-gpolenstaskargument] arg (ConvertTo-GpoLensAbsolutePath "
+                    "$InventoryPath)"
+                ),
+                "[convertto-gpolenstaskargument] param",
+            }
+        ),
+        # argument of new-scheduledtaskaction
         "windowsroot": frozenset(
             {
                 "[script] = if ($env:SystemRoot) { $env:SystemRoot } else { 'C:\\Windows' }",
@@ -5211,10 +5802,10 @@ _ALLOWED_QUALIFIERS = frozenset({"", "script", "local", "private"})
 _VARIABLE_WRITING_PARAMS = frozenset(
     {"OutVariable", "PipelineVariable", "ErrorVariable", "WarningVariable", "InformationVariable"}
 )
-_VARIABLE_PARAM_TOKENS = frozenset(
-    {"ov", "pv", "ev", "wv", "iv"}
-    | {name[:i].casefold() for name in _VARIABLE_WRITING_PARAMS for i in range(3, len(name) + 1)}
-)
+# Canonical (full, lowercased) names; the dumper resolves every parameter token
+# — including unambiguous prefixes like `-Pi` and aliases like `-ov` — to its
+# full name via the cmdlet's real metadata (DeepSeek round 5).
+_VARIABLE_WRITING_CANON = frozenset(p.casefold() for p in _VARIABLE_WRITING_PARAMS)
 
 # Instance methods that cause an external side effect (file/AD/registry/object
 # mutation or a stream open/write). These require a receiver that is an
@@ -5475,6 +6066,8 @@ def _canonicalize(entry: dict[str, Any]) -> dict[str, Any]:
     for decl in entry["parameter_decls"]:
         decl["name"] = _cf(decl["name"])
         decl["function"] = _cf(decl["function"])
+    for cond in entry["conditions"]:
+        cond["function"] = _cf(cond["function"])
     for key in ("member_assignments", "index_assignments"):
         for item in entry[key]:
             item["function"] = _cf(item["function"])
@@ -5676,9 +6269,11 @@ def _required_vars(script: str, inv: dict[str, dict[str, Any]]) -> dict[str, str
 
     Roots: write roots, variables in pinned write-target expressions, receivers
     of every instance-method call / property write / index write, splatted
-    variables, variables in dynamic invocations and scheduled-task arguments,
-    and dot-sourced function parameters pinned by their defining script. Then
-    the closure: every variable read by any binding of a required variable.
+    variables, every variable read by any command argument, .NET call argument
+    or branch/loop condition, and dot-sourced function parameters pinned by
+    their defining script. Then the closure: every variable read by any
+    binding of a required variable. check_pinned_bindings requires PINNED_VARS
+    to cover this set exactly.
     """
     entry = inv[script]
     reasons: dict[str, str] = {}
@@ -5705,14 +6300,24 @@ def _required_vars(script: str, inv: dict[str, dict[str, Any]]) -> dict[str, str
     for ref in entry["variable_refs"]:
         if ref["splatted"]:
             need(ref["name"], "splatted")
+    # Every variable read by ANY command argument, .NET call argument or
+    # branch/loop condition (Sol round 6: `$metaPath = '\\host\share\x'` left
+    # `Get-Content -LiteralPath $metaPath` textually pinned but reading a remote
+    # path; `$Unregister = $true` flipped the guard of Unregister-ScheduledTask).
     for command in entry["commands"]:
         if not command["name"]:
             for var in sorted(_vars_in(command["text"])):
                 need(var, f"dynamic invocation {_norm(command['text'])}")
-        elif command["name"] in _TASK_VECTORS_CF:
-            for arg in command["arguments"]:
-                for var in sorted(_vars_in(arg["value"])):
-                    need(var, f"{command['name']} argument")
+        for arg in command["arguments"]:
+            for var in sorted(_vars_in(arg["value"])):
+                need(var, f"argument of {command['name'] or 'a dynamic invocation'}")
+    for member in entry["members"]:
+        for text in member["arguments"]:
+            for var in sorted(_vars_in(text)):
+                need(var, f"argument of .{member['member']}()")
+    for cond in entry["conditions"]:
+        for var in sorted(_vars_in(cond["text"])):
+            need(var, f"condition {cond['text'][:60]}")
     for source in POLICIES[script].dot_sources:
         for fn in inv[source]["function_params"]:
             for param in fn["params"]:
@@ -5792,6 +6397,18 @@ def check_commands(script: str, entry: dict[str, Any], local: set[str]) -> None:
     )
     forbidden = sorted(named & _cfset(FORBIDDEN_COMMANDS))
     assert not forbidden, f"{script}: commands that are never allowed: {forbidden}"
+    # A parameter token that binds to no real parameter of a known cmdlet (nor a
+    # common parameter) errors at runtime; refuse it rather than treat it as
+    # inert (DeepSeek round-5 NB-3: `Get-ChildItem -OutFile ...`).
+    for command in entry["commands"]:
+        if not command.get("cmdlet_known"):
+            continue
+        for arg in command["arguments"]:
+            if arg["parameter"] and not arg.get("parameter_resolved", True):
+                raise AssertionError(
+                    f"{script}:{command['line']}: -{arg['parameter']} is not a parameter of "
+                    f"{command['name']}"
+                )
     # ForEach-Object may only run scriptblocks: `ForEach-Object Delete` /
     # `-MemberName Delete` invokes a method by name, invisible to the member
     # allowlist.
@@ -5861,9 +6478,11 @@ def check_instance_receivers(script: str, entry: dict[str, Any]) -> None:
         )
 
 
-def _is_variable_param(param: str) -> bool:
-    token = _cf(param)
-    return token in _VARIABLE_PARAM_TOKENS or token.endswith("variable")
+def _is_variable_param(arg: dict[str, Any]) -> bool:
+    canon = arg.get("parameter_canonical")
+    if canon:
+        return _cf(canon) in _VARIABLE_WRITING_CANON
+    return _cf(str(arg["parameter"])).endswith("variable")
 
 
 # A variable-writing common parameter must name its target as a plain literal
@@ -5883,7 +6502,7 @@ def _common_param_writes(entry: dict[str, Any]) -> list[dict[str, Any]]:
     writes: list[dict[str, Any]] = []
     for command in entry["commands"]:
         for arg in command["arguments"]:
-            if arg["parameter"] and _is_variable_param(str(arg["parameter"])):
+            if arg["parameter"] and _is_variable_param(arg):
                 raw = _norm(arg["value"])
                 literal = arg["value_kind"] == "StringConstantExpressionAst" and bool(
                     _LITERAL_VARIABLE_NAME.match(raw)
@@ -5926,11 +6545,11 @@ def check_new_object_and_add_type(script: str, entry: dict[str, Any]) -> None:
         bound = command["bound"]
         if command["name"] == "new-object":
             assert "comobject" not in bound, f"{script}:{command['line']}: COM is not allowed"
-            types.add(str(bound.get("typename")))
+            types.add(_cf(str(bound.get("typename"))))
         elif command["name"] == "add-type":
             keys = set(bound) - {"erroraction"}
             if keys == {"assemblyname"}:
-                assemblies.add(bound["assemblyname"])
+                assemblies.add(_cf(bound["assemblyname"]))
             elif keys == {"typedefinition"} and command["type_definition_sha256"]:
                 definitions.add(command["type_definition_sha256"])
             else:
@@ -5939,8 +6558,8 @@ def check_new_object_and_add_type(script: str, entry: dict[str, Any]) -> None:
                 raise AssertionError(
                     f"{script}:{command['line']}: unsupported Add-Type form {sorted(keys)}"
                 )
-    _exact("New-Object types", script, types, policy.new_object_types)
-    _exact("Add-Type assemblies", script, assemblies, policy.add_type_assemblies)
+    _exact("New-Object types", script, types, _cfset(policy.new_object_types))
+    _exact("Add-Type assemblies", script, assemblies, _cfset(policy.add_type_assemblies))
     _exact("Add-Type inline definitions (sha256)", script, definitions, policy.add_type_definitions)
 
 
@@ -6029,6 +6648,8 @@ def check_pinned_bindings(script: str, inv: dict[str, dict[str, Any]]) -> None:
     assert not unpinned, f"{script}: variables must be pinned: " + "; ".join(
         f"${v} ({required[v]})" for v in unpinned
     )
+    stale = sorted(set(pinned) - set(required))
+    assert not stale, f"{script}: PINNED_VARS entries no longer required (remove them): {stale}"
     bindings = _all_bindings(script, inv)
     for var in sorted(pinned):
         actual = bindings.get(var, set())
@@ -6298,6 +6919,41 @@ def check_remote_paths(script: str, entry: dict[str, Any]) -> None:
             )
 
 
+# Remote-looking string literals anywhere in a script (UNC `\\host\share`,
+# `//host/share`, `\\?\UNC\...`, device paths, URLs `scheme://`): a variable
+# bound to one reaches commands whose text is pinned (Sol round 6). Only these
+# exact literal values may occur (casefolded script -> values, with reasons).
+_REMOTE_LITERAL = re.compile(r"(?:^|[\s'\"(,;=])(?:\\\\|//)\S|\b[A-Za-z][A-Za-z0-9+.-]+://")
+REMOTE_LITERALS: dict[str, frozenset[str]] = {
+    # The collector's one deliberate remote read: the domain's own SYSVOL
+    # Policies share, built from the domain's DNS root (read-only copy source).
+    "Export-GpoEstate.ps1": frozenset({"\\\\$($dom.DNSRoot)\\SYSVOL\\$($dom.DNSRoot)\\Policies"}),
+    "Export-GroupMembers.ps1": frozenset(),
+    "Export-Principals.ps1": frozenset(),
+    "Run-GpoLensCollection.ps1": frozenset(),
+    "GpoLensCollectionMarker.ps1": frozenset(),
+    # A regex (double trailing backslashes in ConvertTo-GpoLensTaskArgument), not a path.
+    "Register-GpoLensCollection.ps1": frozenset({"(\\\\+)$"}),
+}
+
+
+def _string_literals(entry: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for row in entry["ast_rows"]:
+        if row[2] in ("StringConstantExpressionAst", "ExpandableStringExpressionAst"):
+            value = dict(row[3]).get("Value")
+            if isinstance(value, str):
+                values.append(value)
+    return values
+
+
+def check_remote_literals(script: str, entry: dict[str, Any]) -> None:
+    found = {v for v in _string_literals(entry) if _REMOTE_LITERAL.search(v)}
+    unexpected = sorted(found - REMOTE_LITERALS[script])
+    assert not unexpected, f"{script}: remote/UNC/URL-looking string literals: {unexpected}"
+    _exact("remote-looking literals", script, found, REMOTE_LITERALS[script])
+
+
 # Every TaskName parameter of the task scripts carries this validator, so a
 # wildcard (`*`, `?`, `[...]`), path or quote character can never reach
 # Unregister-/Register-ScheduledTask (Sol round 5: `-TaskName '*' -Unregister`
@@ -6337,7 +6993,10 @@ def check_script_header(script: str, entry: dict[str, Any]) -> None:
 
 def _arg_vector(command: dict[str, Any]) -> TaskVector:
     return frozenset(
-        (_cf(str(a["parameter"])), _norm(a["value"]) if a["value"] is not None else None)
+        (
+            _cf(str(a.get("parameter_canonical") or a["parameter"])),
+            _norm(a["value"]) if a["value"] is not None else None,
+        )
         for a in command["arguments"]
         if a["parameter"]
     )
@@ -6386,6 +7045,7 @@ def _named_checks(local: set[str], inv: dict[str, dict[str, Any]]) -> dict[str, 
         "guarded_ops": lambda s, e: check_guarded_ops(s, inv),
         "secret_uses": check_secret_uses,
         "remote_paths": check_remote_paths,
+        "remote_literals": check_remote_literals,
         "task_name_validator": check_task_name_validator,
         "script_header": check_script_header,
     }
@@ -6555,6 +7215,7 @@ def test_policy_tables_cover_every_script() -> None:
         ("SECRET_USES", SECRET_USES),
         ("SCRIPT_HEADERS", SCRIPT_HEADERS),
         ("SECRET_VARIABLES", SECRET_VARIABLES),
+        ("REMOTE_LITERALS", REMOTE_LITERALS),
         ("GUARDED_OPS", GUARDED_OPS),
     ):
         assert set(table) == set(POLICIES), f"{table_name} must have an entry per script"
@@ -7557,6 +8218,107 @@ _REGRESSIONS: list[Probe] = [
             "    [string]$TaskName = 'GpoLensCollection',",
         ),
     ),
+    # --- Round-6 candidates (Sol), each previously accepted ---
+    # 1: a command-argument variable rebound to a remote path.
+    (
+        "r6s_remote_read_by_argument_rebind",
+        "Export-GpoEstate.ps1",
+        "replace",
+        (
+            "    $metaPath = Join-Path $out 'gpo-metadata.json'\n",
+            "    $metaPath = Join-Path $out 'gpo-metadata.json'\n"
+            "    $metaPath = '\\\\attacker.example.test\\share\\payload.json'\n",
+        ),
+    ),
+    # 2: guard-predicate variables rebound.
+    (
+        "r6s_force_unregister_by_guard_rebind",
+        "Register-GpoLensCollection.ps1",
+        "replace",
+        (
+            "    $ErrorActionPreference = 'Stop'\n",
+            "    $ErrorActionPreference = 'Stop'\n    $Unregister = $true\n",
+        ),
+    ),
+    (
+        "r6s_force_real_run_by_guard_rebind",
+        "Export-GpoEstate.ps1",
+        "replace",
+        (
+            "$ErrorActionPreference = 'Stop'\n",
+            "$ErrorActionPreference = 'Stop'\n$DryRun = $false\n",
+        ),
+    ),
+    (
+        "r6s_silently_skip_sysvol_by_guard_rebind",
+        "Export-GpoEstate.ps1",
+        "replace",
+        (
+            "$ErrorActionPreference = 'Stop'\n",
+            "$ErrorActionPreference = 'Stop'\n$SkipSysvol = $true\n",
+        ),
+    ),
+    # Same class: remote-looking literals bound to a variable anywhere.
+    (
+        "r6x_remote_literal_expandable",
+        "Run-GpoLensCollection.ps1",
+        "append",
+        '$gateShare = "\\\\$env:COMPUTERNAME\\c$\\gate"\n',
+    ),
+    (
+        "r6x_remote_literal_url",
+        "Export-Principals.ps1",
+        "append",
+        "$gateUrl = 'https://attacker.example.test/payload'\n",
+    ),
+    # --- DeepSeek round 5 BL-1: 2-char prefix -Pi of -PipelineVariable ---
+    (
+        "r5d_pi_rebind_dest_copy",
+        "Export-GpoEstate.ps1",
+        "replace",
+        (
+            "            Copy-Item -LiteralPath $pf.FullName -Destination $dest -Recurse -Force "
+            "-ErrorAction Stop\n",
+            "            Get-Item -LiteralPath 'C:\\Windows\\Temp' -Pi dest | "
+            "Copy-Item -LiteralPath $pf.FullName -Destination $dest -Recurse -Force "
+            "-ErrorAction Stop\n",
+        ),
+    ),
+    (
+        "r5d_pi_only_getitem",
+        "Export-GpoEstate.ps1",
+        "append",
+        "Get-Item -LiteralPath '/etc/hostname' -Pi knownIds | Out-Null\n",
+    ),
+    (
+        "r5d_pi_rebind_receiver",
+        "Run-GpoLensCollection.ps1",
+        "append",
+        "Get-Item -LiteralPath '/etc/hostname' -Pi stream | Out-Null\n",
+    ),
+    (
+        "r5d_pi_rebind_out_before_write",
+        "Export-GpoEstate.ps1",
+        "replace",
+        (
+            "$allGpos = Get-GPO -All\n",
+            "Get-Item -LiteralPath '/etc/hostname' -Pi out | Out-Null\n$allGpos = Get-GPO -All\n",
+        ),
+    ),
+    # Alias form of the same class.
+    (
+        "r5d_ov_alias_rebind",
+        "Export-GpoEstate.ps1",
+        "append",
+        "Get-Item -LiteralPath '/etc/hostname' -ov OutputRoot | Out-Null\n",
+    ),
+    # DeepSeek round-5 NB-3: a parameter that no real cmdlet parameter matches.
+    (
+        "r5d_unknown_parameter",
+        "Export-GpoEstate.ps1",
+        "append",
+        "Get-ChildItem -LiteralPath 'C:\\x' -OutFile 'C:\\Windows\\Temp\\y'\n",
+    ),
 ]
 
 # NON-BL-3: the regression suite asserts WHICH substantive check flagged each
@@ -7674,6 +8436,18 @@ _PROBE_EXPECTED_CHECK: dict[str, str] = {
     "r5x_secret_copy": "secret_uses",
     "r5s_shouldprocess_false": "script_header",
     "r5s_taskname_validator_removed": "task_name_validator",
+    "r6s_remote_read_by_argument_rebind": "pinned_bindings",
+    "r6s_force_unregister_by_guard_rebind": "pinned_bindings",
+    "r6s_force_real_run_by_guard_rebind": "pinned_bindings",
+    "r6s_silently_skip_sysvol_by_guard_rebind": "pinned_bindings",
+    "r6x_remote_literal_expandable": "remote_literals",
+    "r6x_remote_literal_url": "remote_literals",
+    "r5d_pi_rebind_dest_copy": "pinned_bindings",
+    "r5d_pi_only_getitem": "pinned_bindings",
+    "r5d_pi_rebind_receiver": "pinned_bindings",
+    "r5d_pi_rebind_out_before_write": "pinned_bindings",
+    "r5d_ov_alias_rebind": "pinned_bindings",
+    "r5d_unknown_parameter": "commands",
 }
 
 
@@ -8169,6 +8943,67 @@ def test_task_name_wildcards_are_refused_before_unregister(tmp_path: Path, name:
     assert "REFUSED ParameterArgumentValidationError" in out, out + result.stderr
     assert f"STUB_UNREGISTER <{name}>" not in out
     assert "STUB_UNREGISTER <GpoLensCollection>" in out  # positive control
+
+
+# Aliases of the variable-writing common parameters (PowerShell's own).
+_VARIABLE_PARAM_ALIASES = {
+    "outvariable": "ov",
+    "pipelinevariable": "pv",
+    "errorvariable": "ev",
+    "warningvariable": "wv",
+    "informationvariable": "iv",
+}
+
+
+def test_variable_param_prefixes_and_aliases_are_resolved(tmp_path: Path) -> None:
+    """DeepSeek round 5 (BL-1): `-Pi` is the unambiguous 2-char prefix of
+    -PipelineVariable. The dumper resolves every parameter token the way
+    PowerShell does, so the full name, each alias, and every unambiguous prefix
+    of a variable-writing common parameter must all be caught rebinding a pinned
+    root. Each token is run through the real dumper (its resolver is pwsh's)."""
+    exe = _pwsh()
+    base = (_SCRIPTS / "Export-GpoEstate.ps1").read_text(encoding="utf-8")
+    forms: dict[str, tuple[str, str]] = {}  # label -> (token, expected canonical)
+    for name in _VARIABLE_WRITING_PARAMS:
+        canon = name.casefold()
+        forms[f"{name}:full"] = (name, canon)
+        forms[f"{name}:alias"] = (_VARIABLE_PARAM_ALIASES[canon], canon)
+        for i in range(2, len(name) + 1):  # prefixes; the dumper reports which resolve
+            forms[f"{name}:pre{i}"] = (name[:i], canon)
+    files: list[Path] = []
+    labels = list(forms)
+    for label in labels:
+        token, _canon = forms[label]
+        target = tmp_path / f"{label.replace(':', '_')}.ps1"
+        target.write_text(
+            base + f"\nGet-Item -LiteralPath '/etc/hostname' -{token} OutputRoot | Out-Null\n",
+            encoding="utf-8",
+        )
+        files.append(target)
+    results = [_canonicalize(e) for e in _run_dumper_raw(exe, [str(f) for f in files], timeout=900)]
+    caught_pi_prefix = False
+    for label, entry in zip(labels, results, strict=True):
+        token, expected = forms[label]
+        appended = next(
+            c
+            for c in reversed(entry["commands"])
+            if any(_norm(a["value"]) == "'/etc/hostname'" for a in c["arguments"])
+        )
+        arg = next(
+            a for a in appended["arguments"] if a["parameter"] and _norm(a["value"]) == "OutputRoot"
+        )
+        canon = arg.get("parameter_canonical")
+        if canon != expected:
+            continue  # this prefix is ambiguous on Get-Item; PowerShell would not bind it either
+        inv = dict(_inventory_for(exe))
+        inv["Export-GpoEstate.ps1"] = entry
+        failed = _run_checks("Export-GpoEstate.ps1", inv)
+        assert "pinned_bindings" in failed, (
+            f"{label} (-{token} -> {canon}) was not rejected: {sorted(failed)}"
+        )
+        if token.casefold() == "pi":
+            caught_pi_prefix = True
+    assert caught_pi_prefix, "the 2-char prefix -Pi of -PipelineVariable was not exercised"
 
 
 def test_clean_scripts_pass_all_checks(inventory: dict[str, dict[str, Any]]) -> None:

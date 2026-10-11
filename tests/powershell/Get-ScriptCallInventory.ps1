@@ -345,6 +345,62 @@ function Get-TypeNames {
     return $names
 }
 
+# Resolve a parameter token the way PowerShell does: against the cmdlet's real
+# parameter metadata (names + aliases, exact then unambiguous prefix) when the
+# cmdlet is available in this session, else against the common parameters (which
+# every cmdlet accepts). Returns the canonical full parameter name (lowercased)
+# or, when it cannot be resolved, the lowercased token itself (fail-closed: an
+# unresolved token never equals a pinned full name). DeepSeek round 5: `-Pi`
+# uniquely resolves to -PipelineVariable.
+$script:CommonParameters = [ordered]@{
+    Debug = @('db'); ErrorAction = @('ea'); ErrorVariable = @('ev')
+    InformationAction = @('infa'); InformationVariable = @('iv'); OutBuffer = @('ob')
+    OutVariable = @('ov'); PipelineVariable = @('pv'); ProgressAction = @('proga')
+    Verbose = @('vb'); WarningAction = @('wa'); WarningVariable = @('wv')
+    WhatIf = @('wi'); Confirm = @('cf')
+}
+$script:CmdletParamCache = @{}
+
+function Get-CmdletParameterNames {
+    param([string]$Name)
+    if (-not $Name) { return $null }
+    if ($script:CmdletParamCache.ContainsKey($Name)) { return $script:CmdletParamCache[$Name] }
+    $result = $null
+    try {
+        $cmd = Get-Command -Name $Name -ErrorAction Stop
+        # Follow an alias to its target so parameter metadata is the real one.
+        while ($cmd.CommandType -eq 'Alias' -and $cmd.ResolvedCommand) { $cmd = $cmd.ResolvedCommand }
+        if ($cmd.Parameters -and $cmd.Parameters.Count -gt 0) {
+            $map = [ordered]@{}
+            foreach ($entry in $cmd.Parameters.GetEnumerator()) {
+                $map[$entry.Key] = @($entry.Value.Aliases)
+            }
+            $result = $map
+        }
+    } catch { $result = $null }
+    $script:CmdletParamCache[$Name] = $result
+    return $result
+}
+
+function Resolve-ParameterName {
+    # Returns @(canonicalName, resolved) where resolved is $true when the token
+    # bound to a real parameter (of the cmdlet when known, else a common param).
+    param([string]$Command, [string]$Token)
+    if (-not $Token) { return @($Token, $false) }
+    $cf = $Token.ToLowerInvariant()
+    $known = $null -ne (Get-CmdletParameterNames $Command)
+    $map = Get-CmdletParameterNames $Command
+    if ($null -eq $map) { $map = $script:CommonParameters }
+    foreach ($key in $map.Keys) { if ($key.ToLowerInvariant() -eq $cf) { return @($key.ToLowerInvariant(), $true) } }
+    foreach ($key in $map.Keys) {
+        foreach ($alias in $map[$key]) { if ($alias.ToLowerInvariant() -eq $cf) { return @($key.ToLowerInvariant(), $true) } }
+    }
+    $matches = @($map.Keys | Where-Object { $_.ToLowerInvariant().StartsWith($cf) })
+    if ($matches.Count -eq 1) { return @($matches[0].ToLowerInvariant(), $true) }
+    # Not a parameter of the cmdlet (when known) nor a common parameter.
+    return @($cf, (-not $known))
+}
+
 function Get-AstKind {
     param($Ast)
     if ($null -eq $Ast) { return $null }
@@ -636,13 +692,15 @@ foreach ($file in $Path) {
                     $kind = (Get-AstKind $elems[$ei + 1])
                     $ei++
                 }
-                $arguments += [pscustomobject][ordered]@{ parameter = $el.ParameterName; value = $pv; value_kind = $kind }
+                $resolved = Resolve-ParameterName $name $el.ParameterName
+                $arguments += [pscustomobject][ordered]@{ parameter = $el.ParameterName; parameter_canonical = $resolved[0]; parameter_resolved = [bool]$resolved[1]; value = $pv; value_kind = $kind }
             } else {
-                $arguments += [pscustomobject][ordered]@{ parameter = $null; value = (Get-Text $el); value_kind = (Get-AstKind $el) }
+                $arguments += [pscustomobject][ordered]@{ parameter = $null; parameter_canonical = $null; parameter_resolved = $true; value = (Get-Text $el); value_kind = (Get-AstKind $el) }
             }
         }
         $record = [ordered]@{
             name = $name
+            cmdlet_known = ($null -ne (Get-CmdletParameterNames $name))
             line = $node.Extent.StartLineNumber
             invocation = [string]$node.InvocationOperator
             text = $node.Extent.Text
@@ -809,6 +867,24 @@ foreach ($file in $Path) {
             statement = (Get-NormText (Get-Text $owner))
         }
     }
+    # Every branch/loop condition (if/elseif, while, do, for, switch, foreach
+    # source): the gate pins every variable they read.
+    $conditions = @()
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -or
+                $n -is [System.Management.Automation.Language.LoopStatementAst] -or
+                $n -is [System.Management.Automation.Language.SwitchStatementAst] }, $true)) {
+        $parts = @()
+        if ($node -is [System.Management.Automation.Language.IfStatementAst]) {
+            foreach ($clause in $node.Clauses) { $parts += $clause.Item1 }
+        } else {
+            $parts += $node.Condition
+            if ($node -is [System.Management.Automation.Language.ForStatementAst]) { $parts += $node.Initializer; $parts += $node.Iterator }
+        }
+        foreach ($part in $parts) {
+            if ($null -eq $part) { continue }
+            $conditions += [pscustomobject][ordered]@{ text = (Get-NormText (Get-Text $part)); function = (Get-EnclosingFunction $node) }
+        }
+    }
     $parameterDecls = @()
     foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ParameterAst] }, $true)) {
         $parameterDecls += [pscustomobject][ordered]@{
@@ -886,6 +962,7 @@ foreach ($file in $Path) {
         variable_assignments = $variableAssignments
         variable_refs = $variableRefs
         variable_uses = $variableUses
+        conditions = $conditions
         parameter_decls = $parameterDecls
         indirect_writes = $indirectWrites
         redirections = $redirections
