@@ -19,7 +19,8 @@ one-way schema migration, so a patch number was not assumed).
   SYSVOL and the JSON inputs), replaces it with `[redacted cpassword]`, and
   chases copies through every descriptive field of the estate and through
   finding text. Copies are compared canonically (whitespace inside a value,
-  URL-safe base64 and `=` padding do not matter). They are chased for values
+  URL-safe base64 and `=` padding do not matter), including copies split
+  across the text of nested XML elements. They are chased for values
   of at least 12 characters that look like GPP ciphertext or mix letters and
   digits (whole tokens below 22 characters), and from 8 characters inside the
   setting that carries the value; short or word-like values are redacted only
@@ -44,13 +45,16 @@ one-way schema migration, so a patch number was not assumed).
 ### Upgrade notes
 
 - **Schema v11.** The first read-write open (`ingest`, `serve`, web upload)
-  discovers stored cpassword values in every text column (no SQL prefilter
-  that could miss a split form) and in SYSVOL still on disk at a stored path,
-  scrubs labelled values and copies from the descriptive columns, refuses
-  with `CredentialInIdentityError` and changes nothing if a copy sits in an
-  identity column, re-hashes the event chain from the first rewritten event
-  while keeping any break that existed before, and verifies the result by
-  rediscovering over every column. A residual rolls the whole scrub back (the
+  discovers stored cpassword values in every column whatever its declared
+  type or the value's storage class (BLOBs read as Latin-1/UTF-8 and UTF-16;
+  no prefilter that could miss a form) and in SYSVOL still on disk at a
+  stored path, scrubs labelled values and copies from the descriptive
+  columns, refuses with `CredentialInIdentityError` and changes nothing if a
+  copy sits in an identity column (a value it cannot rewrite exactly fails
+  verification, below), re-hashes the event chain from the first rewritten event, requires the set
+  of events failing verification to be exactly the same afterwards (an
+  earlier break is never healed, even by a payload crafted to match its
+  stored hash), and verifies the result by rediscovering over every column. A residual rolls the whole scrub back (the
   labelled sources stay, so every later open rediscovers and refuses again;
   the schema stays at 10). Otherwise it records a `maintenance.cpassword_scrub`
   event (counts and event ids, never a value), runs `VACUUM`, truncates the

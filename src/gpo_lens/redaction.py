@@ -61,6 +61,7 @@ This is a core module: stdlib only, and it must not import ``narration`` or
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import json
 import re
@@ -150,16 +151,33 @@ class CredentialInIdentityError(ValueError):
 
 def is_cpassword_name(name: object) -> bool:
     """True for ``cpassword`` in any casing, with or without a namespace."""
-    return isinstance(name, str) and localname(name).casefold() == "cpassword"
+    # len("cpassword") == 9; casefold can only shrink a few characters (ß→ss
+    # grows), so anything shorter than 8 cannot fold to it.
+    if not isinstance(name, str) or len(name) < 8:
+        return False
+    return localname(name).casefold() == "cpassword"
 
 
 def mentions_cpassword(text: str) -> bool:
-    """Cheap pre-check: does *text* contain ``cpassword`` in any casing?"""
+    """Cheap pre-check: does *text* contain ``cpassword`` in any casing?
+
+    ASCII text is lower-cased (exact for ASCII); anything else uses the
+    Unicode case-insensitive regex (``ſ`` and ``K`` fold to ``s``/``k``).
+    """
+    if text.isascii():
+        return "cpassword" in text.lower()
     return _HINT.search(text) is not None
 
 
+_MARKER_COMPACT = "".join(CPASSWORD_MARKER.split())
+
+
 def _secret(value: object) -> bool:
-    return isinstance(value, str) and value.strip() != "" and value != CPASSWORD_MARKER
+    """A non-empty value that is not (a whitespace variant of) the marker."""
+    if not isinstance(value, str):
+        return False
+    compact = "".join(value.split())
+    return compact != "" and compact != _MARKER_COMPACT
 
 
 def _unquote(value: str) -> tuple[str, str]:
@@ -259,7 +277,8 @@ class Chaser:
         self._unbounded = frozenset(v for v in eligible if not local and _ciphertext_shaped(v))
         # JSON text escapes quotes and backslashes; such values need a walk.
         self.walk_needed = any(
-            any(c in v for c in '"\\') or not v.isprintable() for v in self.values
+            any(c in v for c in '"\\') or not v.isprintable() or not v.isascii()
+            for v in self.values
         )
 
     def __bool__(self) -> bool:
@@ -337,17 +356,18 @@ def _mixed(elem: Element) -> bool:
     return any(child.tail and child.tail.strip() for child in elem)
 
 
-def redact_element_tree(root: Element) -> set[str]:
+def redact_element_tree(root: Element, *, gate: bool = True) -> set[str]:
     """Redact every labelled cpassword value in *root*'s subtree, in place.
 
     Returns the distinct values removed (un-normalized) for copy chasing.
     """
     found: set[str] = set()
+    if gate and not tree_mentions(root):
+        return found
     for elem in list(root.iter()):
         if is_cpassword_name(elem.tag):
-            pieces = [t.strip() for t in elem.itertext() if t.strip()]
-            content = "".join(pieces)
-            found.update(p for p in pieces if _secret(p))
+            # One value: the element's joined text, not its pieces (review r3 N-01).
+            content = "".join("".join(elem.itertext()).split())
             if _secret(content):
                 found.add(content)
             found.update(v for v in elem.attrib.values() if _secret(v))
@@ -386,6 +406,31 @@ def redact_element_tree(root: Element) -> set[str]:
         if _mixed(elem):
             found |= _redact_segments(list(_xml_segments(elem)))
     return found
+
+
+def tree_mentions(root: Element, source: str | None = None) -> bool:
+    """Superset gate: could *root* hold any labelled form?
+
+    Every form needs the word ``cpassword`` in a tag, an attribute name or
+    value, or the element text. The text is tested joined across the whole
+    tree (so a word split across nodes is seen), tags and attributes in one
+    string; both joins only add adjacency, never remove it. When the document
+    *source* is given and holds neither the word nor a character reference
+    (``&#``, the only way to spell a letter differently once parsed), tags
+    and attributes are covered by the source and are not walked.
+    """
+    if mentions_cpassword("".join(root.itertext())):
+        return True
+    if source is not None and "&#" not in source:
+        return mentions_cpassword(source)
+    names: list[str] = []
+    for elem in root.iter():
+        names.append(str(elem.tag))
+        if elem.attrib:
+            for key, value in elem.attrib.items():
+                names.append(key)
+                names.append(value)
+    return mentions_cpassword("\x00".join(names))
 
 
 def _xml_segments(elem: Element) -> Iterator[list[Any]]:
@@ -436,15 +481,25 @@ def _redact_segments(segments: list[list[Any]]) -> set[str]:
         start = match.start("value") + len(quote)
         found.add(inner)
         spans.append((start, start + len(inner)))
+    _apply_spans(segments, texts, spans)
+    return found
+
+
+def _apply_spans(segments: list[list[Any]], texts: list[str], spans: list[tuple[int, int]]) -> None:
+    """Replace each span of the joined *texts* by the marker, in place.
+
+    The marker goes where the span starts; the span's characters are removed
+    from the segments it continues into. Everything else stays where it was.
+    """
     if not spans:
-        return found
+        return
     offsets = []
     position = 0
     for text in texts:
         offsets.append(position)
         position += len(text)
     new_texts = list(texts)
-    for start, end in reversed(spans):
+    for start, end in sorted(spans, reverse=True):
         placed = False
         for i, text in enumerate(texts):
             lo, hi = offsets[i], offsets[i] + len(text)
@@ -458,7 +513,71 @@ def _redact_segments(segments: list[list[Any]]) -> set[str]:
     for seg, old, new in zip(segments, texts, new_texts, strict=True):
         if new != old:
             _segment_set(seg, new)
-    return found
+
+
+def _element_nodes(obj: Any) -> Iterator[dict[str, Any]]:
+    """``element_to_dict`` nodes with children, deepest first."""
+    if isinstance(obj, dict):
+        for child in obj.get("children", []) or []:
+            yield from _element_nodes(child)
+        if "tag" in obj and obj.get("children"):
+            yield obj
+    elif isinstance(obj, list):
+        for item in obj:
+            yield from _element_nodes(item)
+
+
+def joined_text(obj: Any) -> str:
+    """All element text of an ``element_to_dict`` structure, in document order.
+
+    The joined text of any subtree is a substring of this, so it serves as a
+    superset gate for :func:`chase_joined`.
+    """
+    if isinstance(obj, dict) and "tag" in obj:
+        return "".join(_segment_get(seg) for seg in _dict_segments(obj))
+    if isinstance(obj, list):
+        return "\x00".join(joined_text(item) for item in obj)
+    return ""
+
+
+def _joined_spans(node: dict[str, Any], chaser: Chaser) -> list[tuple[int, int]]:
+    segments = list(_dict_segments(node))
+    texts = [_segment_get(seg) for seg in segments]
+    if sum(1 for t in texts if t) < 2:
+        return []  # a single text node is covered by the per-string chase
+    return chaser._spans("".join(texts))
+
+
+def chase_joined(
+    obj: Any, chaser: Chaser, location: str, *, rewritable: bool, field: str = ""
+) -> Any:
+    """Chase copies split across an element subtree's text nodes.
+
+    ``<P>AAEC…<Span>…Dw==</Span></P>``: the joined text of an element (its text
+    and every descendant's, as stored by ``element_to_dict``) is matched under
+    the same rules, deepest element first, and the spanning pieces are
+    redacted in place. Returns a new structure when anything changed; in a
+    non-rewritable field a match refuses instead.
+    """
+    if not chaser.values or not isinstance(obj, (dict, list)):
+        return obj
+    if not chaser.contains(joined_text(obj)):
+        return obj
+    if not any(_joined_spans(node, chaser) for node in _element_nodes(obj)):
+        return obj
+    if not rewritable:
+        raise CredentialInIdentityError(f"{field or 'value'} ({location})")
+    new = copy.deepcopy(obj)
+    for node in _element_nodes(new):
+        segments = list(_dict_segments(node))
+        texts = [_segment_get(seg) for seg in segments]
+        _apply_spans(segments, texts, _joined_spans(node, chaser))
+    return new
+
+
+def joined_hits(obj: Any, chaser: Chaser) -> bool:
+    """A copy split across an element subtree's text nodes remains."""
+    return bool(chaser.values) and any(_joined_spans(node, chaser) for node in _element_nodes(obj))
 
 
 # --- JSON-like structures -------------------------------------------------------
@@ -515,10 +634,14 @@ def _redact_obj(obj: Any, found: set[str]) -> Any:
     if is_cpassword_name(obj.get("tag")):
         texts: list[str] = []
         _collect_text(obj, texts)
-        found.update(t for t in texts if _secret(t))
-        joined = "".join(t.strip() for t in texts if t.strip())
+        # One value: the element's joined text (not its pieces); attribute
+        # values of the element are labelled individually.
+        joined = "".join("".join(_segment_get(seg) for seg in _dict_segments(obj)).split())
         if _secret(joined):
             found.add(joined)
+        attrs = obj.get("@attr")
+        if isinstance(attrs, dict):
+            found.update(v for v in attrs.values() if _secret(v))
         result: dict[str, Any] = {"tag": obj["tag"]}
         if any(t.strip() for t in texts):
             result["text"] = CPASSWORD_MARKER
@@ -542,8 +665,10 @@ def _redact_obj(obj: Any, found: set[str]) -> Any:
         elif is_cpassword_name(key):
             texts = []
             _collect_text(value, texts)
-            secrets = [t for t in texts if _secret(t)]
-            found.update(secrets)
+            if isinstance(value, str):
+                found.update(t for t in texts if _secret(t))
+            elif _secret("".join(texts)):
+                found.add("".join("".join(texts).split()))
             out[key] = CPASSWORD_MARKER if any(t.strip() for t in texts) else value
         else:
             out[key] = _redact_obj(value, found)
@@ -563,7 +688,9 @@ def redact_structure(obj: Any) -> tuple[Any, set[str]]:
 def _blob(value: Any) -> str | None:
     """JSON text of a JSON-native container, or None (e.g. it holds dataclasses)."""
     try:
-        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        # Same form ``store.save_estate`` writes, so the text can be reused.
+        # Non-ASCII becomes ``\\u`` escapes: gates treat ``\\u`` as "walk".
+        return json.dumps(value, sort_keys=True)
     except (TypeError, ValueError):
         return None
 
@@ -599,9 +726,10 @@ def chase(value: Any, chaser: Chaser, location: str, *, rewritable: bool, field:
             if f.name.startswith("_"):
                 continue
             old = getattr(value, f.name)
-            new = chase(
-                old, chaser, location, rewritable=f.name in allowed, field=f"{cls}.{f.name}"
-            )
+            label = f"{cls}.{f.name}"
+            new = chase(old, chaser, location, rewritable=f.name in allowed, field=label)
+            if isinstance(new, (dict, list)) and not chaser.local:
+                new = chase_joined(new, chaser, location, rewritable=f.name in allowed, field=label)
             if new is not old:
                 changes[f.name] = new
         return dataclasses.replace(value, **changes) if changes else value
@@ -696,7 +824,9 @@ def _dedupe_identities(gpo: Gpo) -> None:
             )
 
 
-def sanitize_estate(estate: Estate, known: Iterable[str] = ()) -> frozenset[str]:
+def sanitize_estate(
+    estate: Estate, known: Iterable[str] = (), *, retain_serialized: bool = False
+) -> frozenset[str]:
     """Redact labelled values, then chase every copy across the estate, in place.
 
     *known* adds values discovered elsewhere (the report tree, SYSVOL files).
@@ -735,11 +865,13 @@ def sanitize_estate(estate: Estate, known: Iterable[str] = ()) -> frozenset[str]
     chaser = Chaser(found)
     if chaser:
         chased_gpos = []
+        # One estate-wide superset test first: per-GPO tests only on a hit.
+        any_setting_hit = _estate_may_hit(estate, chaser)
         for gpo in estate.gpos:
             location = f"GPO {gpo.id}"
             stripped = dataclasses.replace(gpo, settings=[])
             new_gpo = chase(stripped, chaser, location, rewritable=False)
-            if _gpo_may_hit(gpo, chaser):
+            if any_setting_hit and _gpo_may_hit(gpo, chaser):
                 settings = [
                     chase(s, chaser, location, rewritable=False) if _setting_hits(s, chaser) else s
                     for s in gpo.settings
@@ -759,7 +891,9 @@ def sanitize_estate(estate: Estate, known: Iterable[str] = ()) -> frozenset[str]
     try:
         residual = residual_locations(estate, found)
     finally:
-        _blob_memo.clear()
+        if not retain_serialized:
+            _blob_memo.clear()
+        _text_memo.clear()
     if residual:
         raise CpasswordResidualError(residual[0])
     values = frozenset(found)
@@ -792,9 +926,10 @@ def residual_locations(estate: Estate, values: Iterable[str]) -> list[str]:
     """
     chaser = Chaser(values)
     out: list[str] = []
+    any_setting_hit = bool(chaser) and _estate_may_hit(estate, chaser)
     for gpo in estate.gpos:
         may_label = _gpo_may_label(gpo)
-        may_hit = bool(chaser) and _gpo_may_hit(gpo, chaser)
+        may_hit = any_setting_hit and _gpo_may_hit(gpo, chaser)
         for setting in gpo.settings if (may_label or may_hit) else ():
             found: set[str] = set()
             if may_label and _setting_mentions(setting):
@@ -802,7 +937,10 @@ def residual_locations(estate: Estate, values: Iterable[str]) -> list[str]:
             if found or (
                 may_hit
                 and _setting_hits(setting, chaser)
-                and any(chaser.hits(t) for t in _strings(setting))
+                and (
+                    any(chaser.hits(t) for t in _strings(setting))
+                    or joined_hits(setting.raw, chaser)
+                )
             ):
                 out.append(f"Setting {setting.identity!r} (GPO {gpo.id})")
         stripped = dataclasses.replace(gpo, settings=[])
@@ -843,12 +981,26 @@ def _needs_label_walk(raw: Any) -> bool:
     ``_has_mixed`` walked.
     """
     blob = _raw_blob(raw)
-    if blob is None or mentions_cpassword(blob):
+    if blob is None or mentions_cpassword(blob) or "\\u" in blob:
         return True
     return '"children"' in blob and '"text"' in blob and _has_mixed(raw)
 
 
+_text_memo: dict[int, tuple[Gpo, tuple[int, ...], str]] = {}
+
+
 def _settings_text(gpo: Gpo) -> str:
+    """Memoized ``_gpo_settings_text`` (keyed by the GPO and its setting objects)."""
+    key = tuple(map(id, gpo.settings))
+    entry = _text_memo.get(id(gpo))
+    if entry is not None and entry[0] is gpo and entry[1] == key:
+        return entry[2]
+    text = _gpo_settings_text(gpo)
+    _text_memo[id(gpo)] = (gpo, key, text)
+    return text
+
+
+def _gpo_settings_text(gpo: Gpo) -> str:
     """All of a GPO's setting text and raw JSON (escapes as spaces), one string.
 
     Settings are separated by NUL, which is neither whitespace nor base64, so
@@ -872,6 +1024,8 @@ def _settings_text(gpo: Gpo) -> str:
         if blob is None:
             return ""  # not serializable: callers fall back to per-setting tests
         parts.append(_JSON_ESCAPE.sub(" ", blob) if "\\" in blob else blob)
+        if '"children"' in blob:
+            parts.append(joined_text(setting.raw))  # copies split across nodes
     return "\x00".join(parts)
 
 
@@ -879,7 +1033,26 @@ def _gpo_may_label(gpo: Gpo) -> bool:
     text = _settings_text(gpo)
     if not text:
         return bool(gpo.settings)
-    return mentions_cpassword(text) or ('"children"' in text and '"text"' in text)
+    # Raw JSON is ASCII (escaped), so non-ASCII here comes from setting text,
+    # which per-setting tests then examine.
+    return (
+        not text.isascii()
+        or mentions_cpassword(text)
+        or ('"children"' in text and '"text"' in text)
+    )
+
+
+def _estate_may_hit(estate: Estate, chaser: Chaser) -> bool:
+    """``_gpo_may_hit`` for all GPOs at once (NUL-separated, still a superset)."""
+    if chaser.exact or chaser.walk_needed:
+        return True
+    texts = []
+    for gpo in estate.gpos:
+        text = _settings_text(gpo)
+        if not text and gpo.settings:
+            return True
+        texts.append(text)
+    return chaser.contains("\x00".join(texts))
 
 
 def _gpo_may_hit(gpo: Gpo, chaser: Chaser) -> bool:
@@ -896,7 +1069,7 @@ def _setting_mentions(setting: Any) -> bool:
     text = "\x00".join(
         (setting.identity, setting.display_name, setting.display_value, setting.cse, blob)
     )
-    if mentions_cpassword(text):
+    if mentions_cpassword(text) or "\\u" in blob:
         return True
     return '"children"' in blob and '"text"' in blob and _has_mixed(setting.raw)
 
@@ -919,7 +1092,9 @@ def _setting_hits(setting: Any, chaser: Chaser) -> bool:
     if chaser.contains(texts):
         return True
     blob = _raw_blob(setting.raw)
-    return blob is None or chaser.hits_json(blob)
+    if blob is None or chaser.hits_json(blob):
+        return True
+    return '"children"' in blob and chaser.contains(joined_text(setting.raw))
 
 
 def _assign(estate: Estate, source: Estate, *, gpos: list[Gpo]) -> None:
@@ -957,8 +1132,22 @@ def sysvol_values_at(paths: Iterable[str]) -> set[str]:
 
 
 def sanitize_for_storage(estate: Estate) -> frozenset[str]:
-    """``sanitize_estate`` with the estate's own SYSVOL values; returns all values."""
-    return sanitize_estate(estate, sysvol_cpassword_values(estate.gpos))
+    """``sanitize_estate`` with the estate's own SYSVOL values; returns all values.
+
+    The JSON text computed for each setting's raw structure is kept for
+    :func:`stored_json`; call :func:`release_serialized` after writing.
+    """
+    return sanitize_estate(estate, sysvol_cpassword_values(estate.gpos), retain_serialized=True)
+
+
+def stored_json(raw: Any) -> str:
+    """``json.dumps(raw, sort_keys=True)``, reusing the text sanitizing computed."""
+    blob = _raw_blob(raw)
+    return blob if blob is not None else json.dumps(raw, sort_keys=True)
+
+
+def release_serialized() -> None:
+    _blob_memo.clear()
 
 
 def scrub_records(records: Iterable[Any], values: Iterable[str], location: str) -> list[Any]:

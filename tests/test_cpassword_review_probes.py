@@ -698,3 +698,113 @@ def test_ds_r2_nb7_bare_value_trailing_punctuation(tmp_path: Path) -> None:
     gpos = ingest.parse_report_xml(report.encode())
     assert value not in json.dumps([dataclasses.asdict(g) for g in gpos], default=str)
     assert gpos[0].description.endswith(". end")
+
+
+# --- Round 3 (reviews of ad9e7f2) ------------------------------------------------
+
+R3_B16 = base64.b64encode((b"PROBEcpwR3B16" + b"X" * 16)[:16]).decode()
+R3_B32 = base64.b64encode((b"PROBEcpwR3B32" + b"X" * 32)[:32]).decode()
+
+
+@pytest.mark.parametrize("kind", ["integer-text", "integer-blob"])
+def test_sol_r3_b01_value_in_integer_column_refuses_not_stamped(tmp_path: Path, kind: str) -> None:
+    db = _v140_copy(tmp_path, f"migration-{kind}.sqlite3")
+    carrier: object = f'cpassword="{R3_B16}"'
+    if kind == "integer-blob":
+        carrier = sqlite3.Binary(str(carrier).encode())
+    with closing(sqlite3.connect(db)) as conn:
+        conn.execute(
+            "UPDATE gpo SET computer_enabled = ? WHERE rowid = (SELECT rowid FROM gpo LIMIT 1)",
+            (carrier,),
+        )
+        conn.commit()
+    with closing(sqlite3.connect(db)) as conn:
+        with pytest.raises(ValueError, match=r"gpo\.computer_enabled"):
+            init_db(conn)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
+
+
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-16-le"])
+def test_sol_r3_b01_blob_in_text_column_is_scrubbed(tmp_path: Path, encoding: str) -> None:
+    db = _v140_copy(tmp_path, "migration-text-column-blob.sqlite3")
+    carrier = sqlite3.Binary(json.dumps({"cpassword": R3_B16}).encode(encoding))
+    with closing(sqlite3.connect(db)) as conn:
+        rowid = conn.execute("SELECT rowid FROM setting LIMIT 1").fetchone()[0]
+        conn.execute("UPDATE setting SET raw = ? WHERE rowid = ?", (carrier, rowid))
+        conn.commit()
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
+        raw = conn.execute("SELECT raw FROM setting WHERE rowid = ?", (rowid,)).fetchone()[0]
+        assert R3_B16 not in bytes(raw).decode(encoding)
+    utf16 = R3_B16.encode("utf-16-le")
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        path = Path(f"{db}{suffix}")
+        if path.exists():
+            data = path.read_bytes()
+            assert R3_B16.encode() not in data and utf16 not in data
+
+
+def test_sol_r3_b02_crafted_break_cannot_be_healed(tmp_path: Path) -> None:
+    from gpo_lens.events import _compute_hash
+    from gpo_lens.redaction import CPASSWORD_MARKER
+
+    db = tmp_path / "preexisting-break.sqlite3"
+    timestamp, event_type = "2026-01-01T00:00:00+00:00", "probe.history"
+    before = json.dumps({"note": f'cpassword="{R3_B16}"'}, sort_keys=True)
+    after = json.dumps({"note": f'cpassword="{CPASSWORD_MARKER}"'}, sort_keys=True)
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        conn.execute("PRAGMA user_version = 10")
+        conn.execute(
+            "INSERT INTO events (timestamp, event_type, schema_version, payload, prev_hash) "
+            "VALUES (?, ?, 1, ?, ?)",
+            (timestamp, event_type, before, _compute_hash(None, timestamp, event_type, after)),
+        )
+        conn.commit()
+        assert verify_event_chain(conn) == (False, [1])
+    with closing(sqlite3.connect(db)) as conn, warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        init_db(conn)
+        assert verify_event_chain(conn) == (False, [1])
+        assert R3_B16 not in conn.execute("SELECT payload FROM events WHERE id = 1").fetchone()[0]
+
+
+def test_sol_r3_n01_split_cpassword_element_is_one_value() -> None:
+    import defusedxml.ElementTree as ET
+
+    from gpo_lens.redaction import Chaser, redact_element_tree
+
+    value = R3_B32.rstrip("=")
+    first, second = value[:22], value[22:]
+    found = redact_element_tree(ET.fromstring(f"<x><cpassword>{first}<b/>{second}</cpassword></x>"))
+    assert found == {value}
+    assert Chaser(found).sub(f"unrelated=({first})") == f"unrelated=({first})"
+
+
+def test_ds_r3_copy_split_across_xml_elements(tmp_path: Path) -> None:
+    value = base64.b64encode(bytes(range(16))).decode()
+    a, b = value[:12], value[12:]
+    report = (
+        "<GPOs>"
+        + _gpo("{11111111-1111-1111-1111-111111111111}", "source", "d", _drives([("n", value)]))
+        + _gpo(
+            "{22222222-2222-2222-2222-222222222222}",
+            "copy",
+            "d",
+            '<Drives clsid="x"><Drive uid="2" name="m"><Properties path="q">'
+            f"{a}<Span>{b}</Span></Properties></Drive></Drives>",
+        )
+        + "</GPOs>"
+    )
+    (tmp_path / "e").mkdir()
+    (tmp_path / "e" / "AllGPOs.xml").write_text(report, encoding="utf-8")
+    estate = ingest.load_estate(tmp_path / "e")
+    db = tmp_path / "splitxml.sqlite3"
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        save_estate(conn, estate)
+        conn.commit()
+        raw = conn.execute("SELECT raw FROM setting WHERE raw LIKE '%Span%'").fetchone()[0]
+        assert json.loads(raw)["children"][0]["children"][0]["tag"] == "Span"
+    assert _file_hits(db, (value, a, b)) == {}

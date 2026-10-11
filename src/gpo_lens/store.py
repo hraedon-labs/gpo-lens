@@ -40,13 +40,17 @@ from gpo_lens.redaction import (
     CpasswordResidualError,
     CredentialInIdentityError,
     chase,
+    chase_joined,
     estate_cpassword_values,
     forget_cpassword_values,
     iter_strings,
+    joined_hits,
     mentions_cpassword,
     redact_inline,
     redact_structure,
+    release_serialized,
     sanitize_for_storage,
+    stored_json,
     sysvol_values_at,
 )
 
@@ -519,13 +523,75 @@ _SETTING_TEXT = ("identity", "display_name", "display_value", "raw")
 
 
 def _text_columns(conn: sqlite3.Connection, table: str) -> list[str]:
-    """Columns with TEXT or no declared affinity (SQLite affinity rules)."""
-    cols = []
-    for row in conn.execute(f'PRAGMA table_info("{table}")'):
-        declared = (row[2] or "").upper()
-        if not declared or any(t in declared for t in ("CHAR", "CLOB", "TEXT")):
-            cols.append(row[1])
-    return cols
+    """Every column: SQLite is dynamically typed, so a column of any declared
+    affinity can hold a TEXT or BLOB value at runtime."""
+    return [row[1] for row in conn.execute(f'PRAGMA table_info("{table}")')]
+
+
+def _detect_views(value: object) -> list[str]:
+    """Every text reading of a stored value, for discovery and verification.
+
+    TEXT as is; a BLOB as Latin-1 (byte-exact, covers ASCII/UTF-8) and as
+    UTF-16 at both byte alignments (covers UTF-16LE/BE). Numbers and NULL hold
+    no text.
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (bytes, memoryview)):
+        data = bytes(value)
+        return [
+            data.decode("latin-1"),
+            data.decode("utf-16-le", errors="replace"),
+            data[1:].decode("utf-16-le", errors="replace"),
+        ]
+    return []
+
+
+def _rewrite_views(value: object) -> list[tuple[str, str | None]]:
+    """Readings of a stored value that can be written back exactly, with the
+    encoding to use (``None`` for TEXT)."""
+    if isinstance(value, str):
+        return [(value, None)]
+    if not isinstance(value, (bytes, memoryview)):
+        return []
+    data = bytes(value)
+    views: list[tuple[str, str | None]] = [(data.decode("latin-1"), "latin-1")]
+    if len(data) % 2 == 0:
+        for encoding in ("utf-16-le", "utf-16-be"):
+            try:
+                views.append((data.decode(encoding), encoding))
+            except UnicodeDecodeError:
+                continue
+    return views
+
+
+def _encode(text: str, encoding: str | None) -> object:
+    return text if encoding is None else text.encode(encoding)
+
+
+def _labelled_value(table: str, column: str, value: object) -> tuple[object, set[str]]:
+    """``_labelled`` for a stored value of any storage class."""
+    found: set[str] = set()
+    for view in _detect_views(value):
+        found |= _labelled(table, column, view)[1]
+    for view, encoding in _rewrite_views(value):
+        new, _ = _labelled(table, column, view)
+        if new != view:
+            return _encode(new, encoding), found
+    return value, found
+
+
+def _chased_value(table: str, column: str, value: object, chaser: Chaser) -> object:
+    """``_chased`` for a stored value of any storage class."""
+    for view, encoding in _rewrite_views(value):
+        new = _chased(table, column, view, chaser)
+        if new != view:
+            return _encode(new, encoding)
+    return value
+
+
+def _value_hits(value: object, chaser: Chaser) -> bool:
+    return bool(chaser) and any(chaser.hits(view) for view in _detect_views(value))
 
 
 def _user_tables(conn: sqlite3.Connection) -> list[str]:
@@ -565,6 +631,8 @@ def _chased(table: str, column: str, value: str, chaser: Chaser) -> str:
         parsed = _json_container(value)
         if parsed is not None:
             new = chase(parsed, chaser, location, rewritable=True, field=location)
+            if not chaser.local:
+                new = chase_joined(new, chaser, location, rewritable=True, field=location)
             return value if new is parsed else json.dumps(new, sort_keys=True)
     return chaser.sub(value) if chaser.hits(value) else value
 
@@ -578,29 +646,64 @@ def _register_candidates(conn: sqlite3.Connection, chaser: Chaser) -> None:
     hide letters behind ``\\u`` escapes, so those rows are always parsed.
     """
 
-    def text(value: object) -> int:
-        if not isinstance(value, str):
-            return 0
-        return int(mentions_cpassword(value) or (bool(chaser) and chaser.contains(value)))
+    def one_text(value: str) -> bool:
+        return mentions_cpassword(value) or (bool(chaser) and chaser.contains(value))
 
-    def json_text(value: object) -> int:
-        if not isinstance(value, str):
-            return 0
-        return int(
+    def one_json(value: str) -> bool:
+        return (
             mentions_cpassword(value)
             or ('"children"' in value and '"text"' in value)
             or "\\u" in value
             or (bool(chaser) and chaser.hits_json(value))
         )
 
+    # Any storage class: a BLOB is tested in every reading (``_detect_views``).
+    def text(value: object) -> int:
+        return int(any(one_text(view) for view in _detect_views(value)))
+
+    def json_text(value: object) -> int:
+        return int(any(one_json(view) for view in _detect_views(value)))
+
     conn.create_function("gpo_lens_cpw_text", 1, text, deterministic=True)
     conn.create_function("gpo_lens_cpw_json", 1, json_text, deterministic=True)
+    _CANDIDATE_MODE[id(conn)] = bool(chaser)
 
 
-def _candidate_rows(conn: sqlite3.Connection, table: str, column: str) -> list[tuple[int, str]]:
-    fn = "gpo_lens_cpw_json" if (table, column) in _JSON_COLUMNS else "gpo_lens_cpw_text"
+# Whether the registered candidate functions carry a non-empty chaser.
+_CANDIDATE_MODE: dict[int, bool] = {}
+
+
+def _candidate_where(conn: sqlite3.Connection, table: str, column: str) -> str:
+    """SQL condition selecting the rows the candidate functions would select.
+
+    Without a chaser, printable-ASCII TEXT is decided in SQL: there SQLite's
+    ASCII ``lower`` plus ``instr`` is exactly the case-insensitive ``cpassword``
+    test (non-ASCII folds such as long s or the Kelvin sign only occur in the
+    other branch). Numbers and NULL hold no text. Everything else, and every
+    value when a chaser is active, goes to the Python functions.
+    """
+    is_json = (table, column) in _JSON_COLUMNS
+    fn = "gpo_lens_cpw_json" if is_json else "gpo_lens_cpw_text"
+    col = f'"{column}"'
+    python = f"{fn}({col})"
+    if _CANDIDATE_MODE.get(id(conn), True):
+        return python
+    sql_hit = f"instr(lower({col}), 'cpassword') > 0"
+    if is_json:
+        sql_hit += (
+            f" OR (instr({col}, '\"children\"') > 0 AND instr({col}, '\"text\"') > 0)"
+            f" OR instr({col}, '\\u') > 0"
+        )
+    return (
+        f"(CASE WHEN typeof({col}) IN ('integer', 'real', 'null') THEN 0 "
+        f"WHEN typeof({col}) = 'text' AND {col} NOT GLOB '*[^ -~]*' THEN ({sql_hit}) "
+        f"ELSE {python} END)"
+    )
+
+
+def _candidate_rows(conn: sqlite3.Connection, table: str, column: str) -> list[tuple[int, Any]]:
     return conn.execute(
-        f'SELECT rowid, "{column}" FROM "{table}" WHERE {fn}("{column}")'
+        f'SELECT rowid, "{column}" FROM "{table}" WHERE {_candidate_where(conn, table, column)}'
     ).fetchall()
 
 
@@ -616,7 +719,7 @@ def _discover_at_rest(conn: sqlite3.Connection, tables: list[str]) -> set[str]:
     for table in tables:
         for column in _text_columns(conn, table):
             for _, value in _candidate_rows(conn, table, column):
-                found |= _labelled(table, column, value)[1]
+                found |= _labelled_value(table, column, value)[1]
     if "gpo" in tables and _column_exists(conn, "gpo", "sysvol_path"):
         paths = [
             row[0]
@@ -628,8 +731,13 @@ def _discover_at_rest(conn: sqlite3.Connection, tables: list[str]) -> set[str]:
     return found
 
 
-def _value_residual(table: str, column: str, value: str, chaser: Chaser) -> bool:
-    """A labelled value, or a copy the chase rules cover, is still in *value*."""
+def _value_residual(table: str, column: str, value: object, chaser: Chaser) -> bool:
+    """A labelled value, or a copy the chase rules cover, is still in *value*
+    (in any reading of any storage class)."""
+    return any(_view_residual(table, column, view, chaser) for view in _detect_views(value))
+
+
+def _view_residual(table: str, column: str, value: str, chaser: Chaser) -> bool:
     if _labelled(table, column, value)[1]:
         return True
     if not chaser:
@@ -637,7 +745,9 @@ def _value_residual(table: str, column: str, value: str, chaser: Chaser) -> bool
     if (table, column) in _JSON_COLUMNS:
         parsed = _json_container(value)
         if parsed is not None:
-            return any(chaser.hits(text) for text in iter_strings(parsed))
+            return any(chaser.hits(text) for text in iter_strings(parsed)) or joined_hits(
+                parsed, chaser
+            )
     return chaser.hits(value)
 
 
@@ -681,41 +791,38 @@ def _scrub_cpassword_at_rest(conn: sqlite3.Connection) -> _ScrubResult | None:
     values = _discover_at_rest(conn, tables)
     chaser = Chaser(values)
     _register_candidates(conn, chaser)
-    plan: dict[tuple[str, str], list[tuple[str, int]]] = {}
+    plan: dict[tuple[str, str], list[tuple[object, int]]] = {}
     refused: set[str] = set()
 
-    def stage(table: str, column: str, rowid: int, old: str, new: str) -> None:
+    def stage(table: str, column: str, rowid: int, old: object, new: object) -> None:
         if new != old:
             plan.setdefault((table, column), []).append((new, rowid))
 
     if "setting" in tables:
         # A setting's own labelled values also chase through that same row.
-        where = " OR ".join(
-            f"gpo_lens_cpw_json({c})" if c == "raw" else f"gpo_lens_cpw_text({c})"
-            for c in _SETTING_TEXT
-        )
+        where = " OR ".join(_candidate_where(conn, "setting", c) for c in _SETTING_TEXT)
         for rowid, *texts in conn.execute(
             f"SELECT rowid, {', '.join(_SETTING_TEXT)} FROM setting WHERE {where}"
         ).fetchall():
-            labelled: dict[str, str] = {}
+            labelled: dict[str, object] = {}
             own: set[str] = set()
             for column, text in zip(_SETTING_TEXT, texts, strict=True):
-                labelled[column], found = _labelled("setting", column, text)
+                labelled[column], found = _labelled_value("setting", column, text)
                 own |= found
             local = Chaser(own, local=True)
             for column, text in zip(_SETTING_TEXT, texts, strict=True):
-                new = _chased("setting", column, labelled[column], local)
-                stage("setting", column, rowid, text, _chased("setting", column, new, chaser))
+                new = _chased_value("setting", column, labelled[column], local)
+                stage("setting", column, rowid, text, _chased_value("setting", column, new, chaser))
     for table in tables:
         rewritable = REWRITABLE_COLUMNS.get(table, frozenset())
         for column in _text_columns(conn, table):
             if table == "setting" and column in _SETTING_TEXT:
                 continue
             for rowid, value in _candidate_rows(conn, table, column):
-                new, found = _labelled(table, column, value)
+                new, found = _labelled_value(table, column, value)
                 if column in rewritable:
-                    stage(table, column, rowid, value, _chased(table, column, new, chaser))
-                elif found or chaser.hits(value):
+                    stage(table, column, rowid, value, _chased_value(table, column, new, chaser))
+                elif found or _value_hits(value, chaser):
                     refused.add(f"{table}.{column}")
     if refused:
         conn.rollback()
@@ -741,12 +848,14 @@ def _scrub_cpassword_at_rest(conn: sqlite3.Connection) -> _ScrubResult | None:
         rehash_event_chain(conn, rewritten[0], keep_broken=broken_before) if rewritten else []
     )
     if "events" in tables:
+        # Exactly the same breaks: none healed, none added (rewritten events
+        # that verified before must verify now).
         broken_after = frozenset(verify_event_chain(conn)[1])
-        if not broken_after <= broken_before:
+        if broken_after != broken_before:
             conn.rollback()
             raise RuntimeError(
-                "cpassword scrub: the event hash chain did not verify after re-hashing "
-                f"(new breaks at {sorted(broken_after - broken_before)}); nothing was changed."
+                "cpassword scrub: re-hashing changed which events verify (breaks before "
+                f"{sorted(broken_before)}, after {sorted(broken_after)}); nothing was changed."
             )
     residual = _residual_at_rest(conn, tables, chaser)
     if residual:
@@ -785,7 +894,8 @@ _SIDECARS = ("", "-wal", "-shm", "-journal")
 
 
 def _bytes_hold_any(path: str, chaser: Chaser) -> bool:
-    """A discovered value (canonically, as stored text or JSON) in a file's bytes."""
+    """A discovered value (canonically, as stored text or JSON) in a file's bytes,
+    read as Latin-1 (ASCII/UTF-8) and as UTF-16 at both alignments."""
     if not chaser or not os.path.exists(path):
         return False
     overlap = 1 << 16
@@ -793,7 +903,12 @@ def _bytes_hold_any(path: str, chaser: Chaser) -> bool:
     with open(path, "rb") as handle:
         while chunk := handle.read(4 << 20):
             window = tail + chunk.decode("latin-1")
-            if chaser.hits(_JSON_ESCAPE.sub(" ", window)):
+            readings = (
+                window,
+                window.encode("latin-1").decode("utf-16-le", errors="replace"),
+                window.encode("latin-1")[1:].decode("utf-16-le", errors="replace"),
+            )
+            if any(chaser.hits(_JSON_ESCAPE.sub(" ", text)) for text in readings):
                 return True
             tail = window[-overlap:]
     return False
@@ -871,10 +986,10 @@ def _purge_free_pages(conn: sqlite3.Connection, scrub: _ScrubResult) -> None:
         return
     if _table_exists(conn, "events"):
         broken = frozenset(verify_event_chain(conn)[1])
-        if not broken <= scrub.allowed_broken_events:
+        if broken != scrub.allowed_broken_events:
             warnings.warn(
-                f"cpassword purge: event chain verification failed at "
-                f"{sorted(broken - scrub.allowed_broken_events)}; schema not stamped.",
+                "cpassword purge: the set of events failing verification changed "
+                f"({sorted(scrub.allowed_broken_events)} -> {sorted(broken)}); schema not stamped.",
                 stacklevel=2,
             )
             return
@@ -1211,7 +1326,7 @@ def save_estate(
                     s.identity,
                     s.display_name,
                     s.display_value,
-                    json.dumps(s.raw, sort_keys=True),
+                    stored_json(s.raw),
                     int(s.from_disabled_side),
                     s.source_state,
                 )
@@ -1236,6 +1351,7 @@ def save_estate(
         """,
         gpo_link_rows,
     )
+    release_serialized()
     conn.executemany(
         """
         INSERT INTO setting (
@@ -1368,9 +1484,10 @@ def _verify_snapshot_rows(
         else:
             continue
         for column in _text_columns(conn, table):
-            fn = "gpo_lens_cpw_json" if (table, column) in _JSON_COLUMNS else "gpo_lens_cpw_text"
             for (value,) in conn.execute(
-                f'SELECT "{column}" FROM "{table}" WHERE {where} AND {fn}("{column}")', args
+                f'SELECT "{column}" FROM "{table}" '
+                f"WHERE {where} AND {_candidate_where(conn, table, column)}",
+                args,
             ):
                 if _value_residual(table, column, value, chaser):
                     out.append(f"{table}.{column}")

@@ -52,6 +52,7 @@ from gpo_lens.redaction import (
     redact_element_tree,
     sanitize_estate,
     sysvol_cpassword_values,
+    tree_mentions,
 )
 from gpo_lens.registry_pol import parse_registry_pol
 
@@ -1160,11 +1161,14 @@ def _decode_report(xml_bytes: bytes) -> str:
 
 def parse_report_xml(xml_bytes: bytes) -> list[Gpo]:
     """Parse one or more GPOs from raw XML bytes (handles UTF-8 and UTF-16)."""
-    gpos, _ = _parse_report_root(ET.fromstring(_decode_report(xml_bytes)))
+    text = _decode_report(xml_bytes)
+    gpos, _ = _parse_report_root(ET.fromstring(text), source=text)
     return gpos
 
 
-def _parse_report_root(root: Element, *, sanitize: bool = True) -> tuple[list[Gpo], set[str]]:
+def _parse_report_root(
+    root: Element, *, sanitize: bool = True, source: str | None = None
+) -> tuple[list[Gpo], set[str]]:
     """Redact, parse and copy-chase one report tree.
 
     Every labelled GPP cpassword value is redacted in the tree *before* any
@@ -1174,7 +1178,8 @@ def _parse_report_root(root: Element, *, sanitize: bool = True) -> tuple[list[Gp
     union of every input's values (``load_estate``, ``load_baseline_from_zip``),
     so a value labelled in one input is chased through all of them.
     """
-    values = redact_element_tree(root)
+    mentions = tree_mentions(root, source)
+    values = redact_element_tree(root, gate=False) if mentions else set()
     gpos: list[Gpo] = []
     root_is_gpo = _localname(root.tag) == "GPO"
     has_nested_gpo = any(_localname(child.tag) == "GPO" for child in root)
@@ -1195,7 +1200,9 @@ def _parse_report_root(root: Element, *, sanitize: bool = True) -> tuple[list[Gp
                 gpo = _parse_single_gpo(gpo_elem)
                 if gpo is not None:
                     gpos.append(gpo)
-    if not sanitize:
+    if not sanitize or not mentions:
+        # Nothing labelled anywhere in the report (a superset test), so there
+        # is nothing to chase; save_estate still sanitizes and verifies.
         return gpos, values
     estate = Estate(gpos=gpos)
     values |= sanitize_estate(estate, values)
@@ -1257,8 +1264,9 @@ def load_baseline_from_zip(zip_path: str | Path) -> list[Gpo]:
                         total_bytes,
                         max_bytes=_MAX_BASELINE_UNCOMPRESSED_BYTES,
                     )
+                    text = _decode_report(raw)
                     report_gpos, found = _parse_report_root(
-                        ET.fromstring(_decode_report(raw)), sanitize=False
+                        ET.fromstring(text), sanitize=False, source=text
                     )
                     gpos.extend(report_gpos)
                     values |= found
@@ -1297,8 +1305,9 @@ def _extract_gpos_from_zip(
         if name.endswith("gpreport.xml"):
             try:
                 raw = _streaming_zip_read(zf, name, _total, max_bytes=max_bytes)
+                text = _decode_report(raw)
                 report_gpos, found = _parse_report_root(
-                    ET.fromstring(_decode_report(raw)), sanitize=values is None
+                    ET.fromstring(text), sanitize=values is None, source=text
                 )
                 gpos.extend(report_gpos)
                 if values is not None:

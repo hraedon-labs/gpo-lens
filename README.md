@@ -107,7 +107,9 @@ Each labelled value becomes `[redacted cpassword]`. Copies of a discovered
 value under another name (a GPO name or description, a path, another setting,
 a SOM or WMI filter field) are replaced too. Values are compared canonically
 — whitespace inside the value, the URL-safe base64 alphabet and `=` padding do
-not matter — and the replacement covers the copy as written. Two limits keep
+not matter — and the replacement covers the copy as written, including a copy
+split across the text of nested XML elements (`<P>AAEC…<Span>…Dw==</Span></P>`),
+whose pieces are redacted in place. Two limits keep
 the redaction from rewriting unrelated facts:
 
 - Copies are chased only for values of at least 12 characters that look like
@@ -135,9 +137,14 @@ is removed, which is the remediation.
 
 The first read-write open by this release (`ingest`, `serve` or a web upload)
 scrubs databases written by earlier releases: it discovers values in every
-text column (and in SYSVOL still on disk at a stored path), rewrites them,
-re-hashes the event chain from the first rewritten event without hiding any
-earlier break, and verifies the result by rediscovering over every column. If
+column whatever its declared type or the value's storage class (BLOBs are read
+as Latin-1/UTF-8 and UTF-16), and in SYSVOL still on disk at a stored path,
+rewrites them (one in an identity column refuses the upgrade; one it cannot
+rewrite exactly fails the verification below), re-hashes the event chain from the first
+rewritten event, and verifies the result by rediscovering over every column.
+The set of events that fail verification must be exactly the same before and
+after: an earlier break stays a break even if a rewritten payload would match
+its stored hash. If
 anything remains, the whole scrub is rolled back and the database stays at
 schema 10 — the labelled sources stay in place, so every later open rediscovers
 and refuses again. Otherwise it runs `VACUUM`, truncates the WAL and stamps
