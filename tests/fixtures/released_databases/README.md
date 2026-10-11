@@ -111,3 +111,25 @@ The upgrade regression verifies the latest withdrawal wins, the actionable
 inbox and risk register agree, reversed fold input gives the same answer, and
 reopening the upgraded DB is idempotent. It does not require git tags at test
 time: the fixture is prepared by released code, never today's schema builder.
+
+## v1.4.0 cpassword upgrade fixture
+
+`v1.4.0-cpassword.sqlite3` (manifest `v1.4.0-cpassword.json`) is separate from
+the preservation corpus above: it is the input to the schema-v11 cpassword
+scrub test (`tests/test_cpassword_redaction.py`). It was written by installed
+v1.4.0 code through its public CLI and triage API:
+
+```bash
+.venv/bin/python scripts/build_cpassword_upgrade_fixture.py
+```
+
+The golden estate gains synthetic `PROBE…` cpassword values in several GPP
+element types and casings, a `<cpassword>` element, an escaped XML fragment, a
+display-value probe that lands in `gpo.modified` event payloads, and a SYSVOL
+value whose four-character prefix v1.4.0 stored in the finding. A triage note
+quotes one probe. Snapshot 1 carries a probe of its own and is deleted last;
+the file is deliberately **not** vacuumed after that, so that probe survives
+only in free pages. The generator fails if v1.4.0 did not persist every probe.
+Its only edit to the released output, made (and vacuumed) before that delete,
+replaces the scratch directory prefix of `gpo.sysvol_path` with `/lab/export`
+so the file records no host path.

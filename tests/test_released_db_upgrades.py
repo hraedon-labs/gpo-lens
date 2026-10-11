@@ -25,7 +25,7 @@ FIXTURES = Path(__file__).parent / "fixtures/released_databases"
 TAGS = ("v0.5.0", "v0.7.0", "v0.7.1", "v1.0.0", "v1.1.0", "v1.2.0", "v1.3.1")
 
 
-def test_previous_release_refuses_schema_10_without_writes(tmp_path: Path) -> None:
+def test_previous_release_refuses_current_schema_without_writes(tmp_path: Path) -> None:
     # Exercise the actual released version guard, not a simulated old constant.
     # Frozen copy of v1.3.1's store.py: CI checkouts are shallow and carry no tags.
     old_source = (FIXTURES.parent / "released_code" / "v1.3.1-store.py.txt").read_text()
@@ -46,7 +46,10 @@ def test_previous_release_refuses_schema_10_without_writes(tmp_path: Path) -> No
     with closing(sqlite3.connect(db)) as conn:
         init_db(conn)
         before = list(conn.iterdump())
-        with pytest.raises(RuntimeError, match=r"schema version 10.*supports \(version 9\)"):
+        with pytest.raises(
+            RuntimeError,
+            match=rf"schema version {CURRENT_SCHEMA_VERSION}.*supports \(version 9\)",
+        ):
             namespace["init_db"](conn)
         assert list(conn.iterdump()) == before
 
@@ -115,7 +118,7 @@ def test_released_database_upgrade_preserves_every_entity(tag: str, tmp_path: Pa
     for _ in range(2):
         with closing(sqlite3.connect(db)) as conn, conn:
             init_db(conn)
-            assert CURRENT_SCHEMA_VERSION == 10
+            assert CURRENT_SCHEMA_VERSION == 11
             assert "detector_version" in {
                 row[1] for row in conn.execute("PRAGMA table_info(finding_observation)")
             }

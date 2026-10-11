@@ -95,6 +95,80 @@ references, unlinked/empty GPOs, disabled but populated sides, coverage gaps
 and cited dangerous configurations. Baseline ZIP comparison uses an optional
 ADMX/ADML crosswalk to turn registry identities into policy names.
 
+**cpassword values are never stored.** A GPP `cpassword` is encrypted with a
+key Microsoft published (MS14-025), so it is a recoverable credential. Before
+anything is written, ingest discovers every value *labelled* as one, across
+all inputs of the import together (every report, including every report in a
+baseline ZIP, the SYSVOL files and the JSON inputs): the attribute or key in
+any casing or namespace, a `<cpassword>` element, or an inline `cpassword="…"`
+(escaped XML too, and when the word or the value is split across XML nodes).
+Each labelled value becomes `[redacted cpassword]`. Copies of a discovered
+value under another name (a GPO name or description, a path, another setting,
+a SOM or WMI filter field) are replaced too. Values are compared canonically
+— whitespace inside the value, the URL-safe base64 alphabet and `=` padding do
+not matter — and the replacement covers the copy as written, including a copy
+split across the text or attribute values of nested XML elements
+(`<P>AAEC…<Span>…Dw==</Span></P>`, `<P a="AAEC…" b="…Dw=="/>`), whose pieces
+are redacted in place (a field derived from one piece, such as a display value
+taken from an attribute, loses that piece too). Two limits keep
+the redaction from rewriting unrelated facts:
+
+- Copies are chased only for values of at least 12 characters that look like
+  GPP ciphertext or mix letters and digits, and below 22 characters only as a
+  whole token. A short or word-like value (`Enabled`, `Administrators`) is
+  redacted where it is labelled but left elsewhere, and a short value glued to
+  other letters (`xVALUEy`) is left; no valid GPP cpassword looks like that.
+  Inside the setting that carries the value, copies from 8 characters (and
+  exact whole-field copies) are replaced.
+- Copies are rewritten only in descriptive fields. A copy in an identity field
+  (GPO GUID, owner, SID, SOM path, CSE name, event type, …) stops the import,
+  or the upgrade, with an error naming the field and never the value. This is
+  deliberate: a crafted export can therefore block its own import rather than
+  have a credential stored or an identity silently rewritten.
+
+The result is verified independently before it is kept: discovery and the
+copy search run again over the sanitized data, then over the rows as written
+(read back from the database), and after commit over the raw bytes of the
+database, `-wal`, `-shm` and `-journal`; any remaining value refuses the
+import with nothing stored. Diagnostics follow the same rule: warnings raised
+while loading are held back until every value of the import is known, then
+scrubbed, as are log records and error messages, including those for skipped
+GPOs and rejected inputs. The guard spans the whole CLI command or web request,
+so the values stay known until its last line of output, log record, HTTP
+response and `audit.log` entry. Externally supplied names are never echoed at
+all: ZIP errors cite a member's position (and the OS error, without the path),
+CLI path arguments are cited by position, and the audit log records an upload's
+size, not its file name.
+The finding is computed from the SYSVOL files at
+ingest and records only that a cpassword is present, with no characters of it.
+No hash is kept, so replacing one cpassword with another is not a visible
+change in diffs or events; the finding persists on the GPO until the attribute
+is removed, which is the remediation.
+
+The first read-write open by this release (`ingest`, `serve` or a web upload)
+scrubs databases written by earlier releases: it discovers values in every
+column whatever its declared type or the value's storage class (BLOBs are read
+as Latin-1/UTF-8 and UTF-16), and in SYSVOL still on disk at a stored path,
+rewrites them (one in an identity column refuses the upgrade; a BLOB is
+rewritten in place in an exactly round-tripping reading, including misaligned
+or odd-length UTF-16, and a BLOB whose value shows only in a reading that cannot
+be written back exactly is replaced whole, so it can never pin the database at
+schema 10), re-hashes the event chain from the first
+rewritten event, and verifies the result by rediscovering over every column.
+The set of events that fail verification must be exactly the same before and
+after: an earlier break stays a break even if a rewritten payload would match
+its stored hash. If
+anything remains, the whole scrub is rolled back and the database stays at
+schema 10 — the labelled sources stay in place, so every later open rediscovers
+and refuses again. Otherwise it runs `VACUUM`, truncates the WAL and stamps
+schema 11 once the chain verifies and no discovered value is in the file
+bytes. (The byte check can only look for values known in that run; once a
+verified scrub is committed, a later retry relies on `VACUUM` and a complete
+checkpoint.) Allow free disk space about the size of the database for that
+one-time `VACUUM`. Read-only commands do not migrate. Original exports and
+backups made before the upgrade still contain the values; keep them restricted
+or delete them.
+
 For a staged rollout, set `GPO_LENS_LEGACY_NAV=1` before starting the server to
 restore the earlier primary links. Ask stays under Tools. Unset the variable
 and restart to return to the new navigation. This changes presentation;

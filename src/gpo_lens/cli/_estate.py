@@ -152,6 +152,8 @@ def cmd_ingest(args: argparse.Namespace) -> None:
                     # Detectors retain extracted SYSVOL through evaluation;
                     # cleanup failure rolls back before this transaction commits.
                     sources.close()
+                # Post-commit: no discovered cpassword value in the file bytes.
+                store.verify_committed_estate(conn, estate)
             except Exception as exc:
                 raise RuntimeError("Import failed; nothing was imported.") from exc
             domain = estate.domain or "unknown"

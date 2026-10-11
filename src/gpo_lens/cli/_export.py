@@ -65,7 +65,7 @@ def cmd_export(args: argparse.Namespace) -> None:
         raise ValueError("export supports --format md|csv; use the existing command for --json")
     path = Path(args.db).resolve()
     if not path.is_file():
-        raise FileNotFoundError(f"Database not found: {path}")
+        raise FileNotFoundError("Database not found (check --db)")
     conn = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
     try:
         conn.execute("BEGIN")  # pin all queries/provenance to one read transaction

@@ -112,7 +112,7 @@ def _get_estate(args: argparse.Namespace) -> Estate:
         return estate
     db = Path(args.db)
     if not db.exists():
-        raise FileNotFoundError(f"Database not found: {db}")
+        raise FileNotFoundError("Database not found (check --db)")
     conn = sqlite3.connect(str(db))
     try:
         estate = store.load_estate(conn)
@@ -172,12 +172,13 @@ def _get_admx(args: argparse.Namespace) -> PolicyDefinitions | None:
     admx_dir = getattr(args, "admx_dir", None) or os.environ.get("GPO_LENS_ADMX_DIR")
     if admx_dir:
         valid = []
-        for directory in admx_directories(admx_dir):
+        for position, directory in enumerate(admx_directories(admx_dir), 1):
             if directory.is_dir():
                 valid.append(directory)
             else:
+                # Position only: path arguments are never echoed in diagnostics.
                 print(
-                    f"Warning: --admx-dir not found or not a directory: {directory}",
+                    f"Warning: --admx-dir path #{position} not found or not a directory",
                     file=sys.stderr,
                 )
         if valid:

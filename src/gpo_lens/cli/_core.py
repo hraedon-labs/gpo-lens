@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -729,20 +730,48 @@ def main(argv: list[str] | None = None) -> int:
     _set_json_kind(getattr(args, "command", None))
     args.json = bool(args.json) or bool(getattr(args, "_sub_json", False))
     output_token = None
+    # One diagnostics guard spans the whole command: every value an ingest or
+    # migration discovers stays known until the command's last output line,
+    # warning, log record or error message has been scrubbed. Long-running
+    # commands (serve, repl) are excluded; the web app guards each request.
+    command = getattr(args, "command", None)
+    scope: Any = nullcontext() if command in _UNGUARDED_COMMANDS else _guarded_command()
     try:
-        output_token = _begin_output(args)
-        return args.func(args) or 0
+        with scope:
+            output_token = _begin_output(args)
+            return args.func(args) or 0
     except SystemExit:
         raise
     except FileNotFoundError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(f"Error: {_cli_error(exc)}", file=sys.stderr)
         return 2
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        print(f"Error: {_cli_error(exc)}", file=sys.stderr)
         return 1
     finally:
         if output_token is not None:
             _end_output(output_token)
+
+
+_UNGUARDED_COMMANDS = frozenset({"serve", "repl"})
+
+
+@contextmanager
+def _guarded_command() -> Iterator[None]:
+    from gpo_lens.redaction import guarded_diagnostics, scrubbed_standard_streams
+
+    with scrubbed_standard_streams(), guarded_diagnostics():
+        yield
+
+
+def _cli_error(exc: BaseException) -> str:
+    """The error line: OS errors without the file name (path arguments are
+    never echoed); other messages as raised (already scrubbed by the guard)."""
+    from gpo_lens.redaction import describe_error
+
+    if isinstance(exc, OSError) and exc.errno is not None:
+        return describe_error(exc)
+    return str(exc)
 
 
 if __name__ == "__main__":

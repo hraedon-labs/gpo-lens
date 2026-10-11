@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 
 from gpo_lens import store as _store
 from gpo_lens.collection_zip import MAX_ARCHIVE_BYTES, MAX_UNCOMPRESSED_BYTES
+from gpo_lens.redaction import scrub_diagnostic
 from gpo_lens.web import _helpers as _h
 from gpo_lens.web.auth import Principal, _is_loopback
 from gpo_lens.web.rate_limit import RateLimiter, make_rate_limit_middleware
@@ -163,6 +164,12 @@ def _audit(
             "outcome": outcome,
             "detail": detail,
             "request_id": request_id,
+        }
+        # Same sanitizer as every other diagnostic: labelled forms and the
+        # request's discovered cpassword values never reach the audit file.
+        entry = {
+            key: scrub_diagnostic(value) if isinstance(value, str) else value
+            for key, value in entry.items()
         }
         _audit_logger.info(json.dumps(entry, default=str))
     except Exception as exc:

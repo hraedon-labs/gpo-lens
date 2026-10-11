@@ -28,6 +28,7 @@ from gpo_lens.detection import (
 from gpo_lens.ingest import load_estate
 from gpo_lens.model import Estate
 from gpo_lens.queries import estate_doctor, is_security_filtered
+from gpo_lens.redaction import CPASSWORD_FINDING_DETAIL
 from gpo_lens.topology import is_security_filtered as topology_is_security_filtered
 
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden_estate"
@@ -146,11 +147,10 @@ class TestCpasswordDetection:
         cpw_findings = [f for f in findings if f.category == "cpassword"]
         assert len(cpw_findings) == 1
         detail = cpw_findings[0].detail
-        # The masked cpassword should start with the first 4 chars then "****"
-        assert "****" in detail
-        # The full (unmasked) cpassword must NOT appear in the detail
-        # (Well-known test value is long; check a distinctive substring)
-        assert "AQUbc" not in detail  # last 5 chars of the well-known value
+        # No character of the value, not even the prefix earlier releases kept.
+        assert detail == CPASSWORD_FINDING_DETAIL
+        hit = cpassword_scan(golden_estate)[0]
+        assert hit.cpassword[:4] not in detail
 
     def test_cpassword_from_nested_path(self, golden_estate: Estate) -> None:
         """The cpassword hit's file path must reflect the nested layout."""
