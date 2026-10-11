@@ -135,22 +135,16 @@ function Get-NormText {
     return (($Text -replace '\s+', ' ').Trim())
 }
 
-function ConvertTo-Lf {
-    param([string]$Text)
-    if ($null -eq $Text) { return $null }
-    return $Text.Replace("`r`n", "`n")
-}
-
 function Format-ScalarValue {
     # Returns @($ok, $value). $value is a string, $true, or a string array.
     param($Value)
-    if ($Value -is [string]) { return @($true, (ConvertTo-Lf $Value)) }
+    if ($Value -is [string]) { return @($true, $Value) }
     if ($Value -is [bool]) { return @($true, $Value) }
     if ($Value -is [enum]) { return @($true, $Value.ToString()) }
     if ($Value -is [System.Management.Automation.Language.ITypeName]) { return @($true, $Value.FullName) }
     if ($Value -is [System.Management.Automation.VariablePath]) { return @($true, $Value.UserPath) }
     if ($Value -is [System.Management.Automation.Language.Token]) {
-        return @($true, ('{0}:{1}' -f $Value.Kind, (ConvertTo-Lf $Value.Text)))
+        return @($true, ('{0}:{1}' -f $Value.Kind, $Value.Text))
     }
     if ($Value -is [System.Management.Automation.Language.DynamicKeyword]) { return @($true, $Value.Keyword) }
     if ($Value -is [System.Management.Automation.Language.ScriptRequirements]) {
@@ -507,16 +501,21 @@ function New-Binding {
 }
 
 function Get-SourceFacts {
+    # Digest of the exact bytes (no normalization): line endings are fixed to LF
+    # by .gitattributes, and the gate refuses CR and non-ASCII bytes.
     param([string]$File)
     $bytes = [System.IO.File]::ReadAllBytes($File)
     $nonAscii = 0
-    foreach ($b in $bytes) { if ($b -gt 127) { $nonAscii++ } }
-    $text = ConvertTo-Lf ([System.Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF))
+    $cr = 0
+    foreach ($b in $bytes) {
+        if ($b -gt 127) { $nonAscii++ }
+        if ($b -eq 13) { $cr++ }
+    }
     $hash = [System.Security.Cryptography.SHA256]::Create()
     try {
-        $digest = ([System.BitConverter]::ToString($hash.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($text))) -replace '-', '').ToLowerInvariant()
+        $digest = ([System.BitConverter]::ToString($hash.ComputeHash($bytes)) -replace '-', '').ToLowerInvariant()
     } finally { $hash.Dispose() }
-    return @($digest, $nonAscii)
+    return @($digest, $nonAscii, $cr)
 }
 
 $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -598,8 +597,12 @@ foreach ($file in $Path) {
                 }
             }
         }
+        $bodyRows = [System.Collections.Generic.List[object]]::new()
+        $bodyUnsupported = [System.Collections.Generic.List[string]]::new()
+        Add-AstRows -Node $fd -Depth 0 -Role 'Function' -Rows $bodyRows -Unsupported $bodyUnsupported
         $functionParams += [pscustomobject][ordered]@{
             name = $fd.Name
+            body_rows = $bodyRows.ToArray()
             params = @($params | ForEach-Object { $_.Name.VariablePath.UserPath })
             pipeline_params = @($pipeline | Sort-Object -Unique)
         }
@@ -701,6 +704,7 @@ foreach ($file in $Path) {
         if ($left -is [System.Management.Automation.Language.MemberExpressionAst]) {
             $memberAssignments += [pscustomobject][ordered]@{
                 line = $node.Extent.StartLineNumber
+                function = (Get-EnclosingFunction $node)
                 target = $left.Extent.Text
                 receiver_var = (Get-RootVariable $left.Expression)
                 receiver_types = @(Get-TypeNames $left.Expression)
@@ -708,6 +712,7 @@ foreach ($file in $Path) {
         } elseif ($left -is [System.Management.Automation.Language.IndexExpressionAst]) {
             $indexAssignments += [pscustomobject][ordered]@{
                 line = $node.Extent.StartLineNumber
+                function = (Get-EnclosingFunction $node)
                 target = $left.Extent.Text
                 root_var = (Get-RootVariable $left)
                 operator = [string]$node.Operator
@@ -829,6 +834,7 @@ foreach ($file in $Path) {
         path = $file
         source_sha256 = $facts[0]
         source_non_ascii_bytes = $facts[1]
+        source_cr_bytes = $facts[2]
         parse_errors = $parseErrorText
         ast_rows = $rows.ToArray()
         unsupported_nodes = @($unsupported | Sort-Object -Unique)

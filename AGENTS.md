@@ -119,10 +119,13 @@ strict per-script allowlists (commands, .NET calls, redirections, `using`/type
 references, AST node types, local functions, exact scheduled-task argument
 vectors), exact pinning of every binding of every write/receiver/exec variable
 and its dependencies (`PINNED_VARS`), refusal of provider/global/automatic-
-variable writes, and the exact text plus control-flow context of every
-write/delete/exec operation (`GUARDED_OPS`). A collector change that touches a
-write, a guard or a pinned variable therefore also needs a hand edit to those
-tables, with a reason. Every reviewer bypass probe is a regression case in
+variable writes, the exact text plus control-flow context of every
+write/delete/exec/handle-lifetime operation and write-helper call
+(`GUARDED_OPS`), and a digest of every local function body
+(`LOCAL_FUNCTION_BODIES`). These tables are hand-maintained; the generator never
+writes them. A collector change that touches a
+write, a guard, a function body or a pinned variable therefore also needs a hand
+edit to those tables, with a reason. Every reviewer bypass probe is a regression case in
 `test_reviewer_probes_are_flagged` asserted to fail at its intended check and to
 change the golden tree. Every PowerShell file under `scripts/` must be
 classified. Locally the test skips when `pwsh` is absent; in CI it fails.
