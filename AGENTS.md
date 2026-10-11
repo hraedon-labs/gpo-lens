@@ -116,19 +116,22 @@ Slice 1 is **stdlib-only** (`xml.etree.ElementTree`, `json`, `sqlite3`,
 a DC/RSAT box). The tool consumes its output dir.
 
 Read-only is enforced by `tests/test_collector_readonly.py`: it parses every
-DC/RSAT-side script with the PowerShell AST (via `pwsh`) and fails on anything
-a **closed-world** model: a committed golden inventory
-(`tests/powershell/collector-inventory.json`) of every side-effect node, plus a
-strict per-script semantic allowlist (commands, .NET calls, redirections,
-`using`/type references, exact scheduled-task argument vectors, and dataflow
-confinement of write/exec roots against `=`/`$script:`/foreach/`-OutVariable`
-rebinds and to a pinned set of write-target expressions). Any change to a
-collector script changes the inventory and must be regenerated with
-`python scripts/gen_collector_inventory.py` (which refuses to write unless the
-semantic layer passes) and reviewed as a diff; a new command/write/root
-derivation also needs an allowlist/`PINNED_VARS` edit with a reason. Every
-reviewer bypass probe is a regression case in `test_reviewer_probes_are_flagged`
-asserted to fail at its intended check. Every new `scripts/*.ps1` must be
+DC/RSAT-side script with the PowerShell AST (via `pwsh`) in two layers. The
+**golden syntax tree** (`tests/powershell/collector-inventory.json`) is an
+order-preserving serialization of each script's whole AST plus a source digest,
+so *any* edit to a collector fails `test_inventory_matches_golden` until it is
+regenerated with `python scripts/gen_collector_inventory.py` and the diff is
+reviewed. The generator refuses to write unless the **semantic floor** passes:
+strict per-script allowlists (commands, .NET calls, redirections, `using`/type
+references, AST node types, local functions, exact scheduled-task argument
+vectors), exact pinning of every binding of every write/receiver/exec variable
+and its dependencies (`PINNED_VARS`), refusal of provider/global/automatic-
+variable writes, and the exact text plus control-flow context of every
+write/delete/exec operation (`GUARDED_OPS`). A collector change that touches a
+write, a guard or a pinned variable therefore also needs a hand edit to those
+tables, with a reason. Every reviewer bypass probe is a regression case in
+`test_reviewer_probes_are_flagged` asserted to fail at its intended check and to
+change the golden tree. Every PowerShell file under `scripts/` must be
 classified. Locally the test skips when `pwsh` is absent; in CI it fails.
 
 ## Module map

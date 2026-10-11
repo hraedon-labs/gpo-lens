@@ -1,11 +1,12 @@
-"""Regenerate tests/powershell/collector-inventory.json (the closed-world
-collector call-site inventory).
+"""Regenerate tests/powershell/collector-inventory.json (the golden syntax-tree
+inventory of the DC/RSAT-side collector scripts).
 
 It runs the PowerShell AST dumper over the in-scope collector scripts, applies
-the full semantic gate (``run_all_checks`` in tests/test_collector_readonly.py)
-to every script, and writes the normalized inventory ONLY if the gate passes —
-so a regeneration can never launder a read-only violation into the committed
-golden file. Needs ``pwsh``.
+every semantic check (``run_all_checks`` in tests/test_collector_readonly.py) to
+every script, and writes the inventory ONLY if they all pass. A regeneration can
+therefore admit only what the semantic floor admits (allowlists, exact binding
+pins, guarded-operation contexts); it is not a proof of read-only behaviour, and
+the resulting diff must still be reviewed. Needs ``pwsh``.
 
 Usage: python scripts/gen_collector_inventory.py
 """
