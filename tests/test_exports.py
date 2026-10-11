@@ -11,6 +11,15 @@ import pytest
 from gpo_lens.exports import ExportDocument, ExportSection, render_export
 
 
+def _stored_secret(secret_corpus):
+    """A corpus credential that is still stored after ingest (registry value).
+
+    cpassword carriers are redacted at ingest, so their copies can no longer be
+    learned from the store; copy masking is exercised with a stored credential.
+    """
+    return next(s for s in secret_corpus if s.startswith("SYNTH-REGISTRY-"))
+
+
 @pytest.fixture
 def export_client(tmp_path, monkeypatch, secret_corpus):
     import sqlite3
@@ -498,7 +507,9 @@ def test_snapshot_diff_redacts_copied_values(export_client, secret_corpus, forma
         estate = load_estate(conn)
         gpo = estate.gpo_by_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         setting = next(s for s in gpo.settings if s.identity == "Carrier0")
-        setting.display_value = secret_corpus[1]
+        # Ingest stores no cpassword value, so swapping one for another is not
+        # a visible change; the prefix keeps Carrier0 in the diff.
+        setting.display_value = "rotated " + secret_corpus[1]
         setting.raw = {"cpassword": secret_corpus[1]}
         save_estate(conn, estate)
     finally:
@@ -513,10 +524,17 @@ def test_snapshot_diff_redacts_copied_values(export_client, secret_corpus, forma
 
 @pytest.mark.parametrize("format", ["csv", "md"])
 def test_active_secret_filter_is_redacted(export_client, secret_corpus, format):
-    response = export_client.get("/search", params={"q": secret_corpus[0], "format": format})
+    # A stored credential (registry DefaultPassword) echoed as the filter.
+    secret = next(s for s in secret_corpus if s.startswith("SYNTH-REGISTRY-"))
+    response = export_client.get("/search", params={"q": secret, "format": format})
     assert response.status_code == 200
-    assert secret_corpus[0] not in response.text
+    assert secret not in response.text
     assert "REDACTED" in response.text
+    # cpassword values are not stored at all (redacted at ingest), so a search
+    # for one matches nothing; only the analyst's own query could echo it.
+    response = export_client.get("/search", params={"q": secret_corpus[0], "format": "csv"})
+    assert response.status_code == 200
+    assert "Carrier" not in response.text
 
 
 def test_no_export_calls_narration(export_client, monkeypatch):
@@ -636,19 +654,19 @@ def test_historical_workflow_export_keeps_source_provenance(
 
     conn = sqlite3.connect(export_client.db_path)
     save_estate(conn, Estate())
-    conn.execute("UPDATE finding SET summary=?", ("Copied " + secret_corpus[-1],))
+    conn.execute("UPDATE finding SET summary=?", ("Copied " + _stored_secret(secret_corpus),))
     conn.commit()
     conn.close()
     separator = "&" if "?" in view else "?"
     response = export_client.get("/" + view + separator + "format=csv")
     assert response.status_code == 200
-    assert secret_corpus[-1] not in response.text
+    assert _stored_secret(secret_corpus) not in response.text
     rows = list(csv.DictReader(io.StringIO(response.text)))
     evaluations = next(r["value"] for r in rows if r["field"] == "evaluation_ids")
     assert json.loads(evaluations) == [1]
     extra = ["--lifecycle", "all", "--triage", "all"] if view.startswith("findings") else []
     assert main(["--db", str(export_client.db_path), "export", view.split("?")[0], *extra]) == 0
-    assert secret_corpus[-1] not in capsys.readouterr().out
+    assert _stored_secret(secret_corpus) not in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("legacy_nav", [False, True])
@@ -932,12 +950,12 @@ def test_cli_event_export_masks_copied_credentials_without_changing_store(
     from gpo_lens.events import append_event, query_events
 
     with closing(sqlite3.connect(export_client.db_path)) as conn, conn:
-        append_event(conn, "lab.test", {"summary": "Copied " + secret_corpus[-1]})
+        append_event(conn, "lab.test", {"summary": "Copied " + _stored_secret(secret_corpus)})
     output = tmp_path / "events.ndjson"
     assert main(["--db", str(export_client.db_path), "events-export", "--ndjson", str(output)]) == 0
-    assert secret_corpus[-1] not in output.read_text()
+    assert _stored_secret(secret_corpus) not in output.read_text()
     with closing(sqlite3.connect(export_client.db_path)) as conn, conn:
-        assert secret_corpus[-1] in str(query_events(conn))
+        assert _stored_secret(secret_corpus) in str(query_events(conn))
 
 
 @pytest.mark.parametrize("format", ["html", "md"])
@@ -978,12 +996,14 @@ def test_occurrence_notes_mask_copied_snapshot_secrets(export_client, secret_cor
     from gpo_lens.findings import append_triage_event
 
     with closing(sqlite3.connect(export_client.db_path)) as conn, conn:
-        append_triage_event(conn, 1, "commented", "lab-reviewer", note="Copy " + secret_corpus[-1])
+        append_triage_event(
+            conn, 1, "commented", "lab-reviewer", note="Copy " + _stored_secret(secret_corpus)
+        )
     response = export_client.get("/findings/1", params={"format": format})
     assert response.status_code == 200
     import html
 
-    assert secret_corpus[-1] not in html.unescape(response.text)
+    assert _stored_secret(secret_corpus) not in html.unescape(response.text)
 
 
 def test_source_cli_does_not_open_unrelated_database(tmp_path, capsys):

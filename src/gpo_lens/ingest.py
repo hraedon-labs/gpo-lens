@@ -48,6 +48,14 @@ from gpo_lens.normalize import (
     children_by_localname as _children_by_localname,
 )
 from gpo_lens.paths import ci_child, ci_path
+from gpo_lens.redaction import (
+    describe_error,
+    guarded_diagnostics,
+    redact_element_tree,
+    sanitize_estate,
+    sysvol_cpassword_values,
+    tree_mentions,
+)
 from gpo_lens.registry_pol import parse_registry_pol
 
 # Decompression bomb guard: refuse to expand zip contents beyond this total.
@@ -152,7 +160,8 @@ def _load_json_records(path: str | Path) -> list[dict[str, Any]]:
         return [data]
     if not isinstance(data, list):
         warnings.warn(
-            f"Unexpected top-level {type(data).__name__} in {path}; expected object or array",
+            f"Unexpected top-level {type(data).__name__} in {Path(path).name}; "
+            "expected object or array",
             stacklevel=2,
         )
         return []
@@ -160,7 +169,7 @@ def _load_json_records(path: str | Path) -> list[dict[str, Any]]:
     skipped = len(data) - len(records)
     if skipped:
         warnings.warn(
-            f"Skipped {skipped} non-dict entr{'y' if skipped == 1 else 'ies'} in {path}",
+            f"Skipped {skipped} non-dict entr{'y' if skipped == 1 else 'ies'} in {Path(path).name}",
             stacklevel=2,
         )
     return records
@@ -1130,49 +1139,67 @@ def parse_report(xml_path: str | Path) -> list[Gpo]:
     treated as the wrapper case and returns ``[]`` rather than mis-parsing
     the wrapper itself as a malformed single GPO.
     """
+    gpos, _ = _parse_report_file(xml_path)
+    return gpos
+
+
+def _parse_report_file(
+    xml_path: str | Path, *, sanitize: bool = True
+) -> tuple[list[Gpo], set[str]]:
+    """``parse_report`` plus the cpassword values discovered in the report."""
     tree = ET.parse(xml_path)
     root = tree.getroot()
     if root is None:
-        return []
+        return [], set()
+    return _parse_report_root(root, sanitize=sanitize)
+
+
+def _decode_report(xml_bytes: bytes) -> str:
+    if xml_bytes[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return xml_bytes.decode("utf-16")
+    if xml_bytes[:3] == b"\xef\xbb\xbf":
+        return xml_bytes.decode("utf-8-sig")
+    return xml_bytes.decode("utf-8")
+
+
+def parse_report_xml(xml_bytes: bytes) -> list[Gpo]:
+    """Parse one or more GPOs from raw XML bytes (handles UTF-8 and UTF-16)."""
+    text = _decode_report(xml_bytes)
+    gpos, _ = _parse_report_root(ET.fromstring(text), source=text)
+    return gpos
+
+
+def _parse_report_root(
+    root: Element, *, sanitize: bool = True, source: str | None = None
+) -> tuple[list[Gpo], set[str]]:
+    """Redact, parse and copy-chase one report tree.
+
+    Every labelled GPP cpassword value is redacted in the tree *before* any
+    field is read, then copies of the values discovered are chased through the
+    parsed GPOs (``gpo_lens.redaction``). Returns the GPOs and the values.
+    Multi-input loaders pass ``sanitize=False`` and run one sanitize over the
+    union of every input's values (``load_estate``, ``load_baseline_from_zip``),
+    so a value labelled in one input is chased through all of them.
+    """
+    with guarded_diagnostics() as pool:
+        return _parse_report_root_guarded(root, sanitize=sanitize, source=source, pool=pool)
+
+
+def _parse_report_root_guarded(
+    root: Element, *, sanitize: bool, source: str | None, pool: set[str]
+) -> tuple[list[Gpo], set[str]]:
+    mentions = tree_mentions(root, source)
+    values = redact_element_tree(root, gate=False) if mentions else set()
+    pool |= values  # before any GPO is parsed: diagnostics are scrubbed against it
     gpos: list[Gpo] = []
     root_is_gpo = _localname(root.tag) == "GPO"
     has_nested_gpo = any(_localname(child.tag) == "GPO" for child in root)
     # Single-GPO-as-root: root localname is GPO, no nested <GPO>, and at
     # least one non-GPO child (e.g. <Identifier>) — the last clause rejects
-    # an empty wrapper so it returns [] instead of yielding a phantom GPO.
+    # an empty wrapper so it returns [] instead of yielding a phantom GPO
+    # (per-GPO backups and the baseline gpreport.xml shape).
     has_content = any(_localname(child.tag) != "GPO" for child in root)
     if root_is_gpo and not has_nested_gpo and has_content:
-        gpo = _parse_single_gpo(root)
-        if gpo is not None:
-            gpos.append(gpo)
-        return gpos
-    for gpo_elem in root.iter():
-        if gpo_elem is root:
-            continue
-        if _localname(gpo_elem.tag) == "GPO":
-            gpo = _parse_single_gpo(gpo_elem)
-            if gpo is not None:
-                gpos.append(gpo)
-    return gpos
-
-
-def parse_report_xml(xml_bytes: bytes) -> list[Gpo]:
-    """Parse one or more GPOs from raw XML bytes (handles UTF-8 and UTF-16)."""
-    if xml_bytes[:2] in (b"\xff\xfe", b"\xfe\xff"):
-        text = xml_bytes.decode("utf-16")
-    elif xml_bytes[:3] == b"\xef\xbb\xbf":
-        text = xml_bytes.decode("utf-8-sig")
-    else:
-        text = xml_bytes.decode("utf-8")
-    root = ET.fromstring(text)
-    gpos: list[Gpo] = []
-    root_is_gpo = _localname(root.tag) == "GPO"
-    has_nested_gpo = any(_localname(child.tag) == "GPO" for child in root)
-    has_content = any(_localname(child.tag) != "GPO" for child in root)
-    if root_is_gpo and not has_nested_gpo and has_content:
-        # Single-GPO document (per-GPO backup, baseline gpreport.xml): root
-        # itself is the GPO. Without this branch, the loop below would skip
-        # it via the ``gpo_elem is root`` guard.
         gpo = _parse_single_gpo(root)
         if gpo is not None:
             gpos.append(gpo)
@@ -1184,10 +1211,25 @@ def parse_report_xml(xml_bytes: bytes) -> list[Gpo]:
                 gpo = _parse_single_gpo(gpo_elem)
                 if gpo is not None:
                     gpos.append(gpo)
-    return gpos
+    if not sanitize or not mentions:
+        # Nothing labelled anywhere in the report (a superset test), so there
+        # is nothing to chase; save_estate still sanitizes and verifies.
+        return gpos, values
+    estate = Estate(gpos=gpos)
+    values |= sanitize_estate(estate, values)
+    pool |= values
+    return estate.gpos, values
 
 
 def load_baseline_from_zip(zip_path: str | Path) -> list[Gpo]:
+    """Load baseline GPOs from a Microsoft Security Baseline zip (see
+    ``_load_baseline_from_zip``); diagnostics are scrubbed against every
+    cpassword value found in the archive (``redaction.guarded_diagnostics``)."""
+    with guarded_diagnostics() as pool:
+        return _load_baseline_from_zip(zip_path, pool)
+
+
+def _load_baseline_from_zip(zip_path: str | Path, pool: set[str]) -> list[Gpo]:
     """Load baseline GPOs from a Microsoft Security Baseline zip.
 
     Microsoft ships baselines as nested zips.  This function handles both:
@@ -1206,11 +1248,15 @@ def load_baseline_from_zip(zip_path: str | Path) -> list[Gpo]:
     ``BytesIO``) before parsing.  This is necessary because inner zips
     require the complete byte stream to open.  Baseline zips are
     typically under 100 MB, well within the 2 GB cap.
+
+    cpassword values found in any report of the archive are chased through
+    every report's GPOs in one final sanitize (``gpo_lens.redaction``).
     """
     gpos: list[Gpo] = []
+    values: set[str] = set()
     total_bytes = [0]
     with zipfile.ZipFile(str(zip_path)) as outer:
-        for name in outer.namelist():
+        for position, name in enumerate(outer.namelist(), 1):
             if name.endswith(".zip"):
                 try:
                     inner_data = _streaming_zip_read(
@@ -1225,10 +1271,14 @@ def load_baseline_from_zip(zip_path: str | Path) -> list[Gpo]:
                                 inner,
                                 total_bytes,
                                 max_bytes=_MAX_BASELINE_UNCOMPRESSED_BYTES,
+                                values=values,
                             )
                         )
                 except (ValueError, zipfile.BadZipFile, KeyError) as exc:
-                    warnings.warn(f"Skipping inner zip {name}: {exc}", stacklevel=1)
+                    warnings.warn(
+                        f"Skipping inner zip (entry {position}): {describe_error(exc)}",
+                        stacklevel=1,
+                    )
             elif name.endswith("gpreport.xml"):
                 try:
                     raw = _streaming_zip_read(
@@ -1237,9 +1287,17 @@ def load_baseline_from_zip(zip_path: str | Path) -> list[Gpo]:
                         total_bytes,
                         max_bytes=_MAX_BASELINE_UNCOMPRESSED_BYTES,
                     )
-                    gpos.extend(parse_report_xml(raw))
+                    text = _decode_report(raw)
+                    report_gpos, found = _parse_report_root(
+                        ET.fromstring(text), sanitize=False, source=text
+                    )
+                    gpos.extend(report_gpos)
+                    values |= found
                 except (ET.ParseError, KeyError, ValueError, UnicodeDecodeError) as exc:
-                    warnings.warn(f"Skipping entry in zip: {exc}", stacklevel=1)
+                    warnings.warn(
+                        f"Skipping entry in zip (entry {position}): {describe_error(exc)}",
+                        stacklevel=1,
+                    )
 
         if not gpos:
             gpos.extend(
@@ -1247,16 +1305,21 @@ def load_baseline_from_zip(zip_path: str | Path) -> list[Gpo]:
                     outer,
                     total_bytes,
                     max_bytes=_MAX_BASELINE_UNCOMPRESSED_BYTES,
+                    values=values,
                 )
             )
 
-    return gpos
+    pool |= values
+    estate = Estate(gpos=gpos)
+    pool |= sanitize_estate(estate, values)
+    return estate.gpos
 
 
 def _extract_gpos_from_zip(
     zf: zipfile.ZipFile,
     total_counter: list[int] | None = None,
     max_bytes: int | None = None,
+    values: set[str] | None = None,
 ) -> list[Gpo]:
     """Extract GPOs from gpreport.xml files in a zip.
 
@@ -1265,13 +1328,22 @@ def _extract_gpos_from_zip(
     """
     _total = total_counter if total_counter is not None else [0]
     gpos: list[Gpo] = []
-    for name in zf.namelist():
+    for position, name in enumerate(zf.namelist(), 1):
         if name.endswith("gpreport.xml"):
             try:
                 raw = _streaming_zip_read(zf, name, _total, max_bytes=max_bytes)
-                gpos.extend(parse_report_xml(raw))
+                text = _decode_report(raw)
+                report_gpos, found = _parse_report_root(
+                    ET.fromstring(text), sanitize=values is None, source=text
+                )
+                gpos.extend(report_gpos)
+                if values is not None:
+                    values |= found
             except (ET.ParseError, KeyError, ValueError, UnicodeDecodeError) as exc:
-                warnings.warn(f"Skipping entry in zip: {exc}", stacklevel=1)
+                warnings.warn(
+                    f"Skipping entry in zip (entry {position}): {describe_error(exc)}",
+                    stacklevel=1,
+                )
                 continue
     return gpos
 
@@ -1293,6 +1365,9 @@ def _parse_single_gpo(gpo_elem: Element) -> Gpo | None:
 
     Returns ``None`` (with a warning) when the element has no valid
     identifier — callers should skip ``None`` results.
+
+    Callers redact the tree first (``redact_element_tree``), as
+    ``parse_report`` and ``parse_report_xml`` do.
     """
     id_elem = _child_by_localname(gpo_elem, "Identifier")
     raw_id = _text(_child_by_localname(id_elem, "Identifier")) if id_elem is not None else ""
@@ -2118,7 +2193,7 @@ def _try_load[T](
     try:
         return fn(path, *args)
     except (OSError, ValueError) as exc:
-        warnings.warn(f"Skipping {label}: {exc}", stacklevel=2)
+        warnings.warn(f"Skipping {label}: {describe_error(exc)}", stacklevel=2)
         return None
 
 
@@ -2129,15 +2204,25 @@ def _try_action(path: Path, fn: Callable[..., None], label: str, *args: Any) -> 
     try:
         fn(path, *args)
     except (OSError, ValueError) as exc:
-        warnings.warn(f"Skipping {label}: {exc}", stacklevel=2)
+        warnings.warn(f"Skipping {label}: {describe_error(exc)}", stacklevel=2)
 
 
 def load_estate(sample_dir: str | Path) -> Estate:
-    """Orchestrate loading a full estate from a sample directory."""
-    src = Path(sample_dir)
+    """Orchestrate loading a full estate from a sample directory.
+
+    Every warning, log record and exception raised while loading (including for
+    skipped or malformed inputs) is scrubbed against every cpassword value the
+    load discovers, report, SYSVOL and other inputs together
+    (``redaction.guarded_diagnostics``).
+    """
+    with guarded_diagnostics() as pool:
+        return _load_estate(Path(sample_dir), pool)
+
+
+def _load_estate(src: Path, pool: set[str]) -> Estate:
     report_path = src / "AllGPOs.xml"
     if not report_path.exists():
-        raise FileNotFoundError(f"AllGPOs.xml not found in {src}")
+        raise FileNotFoundError("AllGPOs.xml not found in the export directory")
     gpos: list[Gpo] = []
     # A missing AllGPOs.xml raised above. A *corrupt* primary input is a
     # different failure: the charter promises coverage honesty, and silently
@@ -2145,11 +2230,12 @@ def load_estate(sample_dir: str | Path) -> Estate:
     # (the estate would look complete with zero GPOs). Fail fast instead —
     # previously this caught ParseError/OSError/UnicodeDecodeError and warned.
     try:
-        gpos = parse_report(report_path)
+        gpos, cpassword_values = _parse_report_file(report_path, sanitize=False)
+        pool |= cpassword_values
     except (ET.ParseError, UnicodeDecodeError) as exc:
-        raise ValueError(f"AllGPOs.xml in {src} is not parseable: {exc}") from exc
+        raise ValueError(f"AllGPOs.xml is not parseable: {describe_error(exc)}") from None
     except OSError as exc:
-        raise OSError(f"AllGPOs.xml in {src} could not be read: {exc}") from exc
+        raise OSError(f"AllGPOs.xml could not be read: {describe_error(exc)}") from None
     domain = gpos[0].domain if gpos else ""
 
     soms = (
@@ -2184,6 +2270,8 @@ def load_estate(sample_dir: str | Path) -> Estate:
     # SYSVOL is present. No-op when SYSVOL wasn't copied or nothing is blocked.
     augment_blocked_registry_from_pol(gpos)
     augment_audit_from_csv(gpos)
+    cpassword_values |= sysvol_cpassword_values(gpos)
+    pool |= cpassword_values
 
     wmi_filters = (
         _try_load(
@@ -2226,7 +2314,7 @@ def load_estate(sample_dir: str | Path) -> Estate:
         or {}
     )
 
-    return Estate(
+    estate = Estate(
         domain=domain,
         gpos=gpos,
         soms=soms,
@@ -2236,3 +2324,8 @@ def load_estate(sample_dir: str | Path) -> Estate:
         principals=principals,
         group_members=group_members,
     )
+    # Report and SYSVOL cpassword values, and labelled values in any other
+    # input, are chased through every descriptive field of the whole estate;
+    # a copy in an identity field refuses the import (gpo_lens.redaction).
+    pool |= sanitize_estate(estate, cpassword_values)
+    return estate

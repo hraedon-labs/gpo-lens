@@ -12,6 +12,8 @@ from gpo_lens.authz import (
 )
 from gpo_lens.detection._gpp import _walk_gpp_xml
 from gpo_lens.model import Side
+from gpo_lens.normalize import localname
+from gpo_lens.redaction import is_cpassword_name
 
 if TYPE_CHECKING:
     from gpo_lens.model import DelegationEntry, Estate, Gpo, Som, SomLink
@@ -29,15 +31,24 @@ class CpasswordHit:
 
 
 def _scan_gpo_for_cpassword(gpo: Gpo) -> list[CpasswordHit]:
+    """Every non-``None`` cpassword in the GPO's GPP XML, in any casing.
+
+    The real GPP form is a ``cpassword`` attribute (usually on ``<Properties>``);
+    the attribute name is matched case-insensitively and namespace-blind, and a
+    ``<cpassword>`` element's text is reported too. ``cpassword=""`` is still a
+    hit: the attribute's presence is what MS14-025 remediation removes.
+    """
     results: list[CpasswordHit] = []
     for walk in _walk_gpp_xml(gpo, only_known=True):
         root = walk.tree.getroot()
         if root is None:
             continue
         for elem in root.iter():
-            cpw = elem.get("cpassword")
-            if cpw is not None:
-                tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+            tag = localname(elem.tag)
+            values = [v for k, v in elem.attrib.items() if is_cpassword_name(k)]
+            if is_cpassword_name(elem.tag):
+                values.append("".join(elem.itertext()).strip())
+            for cpw in values:
                 results.append(
                     CpasswordHit(
                         gpo_id=gpo.id,
@@ -145,9 +156,14 @@ def enforced_links(estate: Estate) -> list[tuple[Som, SomLink]]:
 
 
 def _mask_cpassword(cpw: str) -> str:
-    if len(cpw) <= 4:
-        return "****"
-    return cpw[:4] + "****"
+    """Fixed mask that reveals nothing about the value.
+
+    Earlier releases kept the first four characters. With a fixed IV and the
+    published key those characters are a deterministic function of the start
+    of the password, so even a prefix narrows a guess; it is no longer shown.
+    """
+    del cpw
+    return "****"
 
 
 # Public API alias
