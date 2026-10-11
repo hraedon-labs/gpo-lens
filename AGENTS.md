@@ -142,10 +142,15 @@ command invocation and write/delete/exec/handle-lifetime .NET call
 (`GUARDED_OPS`), a digest of every local function body
 (`LOCAL_FUNCTION_BODIES`) and of each script's param block
 (`SCRIPT_HEADERS`), and the exact uses of secret-bearing variables
-(`SECRET_USES`). These tables are hand-maintained; the generator never
-writes them. A collector change that touches a
-write, a guard, a function body or a pinned variable therefore also needs a hand
-edit to those tables, with a reason. Every reviewer bypass probe is a regression case in
+(`SECRET_USES`), every expression-valued pipeline input (`PIPELINE_INPUTS`),
+and a digest of every statement of every block body (`STATEMENT_DIGESTS`).
+These tables are hand-maintained; the generator never writes them (a test
+enforces it). Because `STATEMENT_DIGESTS` covers every statement, **any**
+collector edit fails the semantic layer until a human updates the tables:
+print candidates with `python scripts/print_statement_digests.py`
+(print-only, never wired into the generator), review them against the change,
+and paste them in with a reason. The other checks remain the floor that still
+refuses a harmful edit even when the digests are updated. Every reviewer bypass probe is a regression case in
 `test_reviewer_probes_are_flagged` asserted to fail at its intended check and to
 change the golden tree. Every PowerShell file under `scripts/` must be
 classified. Locally the test skips when `pwsh` is absent; in CI it fails.

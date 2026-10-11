@@ -360,6 +360,13 @@ $script:CommonParameters = [ordered]@{
     WhatIf = @('wi'); Confirm = @('cf')
 }
 $script:CmdletParamCache = @{}
+# Resolve parameters only against PowerShell's own core modules, loaded up
+# front, with module auto-loading off: fast (no PSModulePath scan per unknown
+# cmdlet) and identical on every runner (an RSAT host would otherwise resolve
+# AD/GroupPolicy/ScheduledTasks cmdlets that a Linux runner cannot). Commands
+# outside these modules fall back to the common-parameter table.
+Import-Module Microsoft.PowerShell.Management, Microsoft.PowerShell.Utility, Microsoft.PowerShell.Security -ErrorAction SilentlyContinue
+$PSModuleAutoLoadingPreference = 'None'
 
 function Get-CmdletParameterNames {
     param([string]$Name)
@@ -642,6 +649,7 @@ foreach ($file in $Path) {
     foreach ($attr in $ast.Attributes) { Add-AstRows -Node $attr -Depth 0 -Role 'Attributes' -Rows $headerRows -Unsupported $unsupported }
     if ($null -ne $ast.ParamBlock) { Add-AstRows -Node $ast.ParamBlock -Depth 0 -Role 'ParamBlock' -Rows $headerRows -Unsupported $unsupported }
 
+
     $functionDefs = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true))
     $functions = @($functionDefs | ForEach-Object { $_.Name })
     $functionParams = @()
@@ -867,6 +875,24 @@ foreach ($file in $Path) {
             statement = (Get-NormText (Get-Text $owner))
         }
     }
+    # Pipeline input expressions: a pipeline element that is an expression, not a
+    # command (e.g. `@([pscustomobject]@{...}) + @(Get-ChildItem ...) | ForEach`).
+    # These feed downstream commands/scriptblocks but are not CommandAsts, so the
+    # gate pins them by text + context (Sol round 7).
+    $pipelineInputs = @()
+    foreach ($node in $ast.FindAll({ param($n) ($n -is [System.Management.Automation.Language.PipelineAst]) -and
+                $n.PipelineElements.Count -ge 2 }, $true)) {
+        foreach ($el in $node.PipelineElements) {
+            if ($el -is [System.Management.Automation.Language.CommandExpressionAst]) {
+                $pipelineInputs += [pscustomobject][ordered]@{
+                    text = (Get-NormText (Get-Text $el))
+                    function = (Get-EnclosingFunction $el)
+                    context = (Get-NodeContext $el)
+                }
+            }
+        }
+    }
+
     # Every branch/loop condition (if/elseif, while, do, for, switch, foreach
     # source): the gate pins every variable they read.
     $conditions = @()
@@ -963,6 +989,7 @@ foreach ($file in $Path) {
         variable_refs = $variableRefs
         variable_uses = $variableUses
         conditions = $conditions
+        pipeline_inputs = $pipelineInputs
         parameter_decls = $parameterDecls
         indirect_writes = $indirectWrites
         redirections = $redirections
