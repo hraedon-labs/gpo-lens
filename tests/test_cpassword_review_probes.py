@@ -429,3 +429,272 @@ def test_sol_b02_copy_in_hashed_event_type_refuses_unchanged(tmp_path: Path) -> 
 def test_sol_n03_fixture_readme_has_no_trailing_blank_line() -> None:
     text = (ROOT / "tests/fixtures/released_databases/README.md").read_text()
     assert text.endswith("\n") and not text.endswith("\n\n")
+
+
+# --- Round 2 (reviews of ca5fe76) ------------------------------------------------
+
+import base64  # noqa: E402
+
+URLSAFE = base64.urlsafe_b64encode(bytes([251, 255, 190, 237]) * 4).decode().rstrip("=")
+
+
+def _drives(values: list[tuple[str, str]]) -> str:
+    return (
+        '<Drives clsid="x">'
+        + "".join(
+            f'<Drive uid="{{00000000-0000-0000-0000-{i:012d}}}" name="{name}">'
+            f'<Properties action="U" path="\\\\server\\{name}" cpassword="{value}"/></Drive>'
+            for i, (name, value) in enumerate(values, 1)
+        )
+        + "</Drives>"
+    )
+
+
+def test_sol_r2_b01_whitespace_split_copies_fresh_ingest_and_outputs(
+    tmp_path: Path, capsys
+) -> None:
+    from gpo_lens.cli import main
+    from gpo_lens.safe_output import safe_data
+
+    compact = base64.b64encode(b"PROBEcpwSplitXXX").decode()
+    mid = len(compact) // 2
+    same = compact[:mid] + "\n" + compact[mid:]
+    other = compact[:mid] + "\t" + compact[mid:]
+    short12 = "PROBEcpw12A1"
+    description = (
+        f"p=({short12}), u=__{short12}__ | split-compact={compact} | "
+        f"split-same={same} | split-other={other} | url={URLSAFE}x"
+    )
+    report = (
+        "<GPOs>"
+        + _gpo(
+            "{91919191-9191-9191-9191-919191919191}",
+            "boundary",
+            description.replace("\n", "&#10;").replace("\t", "&#9;"),
+            _drives(
+                [
+                    ("split", compact[:mid] + "&#10;" + compact[mid:]),
+                    ("short12", short12),
+                    ("url", URLSAFE),
+                ]
+            ),
+        )
+        + "</GPOs>"
+    )
+    (tmp_path / "e").mkdir()
+    (tmp_path / "e" / "AllGPOs.xml").write_text(report, encoding="utf-8")
+    db = tmp_path / "fresh.sqlite3"
+    assert main(["--db", str(db), "ingest", str(tmp_path / "e")]) in (0, None)
+    capsys.readouterr()
+    needles = (compact, same, other, URLSAFE, f"({short12})", f"__{short12}__")
+    assert _file_hits(db, needles) == {}
+    outputs = []
+    for argv in (
+        ["export", "dossier", "--format", "md", "--gpo-id", "91" * 16],
+        ["export", "dossier", "--format", "csv", "--gpo-id", "91" * 16],
+        ["report", "--format", "html"],
+    ):
+        assert main(["--db", str(db), *argv]) in (0, None)
+        outputs.append(capsys.readouterr().out)
+    with closing(sqlite3.connect(db)) as conn:
+        outputs.append(str(safe_data(load_estate(conn).gpo_by_id("91" * 16))))
+    text = "\n".join(outputs)
+    for needle in (compact, same, other, URLSAFE):
+        assert needle not in text and needle.replace("\n", "\\n") not in text
+
+
+def test_sol_r2_b01_whitespace_split_copies_migration(tmp_path: Path) -> None:
+    compact = base64.b64encode(b"PROBEcpwMigrateX").decode()
+    mid = len(compact) // 2
+    newline = compact[:mid] + "\n" + compact[mid:]
+    tab = compact[:mid] + "\t" + compact[mid:]
+    db = _v140_copy(tmp_path, "migration-whitespace.sqlite3")
+    with closing(sqlite3.connect(db)) as conn:
+        gpo_id = conn.execute("SELECT id FROM gpo LIMIT 1").fetchone()[0]
+        conn.execute(
+            "INSERT INTO setting VALUES (2, ?, 'Computer', 'Synthetic', 'split', 'split', "
+            "'split', ?, 0, 'normal')",
+            (gpo_id, json.dumps({"cpassword": newline})),
+        )
+        conn.execute(
+            "UPDATE gpo SET description = ? WHERE rowid = (SELECT rowid FROM gpo LIMIT 1)",
+            (f"same={newline}; other={tab}; compact={compact}",),
+        )
+        conn.commit()
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
+        assert _file_hits(db, (compact, newline, tab)) == {}
+    assert _file_hits(db, (compact, newline, tab)) == {}
+
+
+def _mixed_raw(value: str) -> dict:
+    return {
+        "tag": "Properties",
+        "text": "cpass",
+        "children": [{"tag": "Span", "text": f'word="{value}"'}],
+    }
+
+
+def test_sol_r2_b02_mixed_content_setting_direct_save(tmp_path: Path) -> None:
+    compact = base64.b64encode(b"PROBEcpwDirectXX").decode()
+    parsed = ingest.parse_report_xml(
+        (
+            "<GPOs>" + _gpo("{94949494-9494-9494-9494-949494949494}", "m", "safe", "") + "</GPOs>"
+        ).encode()
+    )
+    parsed[0].settings.append(
+        Setting(parsed[0].id, "Computer", "Synthetic", "mixed", "mixed", f"copy={compact}",
+                _mixed_raw(compact), False)
+    )  # fmt: skip
+    from gpo_lens.model import Estate
+
+    db = tmp_path / "direct-save-mixed.sqlite3"
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        save_estate(conn, Estate(domain="LABDOMAIN", gpos=parsed))
+        conn.commit()
+        assert _file_hits(db, (compact,)) == {}
+    assert _file_hits(db, (compact,)) == {}
+
+
+def test_sol_r2_b02_mixed_content_setting_migration(tmp_path: Path) -> None:
+    compact = base64.b64encode(b"PROBEcpwMixedXXX").decode()
+    db = _v140_copy(tmp_path, "migration-mixed-json.sqlite3")
+    with closing(sqlite3.connect(db)) as conn:
+        gpo_id = conn.execute("SELECT id FROM gpo LIMIT 1").fetchone()[0]
+        conn.execute(
+            "INSERT INTO setting VALUES (2, ?, 'Computer', 'Synthetic', 'mixed', 'mixed', ?, "
+            "?, 0, 'normal')",
+            (gpo_id, f"copy={compact}", json.dumps(_mixed_raw(compact))),
+        )
+        conn.commit()
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
+        raw = json.loads(
+            conn.execute("SELECT raw FROM setting WHERE identity = 'mixed'").fetchone()[0]
+        )
+        assert raw["children"][0]["tag"] == "Span"  # structure kept (DS NB-3)
+    assert _file_hits(db, (compact,)) == {}
+
+
+def test_sol_r2_b03_baseline_zip_cross_report_copy(tmp_path: Path) -> None:
+    from gpo_lens.model import Estate
+
+    compact = base64.b64encode(b"PROBEcpwBaseline").decode()
+    archive = tmp_path / "baseline-cross-report.zip"
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr(
+            "GPOs/source/gpreport.xml",
+            _gpo("{95959595-9595-9595-9595-959595959595}", "source", "safe",
+                 _drives([("source", compact)])),
+        )  # fmt: skip
+        output.writestr(
+            "GPOs/copy/gpreport.xml",
+            _gpo("{96969696-9696-9696-9696-969696969696}", "copy", f"copy={compact}", ""),
+        )
+    gpos = ingest.load_baseline_from_zip(archive)
+    assert compact not in json.dumps([dataclasses.asdict(g) for g in gpos], default=str)
+    db = tmp_path / "baseline-cross-report.sqlite3"
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        save_estate(conn, Estate(domain="LABDOMAIN", gpos=gpos))
+        conn.commit()
+    assert _file_hits(db, (compact,)) == {}
+
+
+def test_ds_r2_b1_urlsafe_embedded_copy_is_chased() -> None:
+    from gpo_lens.redaction import Chaser
+
+    chaser = Chaser([URLSAFE])
+    for text in (f"a-{URLSAFE}-b", f"a-{URLSAFE}x-b", f"a-x{URLSAFE}-b"):
+        assert URLSAFE not in chaser.sub(text), text
+
+
+def test_ds_r2_b1_urlsafe_copy_fresh_ingest(tmp_path: Path) -> None:
+    report = (
+        "<GPOs>"
+        + _gpo("{97979797-9797-9797-9797-979797979797}", "url", f"adjacent {URLSAFE}x inside",
+               _drives([("url", URLSAFE)]))
+        + "</GPOs>"
+    )  # fmt: skip
+    (tmp_path / "e").mkdir()
+    (tmp_path / "e" / "AllGPOs.xml").write_text(report, encoding="utf-8")
+    estate = ingest.load_estate(tmp_path / "e")
+    assert URLSAFE not in json.dumps(dataclasses.asdict(estate), default=str)
+    db = tmp_path / "fresh.sqlite3"
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        save_estate(conn, estate)
+        conn.commit()
+    assert _file_hits(db, (URLSAFE,)) == {}
+
+
+def test_ds_r2_b1_urlsafe_copy_two_pass_migration_never_stamps_dirty(tmp_path: Path) -> None:
+    db = _v140_copy(tmp_path, "twopass.sqlite3")
+    with closing(sqlite3.connect(db)) as conn:
+        gpo_id = conn.execute("SELECT id FROM gpo LIMIT 1").fetchone()[0]
+        conn.execute(
+            "INSERT INTO setting VALUES (2, ?, 'Computer', 'Synthetic', 'l', 'l', 'l', ?, 0, "
+            "'normal')",
+            (gpo_id, json.dumps({"@attr": {"cpassword": URLSAFE}})),
+        )
+        conn.execute(
+            "UPDATE gpo SET description = ? WHERE id = ?", (f"adjacent {URLSAFE}x inside", gpo_id)
+        )
+        conn.commit()
+    for _ in range(3):
+        with closing(sqlite3.connect(db)) as conn, warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            init_db(conn)
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        in_bytes = URLSAFE.encode() in db.read_bytes()
+        assert not (version == 11 and in_bytes)
+        assert not in_bytes
+
+
+def test_ds_r2_b1_unverifiable_scrub_rolls_back_on_every_open(tmp_path: Path, monkeypatch) -> None:
+    """A chase miss must never be stamped: verification rolls the scrub back."""
+    from gpo_lens import redaction
+
+    db = _v140_copy(tmp_path, "miss.sqlite3")
+    monkeypatch.setattr(redaction.Chaser, "sub", lambda self, text: text)
+    for _ in range(2):
+        with closing(sqlite3.connect(db)) as conn, warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            init_db(conn)
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
+            # The labelled source is still there to rediscover next time.
+            assert "PROBEcpwDSP890" in str(conn.execute("SELECT raw FROM setting").fetchall())
+    monkeypatch.undo()
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
+    assert _file_hits(db, ("PROBEcpwDSP890", "PROBEcpwZZ123")) == {}
+
+
+def test_ds_r2_nb3_mixed_content_keeps_child_elements() -> None:
+    import defusedxml.ElementTree as ET
+
+    from gpo_lens.redaction import redact_element_tree
+
+    root = ET.fromstring(
+        '<Properties>cpass<Span>word="PROBEcpwKEEP1234"</Span>tail<Keep a="1"/></Properties>'
+    )
+    redact_element_tree(root)
+    assert [child.tag for child in root] == ["Span", "Keep"]
+    assert "PROBEcpwKEEP1234" not in "".join(root.itertext())
+
+
+def test_ds_r2_nb7_bare_value_trailing_punctuation(tmp_path: Path) -> None:
+    value = "PROBEcpwPUNCT123"
+    report = (
+        "<GPOs>"
+        + _gpo("{98989898-9898-9898-9898-989898989898}", f"x-{value}",
+               f"note cpassword={value}. end", "")
+        + "</GPOs>"
+    )  # fmt: skip
+    gpos = ingest.parse_report_xml(report.encode())
+    assert value not in json.dumps([dataclasses.asdict(g) for g in gpos], default=str)
+    assert gpos[0].description.endswith(". end")

@@ -12,23 +12,29 @@ one-way schema migration, so a patch number was not assumed).
   it was a block's first attribute, in the setting's display value, snapshot
   diffs and hash-chained `gpo.modified` event payloads), and kept the first
   four characters of each SYSVOL value in the cpassword finding. Ingest now
-  discovers every labelled value (attribute in any casing or namespace,
-  `<cpassword>` element, inline `cpassword="…"` including escaped XML and
-  assignments split across XML nodes) in the report, SYSVOL and other inputs,
-  replaces it with `[redacted cpassword]`, and chases copies through every
-  descriptive field of the estate (GPO names and descriptions, settings, SOM,
-  WMI filter, OU, coverage-gap and principal names) and through finding text.
-  Copies are chased for values of at least 12 characters that look like GPP
-  ciphertext or mix letters and digits (whole tokens below 22 characters), and
-  from 8 characters inside the setting that carries the value; short or
-  word-like values are redacted only where labelled, so unrelated names are
-  never rewritten. A copy in an identity field (GUID, SID, SOM path, CSE name,
-  event type, …) refuses the import with `CredentialInIdentityError` instead
-  of corrupting it. `save_estate` applies the same redaction as a backstop.
-  The finding detail no longer carries any characters (`mask_cpassword`
-  returns `****`). No hash or fingerprint is stored: trends count hits and the
-  finding lifecycle tracks presence per GPO, and any cpassword is already
-  compromised, so rotation is not a remediation and is not shown as a change.
+  discovers every labelled value (attribute or key in any casing or
+  namespace, `<cpassword>` element, inline `cpassword="…"` including escaped
+  XML, with the word or value split across XML nodes) across all inputs of an
+  import together (every report, including each report of a baseline ZIP,
+  SYSVOL and the JSON inputs), replaces it with `[redacted cpassword]`, and
+  chases copies through every descriptive field of the estate and through
+  finding text. Copies are compared canonically (whitespace inside a value,
+  URL-safe base64 and `=` padding do not matter). They are chased for values
+  of at least 12 characters that look like GPP ciphertext or mix letters and
+  digits (whole tokens below 22 characters), and from 8 characters inside the
+  setting that carries the value; short or word-like values are redacted only
+  where labelled, so unrelated names are never rewritten. A copy in an
+  identity field refuses the import with `CredentialInIdentityError` instead
+  of corrupting it (a crafted export can block its own import). Every result
+  is verified independently — rediscovery over the sanitized estate, over the
+  rows as written, and after commit over the database, `-wal`, `-shm` and
+  `-journal` bytes — and a residual refuses the import with
+  `CpasswordResidualError`, nothing stored. Mixed-content redaction keeps
+  child elements. The finding detail no longer carries any characters
+  (`mask_cpassword` returns `****`). No hash or fingerprint is stored: trends
+  count hits and the finding lifecycle tracks presence per GPO, and any
+  cpassword is already compromised, so rotation is not a remediation and is
+  not shown as a change.
 
 ### Changed
 
@@ -38,21 +44,23 @@ one-way schema migration, so a patch number was not assumed).
 ### Upgrade notes
 
 - **Schema v11.** The first read-write open (`ingest`, `serve`, web upload)
-  discovers stored cpassword values in every text column (and in SYSVOL still
-  on disk at a stored path), scrubs labelled values and copies from the
-  descriptive columns (setting raw and display text, GPO names and
-  descriptions, finding text, event payloads, triage notes, …), refuses with
-  `CredentialInIdentityError` and changes nothing if a copy sits in an
+  discovers stored cpassword values in every text column (no SQL prefilter
+  that could miss a split form) and in SYSVOL still on disk at a stored path,
+  scrubs labelled values and copies from the descriptive columns, refuses
+  with `CredentialInIdentityError` and changes nothing if a copy sits in an
   identity column, re-hashes the event chain from the first rewritten event
-  while keeping any break that existed before, verifies the chain, and records
-  a `maintenance.cpassword_scrub` event (counts and event ids, never a value).
-  It then runs `VACUUM` and truncates the WAL. The version is stamped only
-  after the chain verifies again and no discovered value remains in the
-  database or WAL bytes; otherwise it warns and retries on the next read-write
-  open. A database created by this release is stamped directly (no scrub or
-  `VACUUM`), and `init_db` no longer writes to an up-to-date database. Allow
-  free disk space about the size of the database. Read-only commands do not
-  migrate.
+  while keeping any break that existed before, and verifies the result by
+  rediscovering over every column. A residual rolls the whole scrub back (the
+  labelled sources stay, so every later open rediscovers and refuses again;
+  the schema stays at 10). Otherwise it records a `maintenance.cpassword_scrub`
+  event (counts and event ids, never a value), runs `VACUUM`, truncates the
+  WAL, and stamps 11 once the chain verifies and no discovered value remains
+  in the main, `-wal`, `-shm` or `-journal` bytes. A database created by this
+  release is stamped directly (no scrub or `VACUUM`), and `init_db` no longer
+  writes to an up-to-date database. The cpassword detector version moves to 2;
+  detector version is not part of a finding's identity, so existing cpassword
+  occurrences continue rather than restart. Allow free disk space about the
+  size of the database. Read-only commands do not migrate.
 - Backups and original exports made before upgrading still contain the values.
 - A schema-v11 database cannot be opened by v1.4.0 or earlier.
 

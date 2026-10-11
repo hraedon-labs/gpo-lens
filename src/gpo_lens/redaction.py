@@ -44,6 +44,17 @@ Two steps, both deterministic:
      refused with :class:`CredentialInIdentityError`, which names the field,
      never the value.
 
+Values are compared canonically (:func:`canonical`: whitespace removed, the
+URL-safe base64 alphabet mapped to the standard one, ``=`` padding stripped),
+so a copy wrapped across lines or written URL-safe is still a copy.
+
+3. **Verification.** :func:`sanitize_estate` re-runs discovery and the copy
+   search over its own result (:func:`residual_locations`); ``store`` does the
+   same over the rows as written and the raw database bytes, and the v11
+   migration over every stored column. Any residual refuses with
+   :class:`CpasswordResidualError` (nothing stored) or, in the migration, rolls
+   the scrub back so the next open can rediscover the labelled sources.
+
 This is a core module: stdlib only, and it must not import ``narration`` or
 ``web``.
 """
@@ -109,8 +120,20 @@ _INLINE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _QUOTES = ('\\"', '"', "'", "&quot;", "&#34;", "&#x22;")
+_TRAILING = ".,:!?)]}"
 _B64 = "A-Za-z0-9+/"  # token boundary; "=" padding is consumed, not a boundary
 _B64_BODY = re.compile(r"[A-Za-z0-9+/]+")
+
+
+class CpasswordResidualError(RuntimeError):
+    """Verification after redaction still found a value; nothing is stored."""
+
+    def __init__(self, location: str) -> None:
+        super().__init__(
+            f"cpassword redaction could not be verified: a value remains in {location}; "
+            "nothing was stored."
+        )
+        self.location = location
 
 
 class CredentialInIdentityError(ValueError):
@@ -154,10 +177,15 @@ def redact_inline(text: str) -> tuple[str, set[str]]:
 
     def replace(match: re.Match[str]) -> str:
         quote, inner = _unquote(match.group("value"))
-        if inner == "":
+        if inner.strip() in ("", CPASSWORD_MARKER):
             return match.group(0)
+        trail = ""
+        if not quote:
+            # A bare token ends at sentence punctuation: ``cpassword=X.``
+            body = inner.rstrip(_TRAILING)
+            inner, trail = (body, inner[len(body) :]) if body else (inner, "")
         found.add(inner)
-        return f"{match.group('key')}{quote}{CPASSWORD_MARKER}{quote}"
+        return f"{match.group('key')}{quote}{CPASSWORD_MARKER}{quote}{trail}"
 
     return _INLINE.sub(replace, text), found
 
@@ -167,18 +195,27 @@ def redact_text(text: str) -> str:
     return redact_inline(text)[0]
 
 
+# XML/base64 whitespace a decoder ignores, and the URL-safe base64 alphabet.
+_WS = " \t\r\n\f\v"
+_SKELETON = str.maketrans({"-": "+", "_": "/", **dict.fromkeys(_WS)})
+_B64_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+
+
+def canonical(value: str) -> str:
+    """Comparison form of a value: whitespace removed, URL-safe alphabet mapped
+    to the standard one, trailing ``=`` padding stripped."""
+    return value.translate(_SKELETON).rstrip("=")
+
+
 def normalized_values(values: Iterable[str]) -> set[str]:
-    """Each value plus its stripped and whitespace-free variants."""
-    out: set[str] = set()
-    for value in values:
-        for variant in (value, value.strip(), "".join(value.split())):
-            if variant and variant != CPASSWORD_MARKER:
-                out.add(variant)
-    return out
+    """Canonical forms of *values* (see :func:`canonical`), without the marker."""
+    marker = canonical(CPASSWORD_MARKER)
+    out = {canonical(v) for v in values}
+    return {v for v in out if v and v != marker}
 
 
 def _ciphertext_shaped(value: str) -> bool:
-    body = value.rstrip("=")
+    body = canonical(value)
     if len(body) < UNBOUNDED_CHASE_LENGTH or not _B64_BODY.fullmatch(body):
         return False
     if len(body) % 4 == 1:
@@ -187,103 +224,106 @@ def _ciphertext_shaped(value: str) -> bool:
 
 
 def chase_eligible(value: str) -> bool:
-    """Estate-wide copy chasing applies to this (normalized) value."""
-    if len(value) < MIN_CHASE_LENGTH or value in CPASSWORD_MARKER:
+    """Estate-wide copy chasing applies to this value (compared canonically)."""
+    body = canonical(value)
+    if len(body) < MIN_CHASE_LENGTH or body in canonical(CPASSWORD_MARKER):
         return False
-    if _ciphertext_shaped(value):
+    if _ciphertext_shaped(body):
         return True
-    return any(c.isalpha() for c in value) and any(c.isdigit() for c in value)
-
-
-_TOKEN = re.compile(r"[A-Za-z0-9+/]+=*")
-_JSON_ESCAPE = re.compile(r"\\(?:u[0-9a-fA-F]{4}|.)")
+    return any(c.isalpha() for c in body) and any(c.isdigit() for c in body)
 
 
 class Chaser:
-    """Replace copies of known values under the boundary rules above.
+    """Find and replace copies of known values, compared canonically.
 
-    Base64-alphabet values are matched per token (a maximal run of
-    ``[A-Za-z0-9+/]`` plus trailing ``=`` padding): a bounded value must *be* a
-    token; a ciphertext-shaped value may also sit inside a longer token. Values
-    with other characters (rare; synthetic) use a boundary-guarded regex.
+    A carrier string matches when its *skeleton* (whitespace removed, URL-safe
+    letters mapped) contains a value's canonical form, so a copy wrapped across
+    lines or written URL-safe is still found; the replacement covers the
+    original span, including the whitespace inside it and any ``=`` padding
+    after it. A value that is not ciphertext-shaped (or any value of a local
+    chaser) must also stand as a whole token: the characters around the
+    original span may not be standard base64 letters.
     """
 
     def __init__(self, values: Iterable[str], *, local: bool = False) -> None:
         normalized = normalized_values(values)
+        marker = canonical(CPASSWORD_MARKER)
         if local:
-            eligible = {
-                v
-                for v in normalized
-                if len(v) >= MIN_LOCAL_CHASE_LENGTH and v not in CPASSWORD_MARKER
-            }
+            eligible = {v for v in normalized if len(v) >= MIN_LOCAL_CHASE_LENGTH}
         else:
             eligible = {v for v in normalized if chase_eligible(v)}
+        eligible = {v for v in eligible if v not in marker}
         self.local = local
         self.values: tuple[str, ...] = tuple(sorted(eligible, key=lambda v: (-len(v), v)))
         self.exact = frozenset(normalized) if local else frozenset()
-        bounded: set[str] = set()
-        unbounded: list[str] = []
-        other: list[str] = []
-        for value in self.values:
-            core = value.rstrip("=") or value
-            if not _B64_BODY.fullmatch(core):
-                other.append(rf"(?<![{_B64}]){re.escape(core)}=*(?![{_B64}])")
-            elif not local and _ciphertext_shaped(value):
-                unbounded.append(core)
-            else:
-                bounded.add(core)
-        self._bounded = frozenset(bounded)
-        self._unbounded = tuple(sorted(set(unbounded), key=len, reverse=True))
-        self._min_unbounded = min((len(u) for u in self._unbounded), default=0)
-        self._other = re.compile("|".join(other)) if other else None
+        self._unbounded = frozenset(v for v in eligible if not local and _ciphertext_shaped(v))
         # JSON text escapes quotes and backslashes; such values need a walk.
         self.walk_needed = any(
             any(c in v for c in '"\\') or not v.isprintable() for v in self.values
         )
 
     def __bool__(self) -> bool:
-        return bool(self._bounded or self._unbounded or self._other or self.exact)
+        return bool(self.values or self.exact)
 
-    def _token_hit(self, token: str) -> bool:
-        core = token.rstrip("=")
-        if core in self._bounded:
-            return True
-        return len(core) >= self._min_unbounded > 0 and any(u in core for u in self._unbounded)
+    def contains(self, text: str) -> bool:
+        """Boundary-free superset test (a prefilter; never misses a match)."""
+        skeleton = text.translate(_SKELETON)
+        return any(v in skeleton for v in self.values)
+
+    def _spans(self, text: str) -> list[tuple[int, int]]:
+        skeleton = text.translate(_SKELETON)
+        candidates = [v for v in self.values if v in skeleton]
+        if not candidates:
+            return []
+        index = [i for i, ch in enumerate(text) if ch not in _WS]
+        spans: list[tuple[int, int]] = []
+        for value in candidates:
+            k = skeleton.find(value)
+            while k != -1:
+                start, end = index[k], index[k + len(value) - 1] + 1
+                end = _consume_padding(text, end)
+                if value in self._unbounded or (
+                    (start == 0 or text[start - 1] not in _B64_CHARS)
+                    and (end == len(text) or text[end] not in _B64_CHARS)
+                ):
+                    if not any(start < e and s < end for s, e in spans):
+                        spans.append((start, end))
+                k = skeleton.find(value, k + 1)
+        return sorted(spans)
 
     def hits(self, text: str) -> bool:
-        if self.exact and text.strip() in self.exact:
+        if self.exact and canonical(text) in self.exact:
             return True
-        if self._other is not None and self._other.search(text):
-            return True
-        if self._bounded or self._unbounded:
-            return any(self._token_hit(m.group()) for m in _TOKEN.finditer(text))
-        return False
-
-    def _replace_token(self, match: re.Match[str]) -> str:
-        token = match.group()
-        core = token.rstrip("=")
-        if core in self._bounded:
-            return CPASSWORD_MARKER
-        if not self._token_hit(token):
-            return token
-        for value in self._unbounded:
-            core = core.replace(value, CPASSWORD_MARKER)
-        return core if core != CPASSWORD_MARKER else CPASSWORD_MARKER
+        return bool(self.values) and bool(self._spans(text))
 
     def sub(self, text: str) -> str:
-        if self.exact and text.strip() in self.exact:
+        if self.exact and canonical(text) in self.exact:
             return CPASSWORD_MARKER
-        if self._bounded or self._unbounded:
-            text = _TOKEN.sub(self._replace_token, text)
-        if self._other is not None:
-            text = self._other.sub(CPASSWORD_MARKER, text)
+        for start, end in reversed(self._spans(text) if self.values else []):
+            text = text[:start] + CPASSWORD_MARKER + text[end:]
         return text
 
     def hits_json(self, blob: str) -> bool:
-        """``hits`` on JSON text, treating escapes as the boundaries they encode."""
+        """Superset test on JSON text; escapes count as the whitespace or
+        boundaries they encode."""
         if "\\" in blob:
             blob = _JSON_ESCAPE.sub(" ", blob)
-        return self.hits(blob)
+        return self.contains(blob)
+
+
+def _consume_padding(text: str, end: int) -> int:
+    j = end
+    while True:
+        k = j
+        while k < len(text) and text[k] in _WS:
+            k += 1
+        if k < len(text) and text[k] == "=":
+            j = k + 1
+        else:
+            return j
+
+
+_JSON_ESCAPE = re.compile(r"\\(?:u[0-9a-fA-F]{4}|.)")
 
 
 # --- XML ---------------------------------------------------------------------
@@ -340,17 +380,84 @@ def redact_element_tree(root: Element) -> set[str]:
             elem.tail, values = redact_inline(elem.tail)
             found |= values
     # Mixed content: an assignment can be split across nodes (cpass<b/>word=…).
-    # Deepest first; collapse only an element whose joined text still holds one.
+    # Deepest first, redact the value's characters in place across the text and
+    # tail segments; elements and attributes are kept.
     for elem in reversed(list(root.iter())):
-        if not _mixed(elem):
+        if _mixed(elem):
+            found |= _redact_segments(list(_xml_segments(elem)))
+    return found
+
+
+def _xml_segments(elem: Element) -> Iterator[list[Any]]:
+    """``[holder, attribute]`` text segments of *elem*'s content, in order."""
+    yield [elem, "text"]
+    for child in elem:
+        yield from _xml_segments(child)
+        yield [child, "tail"]
+
+
+def _segment_get(seg: list[Any]) -> str:
+    holder, key = seg
+    if isinstance(holder, dict):
+        value = holder.get(key)
+    else:
+        value = getattr(holder, key)
+    return value if isinstance(value, str) else ""
+
+
+def _segment_set(seg: list[Any], value: str) -> None:
+    holder, key = seg
+    if isinstance(holder, dict):
+        holder[key] = value
+    else:
+        setattr(holder, key, value)
+
+
+def _redact_segments(segments: list[list[Any]]) -> set[str]:
+    """Redact inline assignments in the joined text of *segments*, in place.
+
+    The value's characters are replaced by the marker in the segment where the
+    value starts and removed from the segments it continues into; the key text
+    and every other character stay where they were.
+    """
+    texts = [_segment_get(seg) for seg in segments]
+    joined = "".join(texts)
+    found: set[str] = set()
+    spans: list[tuple[int, int]] = []
+    if not mentions_cpassword(joined):
+        return found
+    for match in _INLINE.finditer(joined):
+        quote, inner = _unquote(match.group("value"))
+        if inner.strip() in ("", CPASSWORD_MARKER):
             continue
-        joined = "".join(elem.itertext())
-        new, values = redact_inline(joined)
-        if values:
-            found |= values
-            for child in list(elem):
-                elem.remove(child)
-            elem.text = new
+        if not quote:
+            body = inner.rstrip(_TRAILING)
+            inner = body or inner
+        start = match.start("value") + len(quote)
+        found.add(inner)
+        spans.append((start, start + len(inner)))
+    if not spans:
+        return found
+    offsets = []
+    position = 0
+    for text in texts:
+        offsets.append(position)
+        position += len(text)
+    new_texts = list(texts)
+    for start, end in reversed(spans):
+        placed = False
+        for i, text in enumerate(texts):
+            lo, hi = offsets[i], offsets[i] + len(text)
+            if hi <= start or lo >= end:
+                continue
+            a, b = max(start, lo) - lo, min(end, hi) - lo
+            current = new_texts[i]
+            # Offsets within an already-edited segment: edits run right-to-left.
+            new_texts[i] = current[:a] + (CPASSWORD_MARKER if not placed else "") + current[b:]
+            placed = True
+    for seg, old, new in zip(segments, texts, new_texts, strict=True):
+        if new != old:
+            _segment_set(seg, new)
     return found
 
 
@@ -370,13 +477,30 @@ def _collect_text(obj: object, out: list[str]) -> None:
             _collect_text(value, out)
 
 
-def _joined_text(obj: dict[str, Any]) -> str:
-    """Concatenated element text of an ``element_to_dict`` node (no tails kept)."""
-    parts = [obj["text"]] if isinstance(obj.get("text"), str) else []
+def _is_mixed_dict(obj: Any) -> bool:
+    return (
+        isinstance(obj, dict)
+        and "tag" in obj
+        and isinstance(obj.get("text"), str)
+        and bool(obj.get("children"))
+    )
+
+
+def _has_mixed(obj: Any) -> bool:
+    """Any ``element_to_dict`` node holding both text and children."""
+    if isinstance(obj, dict):
+        return _is_mixed_dict(obj) or any(_has_mixed(v) for v in obj.values())
+    if isinstance(obj, list):
+        return any(_has_mixed(v) for v in obj)
+    return False
+
+
+def _dict_segments(obj: dict[str, Any]) -> Iterator[list[Any]]:
+    """Text segments of an ``element_to_dict`` node in document order (no tails)."""
+    yield [obj, "text"]
     for child in obj.get("children", []) or []:
         if isinstance(child, dict):
-            parts.append(_joined_text(child))
-    return "".join(parts)
+            yield from _dict_segments(child)
 
 
 def _redact_obj(obj: Any, found: set[str]) -> Any:
@@ -424,13 +548,9 @@ def _redact_obj(obj: Any, found: set[str]) -> Any:
         else:
             out[key] = _redact_obj(value, found)
     # Mixed content stored by element_to_dict (text plus children): an
-    # assignment split between the node's text and its children.
-    if "tag" in out and isinstance(out.get("text"), str) and out.get("children"):
-        new, values = redact_inline(_joined_text(out))
-        if values:
-            found |= values
-            out = {k: v for k, v in out.items() if k not in ("children", "text")}
-            out["text"] = new
+    # assignment split between the node's text and its children's text.
+    if _is_mixed_dict(out):
+        found |= _redact_segments(list(_dict_segments(out)))
     return out
 
 
@@ -538,8 +658,7 @@ def _label_pass(obj: Any, found: set[str]) -> Any:
                 continue
             old = getattr(obj, f.name)
             if type(obj).__name__ == "Setting" and f.name == "raw":
-                blob = _blob(old)
-                if blob is not None and not mentions_cpassword(blob):
+                if not _needs_label_walk(old):
                     continue
                 new, values = redact_structure(old)
                 found |= values
@@ -549,9 +668,12 @@ def _label_pass(obj: Any, found: set[str]) -> Any:
                 changes[f.name] = new
         return dataclasses.replace(obj, **changes) if changes else obj
     if isinstance(obj, dict):
-        blob = _blob(obj)
-        if obj and blob is not None and not mentions_cpassword(blob):
+        if obj and not _needs_label_walk(obj):
             return obj
+        if _is_mixed_dict(obj) or _has_mixed(obj):
+            new_obj, values = redact_structure(obj)
+            found |= values
+            return new_obj
         return {k: _label_pass(v, found) for k, v in obj.items()}
     if isinstance(obj, list):
         items = [_label_pass(v, found) for v in obj]
@@ -585,6 +707,8 @@ def sanitize_estate(estate: Estate, known: Iterable[str] = ()) -> frozenset[str]
     found: set[str] = set(known)
     # Labelled forms; a setting's own values also chase through that setting.
     for gpo in estate.gpos:
+        if not _gpo_may_label(gpo):
+            continue
         for index, setting in enumerate(gpo.settings):
             if not _setting_mentions(setting):
                 continue
@@ -615,10 +739,13 @@ def sanitize_estate(estate: Estate, known: Iterable[str] = ()) -> frozenset[str]
             location = f"GPO {gpo.id}"
             stripped = dataclasses.replace(gpo, settings=[])
             new_gpo = chase(stripped, chaser, location, rewritable=False)
-            settings = [
-                chase(s, chaser, location, rewritable=False) if _setting_hits(s, chaser) else s
-                for s in gpo.settings
-            ]
+            if _gpo_may_hit(gpo, chaser):
+                settings = [
+                    chase(s, chaser, location, rewritable=False) if _setting_hits(s, chaser) else s
+                    for s in gpo.settings
+                ]
+            else:
+                settings = gpo.settings
             if new_gpo is stripped and all(
                 a is b for a, b in zip(settings, gpo.settings, strict=True)
             ):
@@ -629,32 +756,169 @@ def sanitize_estate(estate: Estate, known: Iterable[str] = ()) -> frozenset[str]
             chased_gpos.append(new_gpo)
         others = chase(dataclasses.replace(estate, gpos=[]), chaser, "estate", rewritable=False)
         _assign(estate, others, gpos=chased_gpos)
-    return frozenset(found)
+    try:
+        residual = residual_locations(estate, found)
+    finally:
+        _blob_memo.clear()
+    if residual:
+        raise CpasswordResidualError(residual[0])
+    values = frozenset(found)
+    setattr(estate, _VALUES_ATTR, values | estate_cpassword_values(estate))
+    return values
+
+
+# Values discovered for an estate, kept on the in-memory object (not a dataclass
+# field, so never serialized by asdict/repr) until the post-commit byte check.
+_VALUES_ATTR = "_cpassword_values"
+
+
+def estate_cpassword_values(estate: Estate) -> frozenset[str]:
+    """Values discovered while sanitizing *estate* (empty if never sanitized)."""
+    return cast("frozenset[str]", getattr(estate, _VALUES_ATTR, frozenset()))
+
+
+def forget_cpassword_values(estate: Estate) -> None:
+    """Drop the discovered values once the stored result has been verified."""
+    if hasattr(estate, _VALUES_ATTR):
+        delattr(estate, _VALUES_ATTR)
+
+
+def residual_locations(estate: Estate, values: Iterable[str]) -> list[str]:
+    """Independent re-check of a sanitized estate.
+
+    Runs labelled discovery again (a labelled value must now be the marker) and
+    searches every string for a canonical copy the chase rules cover. Returns
+    the locations still holding one (empty when clean).
+    """
+    chaser = Chaser(values)
+    out: list[str] = []
+    for gpo in estate.gpos:
+        may_label = _gpo_may_label(gpo)
+        may_hit = bool(chaser) and _gpo_may_hit(gpo, chaser)
+        for setting in gpo.settings if (may_label or may_hit) else ():
+            found: set[str] = set()
+            if may_label and _setting_mentions(setting):
+                _label_pass(setting, found)
+            if found or (
+                may_hit
+                and _setting_hits(setting, chaser)
+                and any(chaser.hits(t) for t in _strings(setting))
+            ):
+                out.append(f"Setting {setting.identity!r} (GPO {gpo.id})")
+        stripped = dataclasses.replace(gpo, settings=[])
+        found = set()
+        _label_pass(stripped, found)
+        if found or (chaser and any(chaser.hits(t) for t in _strings(stripped))):
+            out.append(f"GPO {gpo.id}")
+    rest = dataclasses.replace(estate, gpos=[])
+    found = set()
+    _label_pass(rest, found)
+    if found or (chaser and any(chaser.hits(t) for t in _strings(rest))):
+        out.append("estate (SOM, WMI, OU, coverage or principal data)")
+    return out
+
+
+# Serialized form of a raw structure, memoized per object for one pass (the
+# object is held so its id cannot be reused while the entry lives).
+_blob_memo: dict[int, tuple[Any, str | None]] = {}
+
+
+def _raw_blob(raw: Any) -> str | None:
+    entry = _blob_memo.get(id(raw))
+    if entry is not None and entry[0] is raw:
+        return entry[1]
+    blob = _blob(raw)
+    if len(_blob_memo) > 500_000:
+        _blob_memo.clear()
+    _blob_memo[id(raw)] = (raw, blob)
+    return blob
+
+
+def _needs_label_walk(raw: Any) -> bool:
+    """Superset gate for labelled discovery in a structure.
+
+    Every labelled form either mentions ``cpassword`` contiguously in the JSON
+    text, or (split across mixed-content nodes) sits in a node with both text
+    and children. Such a node puts both keys in the JSON text, and only then is
+    ``_has_mixed`` walked.
+    """
+    blob = _raw_blob(raw)
+    if blob is None or mentions_cpassword(blob):
+        return True
+    return '"children"' in blob and '"text"' in blob and _has_mixed(raw)
+
+
+def _settings_text(gpo: Gpo) -> str:
+    """All of a GPO's setting text and raw JSON (escapes as spaces), one string.
+
+    Settings are separated by NUL, which is neither whitespace nor base64, so
+    no match can span two settings: a GPO-level test is a superset of the
+    per-setting tests it gates.
+    """
+    parts: list[str] = []
+    for setting in gpo.settings:
+        parts.extend(
+            (
+                setting.identity,
+                setting.display_name,
+                setting.display_value,
+                setting.cse,
+                setting.gpo_id,
+                setting.side,
+                setting.source_state,
+            )
+        )
+        blob = _raw_blob(setting.raw)
+        if blob is None:
+            return ""  # not serializable: callers fall back to per-setting tests
+        parts.append(_JSON_ESCAPE.sub(" ", blob) if "\\" in blob else blob)
+    return "\x00".join(parts)
+
+
+def _gpo_may_label(gpo: Gpo) -> bool:
+    text = _settings_text(gpo)
+    if not text:
+        return bool(gpo.settings)
+    return mentions_cpassword(text) or ('"children"' in text and '"text"' in text)
+
+
+def _gpo_may_hit(gpo: Gpo, chaser: Chaser) -> bool:
+    if chaser.exact or chaser.walk_needed:
+        return True
+    text = _settings_text(gpo)
+    return (not text and bool(gpo.settings)) or chaser.contains(text)
 
 
 def _setting_mentions(setting: Any) -> bool:
-    texts = (setting.identity, setting.display_name, setting.display_value, setting.cse)
-    if any(mentions_cpassword(t) for t in texts):
+    blob = _raw_blob(setting.raw)
+    if blob is None:
         return True
-    blob = _blob(setting.raw)
-    return blob is None or mentions_cpassword(blob)
+    text = "\x00".join(
+        (setting.identity, setting.display_name, setting.display_value, setting.cse, blob)
+    )
+    if mentions_cpassword(text):
+        return True
+    return '"children"' in blob and '"text"' in blob and _has_mixed(setting.raw)
 
 
 def _setting_hits(setting: Any, chaser: Chaser) -> bool:
+    """Superset gate: could the chase change, or refuse, anything in *setting*?"""
     if chaser.exact or chaser.walk_needed:
         return True
-    texts = (
-        setting.identity,
-        setting.display_name,
-        setting.display_value,
-        setting.cse,
-        setting.gpo_id,
-        setting.side,
-        setting.source_state,
+    texts = "\x00".join(
+        (
+            setting.identity,
+            setting.display_name,
+            setting.display_value,
+            setting.cse,
+            setting.gpo_id,
+            setting.side,
+            setting.source_state,
+        )
     )
-    if any(chaser.hits(t) for t in texts):
+    if chaser.contains(texts):
         return True
-    blob = _blob(setting.raw)
+    blob = _raw_blob(setting.raw)
     return blob is None or chaser.hits_json(blob)
 
 
@@ -665,12 +929,6 @@ def _assign(estate: Estate, source: Estate, *, gpos: list[Gpo]) -> None:
         setattr(estate, f.name, getattr(source, f.name))
     estate.gpos = gpos
     estate._gpo_index = None
-
-
-def residual_copies(obj: Any, values: Iterable[str]) -> bool:
-    """True if any chase-eligible value still occurs in any string of *obj*."""
-    chaser = Chaser(values)
-    return bool(chaser) and any(chaser.hits(s) for s in _strings(obj))
 
 
 def sysvol_cpassword_values(gpos: Iterable[Gpo]) -> set[str]:
@@ -715,5 +973,15 @@ def scrub_records(records: Iterable[Any], values: Iterable[str], location: str) 
         labelled = _label_pass(record, found)
         if found:
             chaser = Chaser(set(chaser.values) | found)
-        out.append(chase(labelled, chaser, location, rewritable=False))
+        record = chase(labelled, chaser, location, rewritable=False)
+        recheck: set[str] = set()
+        _label_pass(record, recheck)
+        if recheck or (chaser and any(chaser.hits(t) for t in _strings(record))):
+            raise CpasswordResidualError(location)
+        out.append(record)
     return out
+
+
+def iter_strings(obj: Any) -> Iterator[str]:
+    """Every string (values and mapping keys) in a model object or structure."""
+    return _strings(obj)

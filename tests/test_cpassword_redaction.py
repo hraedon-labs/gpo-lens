@@ -513,3 +513,81 @@ def test_copy_in_an_identity_field_refuses_the_save(tmp_path: Path) -> None:
         conn.rollback()
         assert conn.execute("SELECT count(*) FROM snapshot").fetchone() == (0,)
     assert _file_leaks(db) == {}
+
+
+# --- Round 3: canonical equivalence and independent verification -----------------
+
+
+def test_canonical_equivalence_rules() -> None:
+    from gpo_lens.redaction import canonical
+
+    value = "QUJDREVGR0hJSktMTU5PUA=="  # base64 of 16 bytes
+    assert canonical(value) == canonical("QUJDREVG\nR0hJSktM TU5PUA") == canonical(value + "==")
+    chaser = Chaser([value])
+    wrapped = "copy=QUJDREVG\r\n  R0hJSktMTU5P\tUA==; end"
+    assert chaser.sub(wrapped) == f"copy={CPASSWORD_MARKER}; end"
+    # Whitespace never manufactures a token: the neighbours must still be boundaries.
+    short = Chaser(["PROBEcpw12A1"])
+    assert short.sub("x PROBE cpw12A1 y") == f"x {CPASSWORD_MARKER} y"
+    assert short.sub("xPROBE cpw12A1 y") == "xPROBE cpw12A1 y"
+
+
+def test_fresh_ingest_residual_refuses_and_leaves_no_bytes(tmp_path: Path, monkeypatch) -> None:
+    from gpo_lens import redaction
+    from gpo_lens.redaction import CpasswordResidualError
+    from gpo_lens.store import save_evaluated_estate
+
+    estate = ingest.load_estate(B.build_probe_export(tmp_path / "export"))
+    # Reintroduce a copy, then disable copy replacement: verification must refuse.
+    estate.gpos[0].name = f"name-{B.SYSVOL_PROBE}"
+    monkeypatch.setattr(redaction.Chaser, "sub", lambda self, text: text)
+    db = tmp_path / "residual.sqlite3"
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        with pytest.raises(CpasswordResidualError) as caught:
+            save_evaluated_estate(conn, estate)
+        assert B.SYSVOL_PROBE not in str(caught.value)
+        assert conn.execute("SELECT count(*) FROM snapshot").fetchone() == (0,)
+        assert _file_leaks(db) == {}
+    assert _file_leaks(db) == {}
+
+
+def test_byte_check_covers_every_sidecar(tmp_path: Path) -> None:
+    from gpo_lens.store import cpassword_file_hits
+
+    db = tmp_path / "side.sqlite3"
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        path = Path(f"{db}{suffix}")
+        original = path.read_bytes() if path.exists() else None
+        path.write_bytes((original or b"") + b"\x00junk PROBEcpwSIDE1234\x00")
+        assert cpassword_file_hits(str(db), ["PROBEcpwSIDE1234"]) == [str(path)]
+        if original is None:
+            path.unlink()
+        else:
+            path.write_bytes(original)
+
+
+def test_detector_version_bump_keeps_the_occurrence(tmp_path: Path, capsys) -> None:
+    """DS NB-8: detector version is metadata, not identity; no lifecycle churn."""
+    from gpo_lens.cli import main
+
+    db = tmp_path / "bump.sqlite3"
+    shutil.copyfile(FIXTURE, db)
+    with closing(sqlite3.connect(db)) as conn:
+        init_db(conn)
+        before = conn.execute(
+            "SELECT id, detector_version FROM finding WHERE detector_id = 'cpassword'"
+        ).fetchall()
+    assert [v for _, v in before] == ["1"]
+    assert main(["--db", str(db), "ingest", str(B.build_probe_export(tmp_path / "e"))]) in (
+        0,
+        None,
+    )
+    with closing(sqlite3.connect(db)) as conn:
+        after = conn.execute(
+            "SELECT id, detector_version, resolved_in_snapshot FROM finding "
+            "WHERE detector_id = 'cpassword'"
+        ).fetchall()
+    assert after == [(before[0][0], "2", None)]

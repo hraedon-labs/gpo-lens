@@ -1139,34 +1139,40 @@ def parse_report(xml_path: str | Path) -> list[Gpo]:
     return gpos
 
 
-def _parse_report_file(xml_path: str | Path) -> tuple[list[Gpo], set[str]]:
+def _parse_report_file(
+    xml_path: str | Path, *, sanitize: bool = True
+) -> tuple[list[Gpo], set[str]]:
     """``parse_report`` plus the cpassword values discovered in the report."""
     tree = ET.parse(xml_path)
     root = tree.getroot()
     if root is None:
         return [], set()
-    return _parse_report_root(root)
+    return _parse_report_root(root, sanitize=sanitize)
+
+
+def _decode_report(xml_bytes: bytes) -> str:
+    if xml_bytes[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return xml_bytes.decode("utf-16")
+    if xml_bytes[:3] == b"\xef\xbb\xbf":
+        return xml_bytes.decode("utf-8-sig")
+    return xml_bytes.decode("utf-8")
 
 
 def parse_report_xml(xml_bytes: bytes) -> list[Gpo]:
     """Parse one or more GPOs from raw XML bytes (handles UTF-8 and UTF-16)."""
-    if xml_bytes[:2] in (b"\xff\xfe", b"\xfe\xff"):
-        text = xml_bytes.decode("utf-16")
-    elif xml_bytes[:3] == b"\xef\xbb\xbf":
-        text = xml_bytes.decode("utf-8-sig")
-    else:
-        text = xml_bytes.decode("utf-8")
-    gpos, _ = _parse_report_root(ET.fromstring(text))
+    gpos, _ = _parse_report_root(ET.fromstring(_decode_report(xml_bytes)))
     return gpos
 
 
-def _parse_report_root(root: Element) -> tuple[list[Gpo], set[str]]:
+def _parse_report_root(root: Element, *, sanitize: bool = True) -> tuple[list[Gpo], set[str]]:
     """Redact, parse and copy-chase one report tree.
 
     Every labelled GPP cpassword value is redacted in the tree *before* any
     field is read, then copies of the values discovered are chased through the
-    parsed GPOs (``gpo_lens.redaction``). Returns the GPOs and the values, so
-    ``load_estate`` can chase them through the rest of the estate too.
+    parsed GPOs (``gpo_lens.redaction``). Returns the GPOs and the values.
+    Multi-input loaders pass ``sanitize=False`` and run one sanitize over the
+    union of every input's values (``load_estate``, ``load_baseline_from_zip``),
+    so a value labelled in one input is chased through all of them.
     """
     values = redact_element_tree(root)
     gpos: list[Gpo] = []
@@ -1189,6 +1195,8 @@ def _parse_report_root(root: Element) -> tuple[list[Gpo], set[str]]:
                 gpo = _parse_single_gpo(gpo_elem)
                 if gpo is not None:
                     gpos.append(gpo)
+    if not sanitize:
+        return gpos, values
     estate = Estate(gpos=gpos)
     values |= sanitize_estate(estate, values)
     return estate.gpos, values
@@ -1213,8 +1221,12 @@ def load_baseline_from_zip(zip_path: str | Path) -> list[Gpo]:
     ``BytesIO``) before parsing.  This is necessary because inner zips
     require the complete byte stream to open.  Baseline zips are
     typically under 100 MB, well within the 2 GB cap.
+
+    cpassword values found in any report of the archive are chased through
+    every report's GPOs in one final sanitize (``gpo_lens.redaction``).
     """
     gpos: list[Gpo] = []
+    values: set[str] = set()
     total_bytes = [0]
     with zipfile.ZipFile(str(zip_path)) as outer:
         for name in outer.namelist():
@@ -1232,6 +1244,7 @@ def load_baseline_from_zip(zip_path: str | Path) -> list[Gpo]:
                                 inner,
                                 total_bytes,
                                 max_bytes=_MAX_BASELINE_UNCOMPRESSED_BYTES,
+                                values=values,
                             )
                         )
                 except (ValueError, zipfile.BadZipFile, KeyError) as exc:
@@ -1244,7 +1257,11 @@ def load_baseline_from_zip(zip_path: str | Path) -> list[Gpo]:
                         total_bytes,
                         max_bytes=_MAX_BASELINE_UNCOMPRESSED_BYTES,
                     )
-                    gpos.extend(parse_report_xml(raw))
+                    report_gpos, found = _parse_report_root(
+                        ET.fromstring(_decode_report(raw)), sanitize=False
+                    )
+                    gpos.extend(report_gpos)
+                    values |= found
                 except (ET.ParseError, KeyError, ValueError, UnicodeDecodeError) as exc:
                     warnings.warn(f"Skipping entry in zip: {exc}", stacklevel=1)
 
@@ -1254,16 +1271,20 @@ def load_baseline_from_zip(zip_path: str | Path) -> list[Gpo]:
                     outer,
                     total_bytes,
                     max_bytes=_MAX_BASELINE_UNCOMPRESSED_BYTES,
+                    values=values,
                 )
             )
 
-    return gpos
+    estate = Estate(gpos=gpos)
+    sanitize_estate(estate, values)
+    return estate.gpos
 
 
 def _extract_gpos_from_zip(
     zf: zipfile.ZipFile,
     total_counter: list[int] | None = None,
     max_bytes: int | None = None,
+    values: set[str] | None = None,
 ) -> list[Gpo]:
     """Extract GPOs from gpreport.xml files in a zip.
 
@@ -1276,7 +1297,12 @@ def _extract_gpos_from_zip(
         if name.endswith("gpreport.xml"):
             try:
                 raw = _streaming_zip_read(zf, name, _total, max_bytes=max_bytes)
-                gpos.extend(parse_report_xml(raw))
+                report_gpos, found = _parse_report_root(
+                    ET.fromstring(_decode_report(raw)), sanitize=values is None
+                )
+                gpos.extend(report_gpos)
+                if values is not None:
+                    values |= found
             except (ET.ParseError, KeyError, ValueError, UnicodeDecodeError) as exc:
                 warnings.warn(f"Skipping entry in zip: {exc}", stacklevel=1)
                 continue
@@ -2155,7 +2181,7 @@ def load_estate(sample_dir: str | Path) -> Estate:
     # (the estate would look complete with zero GPOs). Fail fast instead —
     # previously this caught ParseError/OSError/UnicodeDecodeError and warned.
     try:
-        gpos, cpassword_values = _parse_report_file(report_path)
+        gpos, cpassword_values = _parse_report_file(report_path, sanitize=False)
     except (ET.ParseError, UnicodeDecodeError) as exc:
         raise ValueError(f"AllGPOs.xml in {src} is not parseable: {exc}") from exc
     except OSError as exc:

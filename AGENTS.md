@@ -68,8 +68,14 @@ narrates facts the core computed. See `README.md` for the full charter.
   raise `CredentialInIdentityError`. When you add a model field or a column,
   classify it there (unlisted means structural). Never add a path that stores,
   hashes or prints a value; findings carry `CPASSWORD_FINDING_DETAIL` only.
-  Schema v11 scrubs older databases and purges free pages
-  (`store._scrub_cpassword_at_rest`, `_purge_free_pages`).
+  Multi-input loaders discover over all inputs before one sanitize
+  (`_parse_report_root(..., sanitize=False)`). Results are verified
+  independently (`residual_locations`, `store._verify_snapshot_rows`,
+  `store.verify_committed_estate`); never gate discovery on a contiguous
+  `cpassword` substring of serialized data without the mixed-content check.
+  Schema v11 scrubs older databases, verifies by rediscovery (rolling back on
+  a residual), and purges free pages (`store._scrub_cpassword_at_rest`,
+  `_purge_free_pages`).
 
 ## Build / test / lint
 

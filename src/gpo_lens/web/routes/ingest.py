@@ -138,6 +138,8 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                             {"principal": principal.name},
                             commit=False,
                         )
+                    # Post-commit: no discovered cpassword value in the file bytes.
+                    _store.verify_committed_estate(rw_conn, estate)
                 finally:
                     rw_conn.close()
 

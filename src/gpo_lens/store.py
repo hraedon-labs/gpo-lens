@@ -6,6 +6,7 @@ import json
 import os
 import sqlite3
 import warnings
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -33,10 +34,16 @@ from gpo_lens.model import (
 )
 from gpo_lens.normalize import parse_dt
 from gpo_lens.redaction import (
+    _JSON_ESCAPE,
     CPASSWORD_FINDING_DETAIL,
     Chaser,
+    CpasswordResidualError,
     CredentialInIdentityError,
     chase,
+    estate_cpassword_values,
+    forget_cpassword_values,
+    iter_strings,
+    mentions_cpassword,
     redact_inline,
     redact_structure,
     sanitize_for_storage,
@@ -562,20 +569,54 @@ def _chased(table: str, column: str, value: str, chaser: Chaser) -> str:
     return chaser.sub(value) if chaser.hits(value) else value
 
 
+def _register_candidates(conn: sqlite3.Connection, chaser: Chaser) -> None:
+    """SQL prefilters that are supersets of what discovery and the chase can see.
+
+    Plain text holds only inline assignments, which ``redact_inline`` finds by
+    the same contiguous ``cpassword`` regex. Stored JSON can also split the word
+    across mixed-content nodes (a node with both ``text`` and ``children``) or
+    hide letters behind ``\\u`` escapes, so those rows are always parsed.
+    """
+
+    def text(value: object) -> int:
+        if not isinstance(value, str):
+            return 0
+        return int(mentions_cpassword(value) or (bool(chaser) and chaser.contains(value)))
+
+    def json_text(value: object) -> int:
+        if not isinstance(value, str):
+            return 0
+        return int(
+            mentions_cpassword(value)
+            or ('"children"' in value and '"text"' in value)
+            or "\\u" in value
+            or (bool(chaser) and chaser.hits_json(value))
+        )
+
+    conn.create_function("gpo_lens_cpw_text", 1, text, deterministic=True)
+    conn.create_function("gpo_lens_cpw_json", 1, json_text, deterministic=True)
+
+
+def _candidate_rows(conn: sqlite3.Connection, table: str, column: str) -> list[tuple[int, str]]:
+    fn = "gpo_lens_cpw_json" if (table, column) in _JSON_COLUMNS else "gpo_lens_cpw_text"
+    return conn.execute(
+        f'SELECT rowid, "{column}" FROM "{table}" WHERE {fn}("{column}")'
+    ).fetchall()
+
+
 def _discover_at_rest(conn: sqlite3.Connection, tables: list[str]) -> set[str]:
     """Every cpassword value in any stored form, in any text column of any table.
 
+    Uses the superset prefilters of ``_register_candidates`` (no SQL ``LIKE``).
     Also re-reads collected SYSVOL still present at a stored ``sysvol_path``,
     so copies of a SYSVOL value can be chased (v1.4.0 never stored the value).
     """
+    _register_candidates(conn, Chaser(()))
     found: set[str] = set()
     for table in tables:
         for column in _text_columns(conn, table):
-            for (value,) in conn.execute(
-                f'SELECT "{column}" FROM "{table}" WHERE "{column}" LIKE \'%cpassword%\''
-            ):
-                if isinstance(value, str):
-                    found |= _labelled(table, column, value)[1]
+            for _, value in _candidate_rows(conn, table, column):
+                found |= _labelled(table, column, value)[1]
     if "gpo" in tables and _column_exists(conn, "gpo", "sysvol_path"):
         paths = [
             row[0]
@@ -587,30 +628,59 @@ def _discover_at_rest(conn: sqlite3.Connection, tables: list[str]) -> set[str]:
     return found
 
 
-def _scrub_cpassword_at_rest(conn: sqlite3.Connection) -> _ScrubResult:
+def _value_residual(table: str, column: str, value: str, chaser: Chaser) -> bool:
+    """A labelled value, or a copy the chase rules cover, is still in *value*."""
+    if _labelled(table, column, value)[1]:
+        return True
+    if not chaser:
+        return False
+    if (table, column) in _JSON_COLUMNS:
+        parsed = _json_container(value)
+        if parsed is not None:
+            return any(chaser.hits(text) for text in iter_strings(parsed))
+    return chaser.hits(value)
+
+
+def _residual_at_rest(conn: sqlite3.Connection, tables: list[str], chaser: Chaser) -> list[str]:
+    """Independent re-check of every text column after the scrub."""
+    _register_candidates(conn, chaser)
+    out: list[str] = []
+    for table in tables:
+        for column in _text_columns(conn, table):
+            if any(
+                _value_residual(table, column, value, chaser)
+                for _, value in _candidate_rows(conn, table, column)
+            ):
+                out.append(f"{table}.{column}")
+    return out
+
+
+def _scrub_cpassword_at_rest(conn: sqlite3.Connection) -> _ScrubResult | None:
     """Erase every stored GPP cpassword value and its copies (schema v11).
 
     1. Discover values in every stored form, in every text column (and SYSVOL
        still on disk), before changing anything.
     2. Plan every rewrite: labelled forms anywhere; copies (``redaction.Chaser``
-       rules) in the descriptive columns of ``REWRITABLE_COLUMNS``; a setting's
-       own values through that setting row. A labelled form or copy in any
-       other (structural) column refuses the whole migration, unchanged.
+       rules, compared canonically) in the descriptive columns of
+       ``REWRITABLE_COLUMNS``; a setting's own values through that setting
+       row. A labelled form or copy in any other (structural) column refuses
+       the whole migration, unchanged.
     3. Apply; cpassword findings drop the four-character prefix older releases
        kept. Re-hash the event chain from the first rewritten event, keeping
        any break that existed before (it is not blessed), then verify that no
-       new break exists. A ``maintenance.cpassword_scrub`` event records the
-       counts and event ids (never a value).
+       new break exists.
+    4. Verify independently: rediscover over every text column and search for
+       every discovered value. If anything remains, roll the whole scrub back
+       (so the labelled sources stay discoverable), warn, and return ``None``:
+       the schema stays below v11 and the same check runs on every read-write
+       open. Otherwise record a ``maintenance.cpassword_scrub`` event (counts
+       and event ids, never a value).
     """
     tables = _user_tables(conn)
     broken_before = frozenset(verify_event_chain(conn)[1]) if "events" in tables else frozenset()
     values = _discover_at_rest(conn, tables)
     chaser = Chaser(values)
-
-    def candidate(value: object) -> int:
-        return int(isinstance(value, str) and ("assword" in value.lower() or chaser.hits(value)))
-
-    conn.create_function("gpo_lens_cpassword_candidate", 1, candidate, deterministic=True)
+    _register_candidates(conn, chaser)
     plan: dict[tuple[str, str], list[tuple[str, int]]] = {}
     refused: set[str] = set()
 
@@ -620,7 +690,10 @@ def _scrub_cpassword_at_rest(conn: sqlite3.Connection) -> _ScrubResult:
 
     if "setting" in tables:
         # A setting's own labelled values also chase through that same row.
-        where = " OR ".join(f"gpo_lens_cpassword_candidate({c})" for c in _SETTING_TEXT)
+        where = " OR ".join(
+            f"gpo_lens_cpw_json({c})" if c == "raw" else f"gpo_lens_cpw_text({c})"
+            for c in _SETTING_TEXT
+        )
         for rowid, *texts in conn.execute(
             f"SELECT rowid, {', '.join(_SETTING_TEXT)} FROM setting WHERE {where}"
         ).fetchall():
@@ -638,10 +711,7 @@ def _scrub_cpassword_at_rest(conn: sqlite3.Connection) -> _ScrubResult:
         for column in _text_columns(conn, table):
             if table == "setting" and column in _SETTING_TEXT:
                 continue
-            for rowid, value in conn.execute(
-                f'SELECT rowid, "{column}" FROM "{table}" '
-                f'WHERE gpo_lens_cpassword_candidate("{column}")'
-            ).fetchall():
+            for rowid, value in _candidate_rows(conn, table, column):
                 new, found = _labelled(table, column, value)
                 if column in rewritable:
                     stage(table, column, rowid, value, _chased(table, column, new, chaser))
@@ -678,6 +748,17 @@ def _scrub_cpassword_at_rest(conn: sqlite3.Connection) -> _ScrubResult:
                 "cpassword scrub: the event hash chain did not verify after re-hashing "
                 f"(new breaks at {sorted(broken_after - broken_before)}); nothing was changed."
             )
+    residual = _residual_at_rest(conn, tables, chaser)
+    if residual:
+        conn.rollback()
+        warnings.warn(
+            "cpassword scrub could not be verified (a value remains in "
+            f"{', '.join(residual)}); nothing was changed. The database stays at "
+            f"schema {_CPASSWORD_SCRUB_VERSION - 1} and the check runs again on every "
+            "read-write open.",
+            stacklevel=3,
+        )
+        return None
     if changed and "events" in tables:
         append_event(
             conn,
@@ -700,18 +781,62 @@ def _scrub_cpassword_at_rest(conn: sqlite3.Connection) -> _ScrubResult:
     return _ScrubResult(changed, frozenset(chaser.values), broken_before)
 
 
-def _file_holds_any(path: str, needles: tuple[bytes, ...]) -> bool:
-    if not needles or not os.path.exists(path):
+_SIDECARS = ("", "-wal", "-shm", "-journal")
+
+
+def _bytes_hold_any(path: str, chaser: Chaser) -> bool:
+    """A discovered value (canonically, as stored text or JSON) in a file's bytes."""
+    if not chaser or not os.path.exists(path):
         return False
-    overlap = max(len(n) for n in needles)
-    tail = b""
+    overlap = 1 << 16
+    tail = ""
     with open(path, "rb") as handle:
         while chunk := handle.read(4 << 20):
-            window = tail + chunk
-            if any(n in window for n in needles):
+            window = tail + chunk.decode("latin-1")
+            if chaser.hits(_JSON_ESCAPE.sub(" ", window)):
                 return True
             tail = window[-overlap:]
     return False
+
+
+def _database_path(conn: sqlite3.Connection) -> str:
+    row = conn.execute("PRAGMA database_list").fetchone()
+    return row[2] if row and row[2] else ""
+
+
+def cpassword_file_hits(path: str, values: Iterable[str]) -> list[str]:
+    """Of a database's files (main, -wal, -shm, -journal), those whose raw bytes
+    hold a discovered value."""
+    chaser = Chaser(values)
+    if not path or not chaser:
+        return []
+    return [f"{path}{suffix}" for suffix in _SIDECARS if _bytes_hold_any(f"{path}{suffix}", chaser)]
+
+
+def cpassword_bytes_present(conn: sqlite3.Connection, values: Iterable[str]) -> list[str]:
+    """``cpassword_file_hits`` for the database behind *conn*."""
+    return cpassword_file_hits(_database_path(conn), values)
+
+
+def verify_committed_estate(conn: sqlite3.Connection, estate: Estate) -> None:
+    """Post-commit check of a fresh ingest: no discovered value in the file bytes.
+
+    A hit can only come from bytes outside the verified rows (uncommitted WAL
+    frames, earlier free pages); they are purged with a truncating checkpoint
+    and ``VACUUM`` and checked again. Raises ``CpasswordResidualError`` if a
+    value still remains.
+    """
+    values = estate_cpassword_values(estate)
+    try:
+        if cpassword_bytes_present(conn, values):
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.execute("VACUUM")
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            remaining = cpassword_bytes_present(conn, values)
+            if remaining:
+                raise CpasswordResidualError(", ".join(remaining))
+    finally:
+        forget_cpassword_values(estate)
 
 
 def _purge_free_pages(conn: sqlite3.Connection, scrub: _ScrubResult) -> None:
@@ -722,7 +847,8 @@ def _purge_free_pages(conn: sqlite3.Connection, scrub: _ScrubResult) -> None:
     the rebuilt pages land in the WAL, and only a complete ``TRUNCATE``
     checkpoint overwrites (and shrinks) the main file and empties the WAL. The
     version is stamped only when, after that, the event chain has no new break
-    and no discovered value occurs in the main file or WAL bytes. Otherwise it
+    and no discovered value occurs (canonically) in the bytes of the main file,
+    ``-wal``, ``-shm`` or ``-journal``. Otherwise it
     stays below ``_CPASSWORD_SCRUB_VERSION`` and the next read-write open
     scrubs (a no-op by then) and purges again.
     """
@@ -752,10 +878,7 @@ def _purge_free_pages(conn: sqlite3.Connection, scrub: _ScrubResult) -> None:
                 stacklevel=2,
             )
             return
-    row = conn.execute("PRAGMA database_list").fetchone()
-    path = row[2] if row else ""
-    needles = tuple(v.rstrip("=").encode() for v in scrub.values)
-    if path and any(_file_holds_any(p, needles) for p in (path, f"{path}-wal")):
+    if cpassword_bytes_present(conn, scrub.values):
         warnings.warn(
             f"cpassword purge: a discovered value is still in the file. {retry}", stacklevel=2
         )
@@ -947,15 +1070,17 @@ def _migrate_schema(conn: sqlite3.Connection, *, fresh: bool = False) -> _ScrubR
         # v10 -> v11: no cpassword value at rest. secure_delete zeroes the old
         # cell content this connection frees; the VACUUM after commit removes
         # what earlier deletes left in free pages.
+        # The additive migrations above are committed first, so a scrub that
+        # is refused or cannot be verified rolls back only its own rewrites.
+        if user_version != _CPASSWORD_SCRUB_VERSION - 1:
+            conn.execute(f"PRAGMA user_version = {_CPASSWORD_SCRUB_VERSION - 1}")
+        conn.commit()
         previous = conn.execute("PRAGMA secure_delete").fetchone()[0]
         conn.execute("PRAGMA secure_delete = ON")
         try:
-            result = _scrub_cpassword_at_rest(conn)
+            return _scrub_cpassword_at_rest(conn)
         finally:
             conn.execute(f"PRAGMA secure_delete = {int(previous)}")
-        if user_version != _CPASSWORD_SCRUB_VERSION - 1:
-            conn.execute(f"PRAGMA user_version = {_CPASSWORD_SCRUB_VERSION - 1}")
-        return result
 
     if user_version != CURRENT_SCHEMA_VERSION:  # no write on an up-to-date DB
         conn.execute(f"PRAGMA user_version = {CURRENT_SCHEMA_VERSION}")
@@ -1003,17 +1128,19 @@ def save_estate(
     taken_at: datetime | None = None,
     *,
     commit: bool = True,
-    _sanitized: bool = False,
+    _cpassword_values: frozenset[str] | None = None,
 ) -> int:
     """Save an estate as a new snapshot; returns the new ``snapshot_id``.
 
     GPP cpassword values are redacted and their copies chased through the
     estate first (in place; ``redaction.sanitize_for_storage``), unless the
-    caller already did so (``_sanitized``). A copy in an identity field raises
-    ``CredentialInIdentityError`` before anything is written.
+    caller already did and passes the values (``_cpassword_values``). A copy
+    in an identity field raises ``CredentialInIdentityError`` before anything
+    is written. The rows written are then read back and verified
+    independently (``_verify_snapshot_rows``); a residual raises
+    ``CpasswordResidualError`` and the caller must roll back.
     """
-    if not _sanitized:
-        sanitize_for_storage(estate)
+    values = sanitize_for_storage(estate) if _cpassword_values is None else _cpassword_values
     if taken_at is None:
         taken_at = datetime.now(UTC)
     cursor = conn.execute(
@@ -1208,10 +1335,47 @@ def save_estate(
         ],
     )
 
+    if _cpassword_values is None:  # save_evaluated_estate verifies after evaluation
+        residual = _verify_snapshot_rows(conn, snapshot_id, values)
+        if residual:
+            raise CpasswordResidualError(", ".join(residual))
     if commit:
         conn.commit()
     restrict_db_permissions(conn)
     return snapshot_id
+
+
+def _verify_snapshot_rows(
+    conn: sqlite3.Connection, snapshot_id: int, values: Iterable[str]
+) -> list[str]:
+    """Read back one snapshot's rows (and its finding rows) and re-check them.
+
+    Independent of the in-memory estate: labelled discovery runs again on the
+    stored text and JSON, and every discovered value is searched canonically.
+    """
+    chaser = Chaser(values)
+    _register_candidates(conn, chaser)
+    out: list[str] = []
+    for table in _user_tables(conn):
+        columns = {row[1] for row in conn.execute(f'PRAGMA table_info("{table}")')}
+        if "snapshot_id" in columns:
+            where, args = "snapshot_id = ?", (snapshot_id,)
+        elif table == "finding" and "last_seen_snapshot" in columns:
+            where, args = "last_seen_snapshot = ?", (snapshot_id,)
+        elif table == "finding_observation":
+            where = "run_id IN (SELECT id FROM evaluation_run WHERE snapshot_id = ?)"
+            args = (snapshot_id,)
+        else:
+            continue
+        for column in _text_columns(conn, table):
+            fn = "gpo_lens_cpw_json" if (table, column) in _JSON_COLUMNS else "gpo_lens_cpw_text"
+            for (value,) in conn.execute(
+                f'SELECT "{column}" FROM "{table}" WHERE {where} AND {fn}("{column}")', args
+            ):
+                if _value_residual(table, column, value, chaser):
+                    out.append(f"{table}.{column}")
+                    break
+    return out
 
 
 def load_estate(conn: sqlite3.Connection, snapshot_id: int | None = None) -> Estate:
@@ -1489,7 +1653,7 @@ def save_evaluated_estate(
         if not conn.in_transaction:
             conn.execute("BEGIN IMMEDIATE")
         values = sanitize_for_storage(estate)
-        sid = save_estate(conn, estate, commit=False, _sanitized=True)
+        sid = save_estate(conn, estate, commit=False, _cpassword_values=values)
         evaluate_finding_lifecycle_v2(
             conn,
             sid,
@@ -1499,11 +1663,17 @@ def save_evaluated_estate(
             commit=False,
             cpassword_values=values,
         )
+        residual = _verify_snapshot_rows(conn, sid, values)
+        if residual:
+            raise CpasswordResidualError(", ".join(residual))
         if commit:
             conn.commit()
+            verify_committed_estate(conn, estate)
         return sid
-    except CredentialInIdentityError:
+    except (CredentialInIdentityError, CpasswordResidualError):
         conn.rollback()
+        # Frames written before the rollback may linger in the WAL file.
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         raise
     except Exception as exc:
         conn.rollback()
