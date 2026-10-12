@@ -362,8 +362,10 @@ class TestCsrfSameHostOrigin:
     request's own Host header.
     """
 
+    # Not named ``base_url``: pytest-base-url (a pytest-playwright dependency)
+    # owns that fixture name and its autouse check would collide.
     @pytest.mark.parametrize(
-        ("base_url", "origin"),
+        ("proxy_url", "origin"),
         [
             # IIS + SNI on :443 (default port omitted by browser on both sides).
             ("https://gpo-lens.example.com", "https://gpo-lens.example.com"),
@@ -371,8 +373,8 @@ class TestCsrfSameHostOrigin:
             ("https://gpo-lens.example.com:8443", "https://gpo-lens.example.com:8443"),
         ],
     )
-    def test_same_host_origin_passes(self, csrf_db, base_url, origin) -> None:
-        client = _proxy_client(csrf_db, base_url)
+    def test_same_host_origin_passes(self, csrf_db, proxy_url, origin) -> None:
+        client = _proxy_client(csrf_db, proxy_url)
         resp = client.post("/ingest", headers={"origin": origin})
         assert resp.status_code != 403
 

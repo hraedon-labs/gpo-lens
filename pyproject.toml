@@ -18,6 +18,11 @@ dev = [
     "httpx>=0.28",
     "types-defusedxml>=0.7",
     "hatchling>=1.27",
+    # Real-browser + axe-core accessibility tests (tests/browser/, marker
+    # "browser", excluded from the default run). Minor-pinned: each Playwright
+    # release pins its own browser builds.
+    "playwright>=1.63,<1.64",
+    "pytest-playwright>=0.9,<0.10",
 ]
 web = [
     "fastapi>=0.115",
@@ -45,7 +50,10 @@ testpaths = ["tests"]
 # tests/golden_estate/) drive coverage to ~92% without the gitignored samples/
 # exports. CI re-adds --cov explicitly. Override -n auto with `-n0` when using
 # -s / pdb; add --cov=src locally on demand.
-addopts = "-q -n auto"
+# Real-browser tests (tests/browser/, marker "browser") are deselected here so
+# the default run stays fast and needs no browser; CI's browser job and local
+# runs use `pytest -m browser` (a later -m overrides this one).
+addopts = "-q -n auto -m 'not browser'"
 filterwarnings = [
     "error:unclosed database:ResourceWarning",
     "error:(?s).*unclosed database.*:pytest.PytestUnraisableExceptionWarning",
@@ -55,6 +63,7 @@ filterwarnings = [
 markers = [
     "samples: requires real GPO export samples in samples/",
     "slow: opt-in synthetic large-estate benchmarks (GPO_LENS_BENCHMARK=1)",
+    "browser: real Chromium + axe-core tests against a live server (pytest -m browser)",
 ]
 
 [tool.ruff]

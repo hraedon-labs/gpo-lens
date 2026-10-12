@@ -83,10 +83,17 @@ narrates facts the core computed. See `README.md` for the full charter.
 uv venv && uv pip install -e ".[dev]"   # local dev
 .venv/bin/pytest -q            # unit + calibration tests (sample tests skip if samples/ absent)
 .venv/bin/pytest -q -m samples # calibration tests against the real exports (needs samples/)
+.venv/bin/pytest -m browser -n0 # real Chromium + axe-core tests (once: .venv/bin/playwright install chromium)
 .venv/bin/ruff check .
 .venv/bin/ruff format .          # formatter is authoritative — see below
 .venv/bin/mypy src
 ```
+
+Browser tests (`tests/browser/`) are deselected by default. They drive a live
+`gpo-lens serve` with Playwright and gate axe-core serious/critical violations
+against `tests/browser/axe-baseline.json`; a new violation **or** a baselined one
+that disappears fails. After a deliberate a11y fix, regenerate with
+`GPO_LENS_AXE_WRITE_BASELINE=1` and review the diff.
 
 **Formatting is `ruff format`'s job, not yours.** CI runs
 `ruff format --check`, so a hand-styled block fails the build; run
