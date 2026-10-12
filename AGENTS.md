@@ -103,6 +103,21 @@ CI installs from the lockfile (`uv sync --locked --extra dev --extra web`), so
 stale-lock drift fails the build. A `supply-chain` CI job runs `pip-audit`
 against the locked runtime + web set.
 
+`docs/capability-matrix.md` is generated: after adding a detector, danger rule,
+ingest parser, collector input or CSE handling, run
+`python scripts/gen_capability_matrix.py` (curated descriptions live in that
+script). `tests/test_capability_matrix.py` fails on a stale file or on a
+detector/parser/input without a row.
+
+**Releases** are tag-driven: pushing `vX.Y.Z` runs `.github/workflows/release.yml`,
+which refuses unless the tag, `__version__`, `pyproject.toml`, `uv.lock` and the
+top (released, dated) CHANGELOG heading agree (`scripts/check_release_version.py`)
+and the commit is on `main`; it then re-runs all of `ci.yml`, builds the sdist and
+wheel twice and requires identical bytes, smoke-installs the exact wheel against
+the golden estate, and creates a **draft** GitHub release with a CycloneDX SBOM,
+`SHA256SUMS` and build-provenance + SBOM attestations. Publishing the draft is a
+human step.
+
 Slice 1 is **stdlib-only** (`xml.etree.ElementTree`, `json`, `sqlite3`,
 `argparse`) — keep it dependency-free so the core stays portable/air-gappable.
 
@@ -110,6 +125,37 @@ Slice 1 is **stdlib-only** (`xml.etree.ElementTree`, `json`, `sqlite3`,
 
 `scripts/Export-GpoEstate.ps1` produces the inputs (read-only PowerShell, run on
 a DC/RSAT box). The tool consumes its output dir.
+
+Read-only is enforced by `tests/test_collector_readonly.py`: it parses every
+DC/RSAT-side script with the PowerShell AST (via `pwsh`) in two layers. The
+**golden syntax tree** (`tests/powershell/collector-inventory.json`) is an
+order-preserving serialization of each script's whole AST plus a source digest,
+so *any* edit to a collector fails `test_inventory_matches_golden` until it is
+regenerated with `python scripts/gen_collector_inventory.py` and the diff is
+reviewed. The generator refuses to write unless the **semantic floor** passes:
+strict per-script allowlists (commands, .NET calls, redirections, `using`/type
+references, AST node types, local functions, exact scheduled-task argument
+vectors), exact pinning of every binding of every write/receiver/exec variable
+and its dependencies (`PINNED_VARS`), refusal of provider/global/automatic-
+variable writes, the exact text plus control-flow context of every
+command invocation, .NET method call and property access
+(`GUARDED_OPS`), a type allowlist for every cast/`-as`/`-is`/
+parameter-constraint/`[type]` construct (`check_cast_types`; computed types
+refused), a digest of every local function body
+(`LOCAL_FUNCTION_BODIES`) and of each script's param block
+(`SCRIPT_HEADERS`), and the exact uses of secret-bearing variables
+(`SECRET_USES`), every expression-valued pipeline input (`PIPELINE_INPUTS`),
+and a digest of every statement of every block body (`STATEMENT_DIGESTS`).
+These tables are hand-maintained; the generator never writes them (a test
+enforces it). Because `STATEMENT_DIGESTS` covers every statement, **any**
+collector edit fails the semantic layer until a human updates the tables:
+print candidates with `python scripts/print_statement_digests.py`
+(print-only, never wired into the generator), review them against the change,
+and paste them in with a reason. The other checks remain the floor that still
+refuses a harmful edit even when the digests are updated. Every reviewer bypass probe is a regression case in
+`test_reviewer_probes_are_flagged` asserted to fail at its intended check and to
+change the golden tree. Every PowerShell file under `scripts/` must be
+classified. Locally the test skips when `pwsh` is absent; in CI it fails.
 
 ## Module map
 

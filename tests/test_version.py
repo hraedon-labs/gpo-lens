@@ -83,11 +83,27 @@ def test_lock_version_matches_package() -> None:
     assert next(p["version"] for p in packages if p["name"] == "gpo-lens") == __version__
 
 
-def test_release_handover_reports_current_metadata() -> None:
+def _changelog_version_containing(marker: str) -> str:
+    text = (Path(__file__).resolve().parents[1] / "CHANGELOG.md").read_text(encoding="utf-8")
+    hits = [
+        section.split(" ", 1)[0].removeprefix("v")
+        for section in re.split(r"^## ", text, flags=re.MULTILINE)[1:]
+        if marker in section
+    ]
+    assert len(hits) == 1, f"{marker!r} must appear in exactly one CHANGELOG release: {hits}"
+    return hits[0]
+
+
+def test_release_handover_names_the_hotfix_release_the_changelog_records() -> None:
+    # These are historical v1.3.0 documents. They name the release that shipped
+    # the broken-reference hotfix, as recorded in CHANGELOG; they must not track
+    # the current package version (that coupling rewrote them to "1.4.0").
+    hotfix = _changelog_version_containing("**Broken-reference details.**")
     root = Path(__file__).resolve().parents[1]
     for name in ("docs/release-v1.3.0-verification.md", "plans/027-road-to-generous-1x.md"):
         text = (root / name).read_text()
-        assert f"Package metadata reports **{__version__}**" in text
+        assert f"broken-reference hotfix shipped as **v{hotfix}**" in " ".join(text.split())
+        assert "Package metadata reports" not in text
         assert "bump package metadata" not in text
         assert "metadata remains\n1.2.0" not in text
         assert "metadata currently reports **1.2.0**" not in text

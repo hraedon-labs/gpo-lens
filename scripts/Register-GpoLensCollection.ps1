@@ -39,7 +39,9 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Service')]
     [string]$OutputRoot,
     [switch]$Force,
-    [ValidateScript({ -not [string]::IsNullOrWhiteSpace($_) })]
+    # Task names: no wildcard, path or quote characters, so -Unregister can
+    # never match more than this one task (Sol round-5).
+    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9 ._-]{0,199}$')]
     [string]$TaskName = 'GpoLensCollection',
     [string]$CollectorPath = (Join-Path $PSScriptRoot 'Export-GpoEstate.ps1'),
     [ValidateRange(1, 365)]
@@ -74,7 +76,12 @@ function ConvertTo-GpoLensAbsolutePath {
 }
 
 function Set-GpoLensCollectionOwner {
-    param([string]$OutputRoot, [string]$TaskName, [switch]$Force, [scriptblock]$RegisterTask)
+    param(
+        [string]$OutputRoot,
+        [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9 ._-]{0,199}$')][string]$TaskName,
+        [switch]$Force,
+        [scriptblock]$RegisterTask
+    )
     if ((Test-Path -LiteralPath $OutputRoot) -and
         ((Get-Item -LiteralPath $OutputRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
         throw 'Registration refuses a linked output root.'

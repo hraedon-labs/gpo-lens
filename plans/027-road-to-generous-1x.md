@@ -1,6 +1,6 @@
 # Plan 027 — Road to the generous 1.x: final release reconciliation
 
-**Status:** Shipped in v1.3.0; verified 2026-10-06 on the release candidate (release date set by coordinator). Evidence: [src/gpo_lens/web/templates/base.html](../src/gpo_lens/web/templates/base.html), [tests/test_released_db_upgrades.py](../tests/test_released_db_upgrades.py).
+**Status:** Shipped in v1.3.0 (released 2026-10-06, tag `v1.3.0`); verified 2026-10-06 on the release candidate. Evidence: [src/gpo_lens/web/templates/base.html](../src/gpo_lens/web/templates/base.html), [tests/test_released_db_upgrades.py](../tests/test_released_db_upgrades.py).
 
 ## Release scope and final state
 
@@ -8,8 +8,8 @@ Reconciled against `release/v1.3.0-candidate` on **2026-10-06**. “Shipped in
 v1.3.0” below means implemented for this release; the coordinator still owns
 the release date/tag, tracker acceptance and deployment.
 This docs pass does not create those artifacts or claim the release is already
-running at work. Package metadata reports **1.4.0** for the broken-reference
-hotfix; the v1.3.0 release scope below remains unchanged.
+running at work. The broken-reference hotfix shipped as **v1.3.1** (see
+CHANGELOG); the v1.3.0 release scope below remains unchanged.
 
 | Phase / stream | Final state and evidence |
 |----------------|--------------------------|

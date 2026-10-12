@@ -1,10 +1,9 @@
 # Taking over a gpo-lens installation
 
 Start here if you've inherited a running gpo-lens and the person who set it up
-isn't around to ask. This page describes the **v1.4.0 release candidate**.
-The latest published release is **v1.3.1**, fixing v1.3.0's over-redacted
-broken-reference details. Keep running 1.3.1 until the coordinator publishes 1.4;
-the new capabilities below require 1.4. gpo-lens has two halves:
+isn't around to ask. This page describes **v1.4.0**, the current release
+(2026-10-06); the capabilities below that are new in 1.4 require it. gpo-lens
+has two halves:
 
 - **Collection.** A PowerShell script, run on a DC or RSAT box, exports the
   Group Policy estate to files. It is read-only and never writes to AD.
