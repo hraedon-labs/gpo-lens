@@ -959,6 +959,30 @@ foreach ($file in $Path) {
         }
     }
 
+    # Every type by how it is used: conversion targets (casts), parameter type
+    # constraints, and type literals (static receivers, enum/type objects, the
+    # operand of -as). The gate allowlists each kind separately.
+    $castTypes = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ConvertExpressionAst] }, $true) |
+            ForEach-Object { $_.Type.TypeName.FullName })
+    $paramTypes = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.TypeConstraintAst] -and
+                -not ($n.Parent -is [System.Management.Automation.Language.ConvertExpressionAst]) }, $true) |
+            ForEach-Object { $_.TypeName.FullName })
+    $typeLiterals = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.TypeExpressionAst] }, $true) |
+            ForEach-Object { $_.TypeName.FullName })
+    # Every property access (getter or setter; method calls are `members`), with
+    # its control-flow context: a getter can have side effects.
+    $properties = @()
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.MemberExpressionAst] -and
+                -not ($n -is [System.Management.Automation.Language.InvokeMemberExpressionAst]) }, $true)) {
+        $properties += [pscustomobject][ordered]@{
+            text = (Get-NormText (Get-Text $node))
+            static = [bool]$node.Static
+            member = (Get-StringValue $node.Member)
+            function = (Get-EnclosingFunction $node)
+            context = (Get-NodeContext $node)
+        }
+    }
+
     $typeReferences = @()
     foreach ($n in (Get-TypeNames $ast)) {
         $typeReferences += $n
@@ -995,6 +1019,10 @@ foreach ($file in $Path) {
         redirections = $redirections
         using_statements = $usings
         type_references = $typeReferences
+        cast_types = $castTypes
+        parameter_types = $paramTypes
+        type_literals = $typeLiterals
+        properties = $properties
     }
 }
 $sha.Dispose()
