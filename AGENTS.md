@@ -139,8 +139,9 @@ vectors), exact pinning of every binding of every write/receiver/exec variable
 and its dependencies (`PINNED_VARS`), refusal of provider/global/automatic-
 variable writes, the exact text plus control-flow context of every
 command invocation, .NET method call and property access
-(`GUARDED_OPS`), an inert-type allowlist for every cast/conversion target
-(`check_cast_types`), a digest of every local function body
+(`GUARDED_OPS`), a type allowlist for every cast/`-as`/`-is`/
+parameter-constraint/`[type]` construct (`check_cast_types`; computed types
+refused), a digest of every local function body
 (`LOCAL_FUNCTION_BODIES`) and of each script's param block
 (`SCRIPT_HEADERS`), and the exact uses of secret-bearing variables
 (`SECRET_USES`), every expression-valued pipeline input (`PIPELINE_INPUTS`),

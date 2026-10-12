@@ -32,30 +32,6 @@ def _load_gate():  # type: ignore[no-untyped-def]
     return module
 
 
-def _lit(text: str, indent: int) -> str:
-    r = repr(text)
-    if len(r) + indent + 2 <= 99:
-        return r
-    width = max(30, 96 - indent - 4)
-    chunks, rest = [], text
-    while len(repr(rest)) > width:
-        cut = next(
-            (
-                i
-                for i in range(len(rest), 0, -1)
-                if len(repr(rest[:i])) <= width and rest[i - 1] == " "
-            ),
-            None,
-        )
-        if cut is None:
-            cut = max(i for i in range(1, len(rest)) if len(repr(rest[:i])) <= width)
-        chunks.append(rest[:cut])
-        rest = rest[cut:]
-    chunks.append(rest)
-    pad = " " * (indent + 4)
-    return "(\n" + "".join(f"{pad}{c!r}\n" for c in chunks) + " " * indent + ")"
-
-
 def main() -> int:
     what = sys.argv[1] if len(sys.argv) > 1 else "statements"
     exe = shutil.which("pwsh")
@@ -70,9 +46,13 @@ def main() -> int:
         out.append("STATEMENT_DIGESTS: dict[str, dict[str, str]] = {")
         for script in order:
             out.append(f"    {script!r}: {{")
-            for st in gate._statements(inv[script]):
-                out.append(f"        # [{st['path']}] {st['kind']}: {st['preview'][:70]}"[:99])
-                out.append(f"        {str(st['seq'])!r}: {st['digest']!r},")
+            digs = gate._statement_digests(inv[script])
+            labels = gate._statement_digest_labels(inv[script])
+            for k in digs:
+                out.append(f"        # {labels.get(k, '?')} @ {k}"[:99])
+                out.append(f"        {k!r}: (")
+                out.append(f"            {digs[k]!r}")
+                out.append("        ),")
             out.append("    },")
         out.append("}")
     elif what == "headers":

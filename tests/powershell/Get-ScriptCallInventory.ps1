@@ -962,13 +962,44 @@ foreach ($file in $Path) {
     # Every type by how it is used: conversion targets (casts), parameter type
     # constraints, and type literals (static receivers, enum/type objects, the
     # operand of -as). The gate allowlists each kind separately.
-    $castTypes = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ConvertExpressionAst] }, $true) |
-            ForEach-Object { $_.Type.TypeName.FullName })
-    $paramTypes = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.TypeConstraintAst] -and
-                -not ($n.Parent -is [System.Management.Automation.Language.ConvertExpressionAst]) }, $true) |
-            ForEach-Object { $_.TypeName.FullName })
-    $typeLiterals = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.TypeExpressionAst] }, $true) |
-            ForEach-Object { $_.TypeName.FullName })
+    # Every construct that converts to or references a type, classified by role so
+    # the gate routes each through the right allowlist. One usage per node — no
+    # double counting — so a count-parity meta-test can prove nothing is missed:
+    #   convert     ConvertExpressionAst cast / `[T]@{}` (its .Type TypeConstraintAst)
+    #   as          `$x -as [T]` (BinaryExpressionAst, right TypeExpressionAst)
+    #   is/isnot    `$x -is [T]` / `-isnot [T]`
+    #   constraint  param([T]$x) (TypeConstraintAst not under a cast)
+    #   reference   a bare [T] literal (static receiver, argument value, enum)
+    # A non-literal conversion type (`-as $typeVar`) is recorded computed=$true.
+    $typeUsages = @()
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ConvertExpressionAst] }, $true)) {
+        $typeUsages += [pscustomobject][ordered]@{ role = 'convert'; type = $node.Type.TypeName.FullName; computed = $false }
+    }
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.BinaryExpressionAst] -and
+                $n.Operator -in @('As', 'Is', 'IsNot') }, $true)) {
+        $role = ([string]$node.Operator).ToLowerInvariant()
+        if ($node.Right -is [System.Management.Automation.Language.TypeExpressionAst]) {
+            $typeUsages += [pscustomobject][ordered]@{ role = $role; type = $node.Right.TypeName.FullName; computed = $false }
+        } else {
+            $typeUsages += [pscustomobject][ordered]@{ role = $role; type = (Get-NormText (Get-Text $node.Right)); computed = $true }
+        }
+    }
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.TypeConstraintAst] -and
+                -not ($n.Parent -is [System.Management.Automation.Language.ConvertExpressionAst]) }, $true)) {
+        $typeUsages += [pscustomobject][ordered]@{ role = 'constraint'; type = $node.TypeName.FullName; computed = $false }
+    }
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.TypeExpressionAst] }, $true)) {
+        $typeUsages += [pscustomobject][ordered]@{ role = 'reference'; type = $node.TypeName.FullName; computed = $false }
+    }
+    # Counts straight from the AST for the parity meta-test.
+    $typeNodeCounts = [pscustomobject][ordered]@{
+        convert = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ConvertExpressionAst] }, $true)).Count
+        binary_typeop = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.BinaryExpressionAst] -and
+                    $n.Operator -in @('As', 'Is', 'IsNot') }, $true)).Count
+        constraint_not_cast = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.TypeConstraintAst] -and
+                    -not ($n.Parent -is [System.Management.Automation.Language.ConvertExpressionAst]) }, $true)).Count
+        type_expr = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.TypeExpressionAst] }, $true)).Count
+    }
     # Every property access (getter or setter; method calls are `members`), with
     # its control-flow context: a getter can have side effects.
     $properties = @()
@@ -1019,9 +1050,8 @@ foreach ($file in $Path) {
         redirections = $redirections
         using_statements = $usings
         type_references = $typeReferences
-        cast_types = $castTypes
-        parameter_types = $paramTypes
-        type_literals = $typeLiterals
+        type_usages = $typeUsages
+        type_node_counts = $typeNodeCounts
         properties = $properties
     }
 }
