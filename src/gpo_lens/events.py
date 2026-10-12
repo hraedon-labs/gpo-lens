@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -102,6 +103,57 @@ def append_events(
     if commit:
         conn.commit()
     return ids
+
+
+# Marks a stored hash kept invalid on purpose by ``rehash_event_chain``.
+_UNVERIFIED_PREFIX = "unverified-before-rehash:"
+
+
+def rehash_event_chain(
+    conn: sqlite3.Connection, from_id: int, *, keep_broken: Iterable[int] = ()
+) -> list[int]:
+    """Recompute stored hashes from event ``from_id`` onward; return changed ids.
+
+    Only for a documented, audited rewrite of stored payloads (the v11
+    cpassword scrub). The caller must append an event that records the rewrite,
+    so the re-chained history still says it was changed and from where.
+    Unhashed (``prev_hash IS NULL``) rows stay unhashed, as in
+    :func:`verify_event_chain`. Rows in ``keep_broken`` (breaks that existed
+    before the rewrite) keep their stored hash, so the rewrite never blesses
+    earlier tampering; if a rewritten payload would make one verify, its hash
+    is replaced by a marked non-hash, so it still fails verification.
+    """
+    keep = set(keep_broken)
+    row = conn.execute(
+        "SELECT prev_hash FROM events WHERE id < ? ORDER BY id DESC LIMIT 1", (from_id,)
+    ).fetchone()
+    prev_hash: str | None = row[0] if row else None
+    changed: list[int] = []
+    rows = conn.execute(
+        "SELECT id, timestamp, event_type, payload, prev_hash FROM events "
+        "WHERE id >= ? ORDER BY id ASC",
+        (from_id,),
+    ).fetchall()
+    for event_id, timestamp, event_type, payload, stored in rows:
+        if stored is None:
+            prev_hash = None
+            continue
+        if event_id in keep:
+            # A pre-existing break must stay a break. If the rewritten payload
+            # now happens (or was crafted) to match the stored hash, store a
+            # deterministic non-hash so the row still fails verification.
+            if stored == _compute_hash(prev_hash, timestamp, event_type, payload):
+                stored = f"{_UNVERIFIED_PREFIX}{stored}"
+                conn.execute("UPDATE events SET prev_hash = ? WHERE id = ?", (stored, event_id))
+                changed.append(event_id)
+            prev_hash = stored
+            continue
+        expected = _compute_hash(prev_hash, timestamp, event_type, payload)
+        if expected != stored:
+            conn.execute("UPDATE events SET prev_hash = ? WHERE id = ?", (expected, event_id))
+            changed.append(event_id)
+        prev_hash = expected
+    return changed
 
 
 def verify_event_chain(conn: sqlite3.Connection) -> tuple[bool, list[int]]:

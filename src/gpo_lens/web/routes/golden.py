@@ -23,6 +23,7 @@ from gpo_lens import ingest as _ingest
 from gpo_lens import queries
 from gpo_lens import store as _store
 from gpo_lens.exports import ExportSection, export_context
+from gpo_lens.redaction import describe_error
 from gpo_lens.safe_output import safe_data
 from gpo_lens.web._helpers import get_ro_conn, stream_upload_to_file
 from gpo_lens.web.app import _audit
@@ -118,7 +119,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             RuntimeError,
             MemoryError,
         ) as exc:
-            _logger.warning("Invalid golden zip: %s", exc)
+            _logger.warning("Invalid golden zip: %s", describe_error(exc))
             _audit("golden_diff", _principal, "failure", type(exc).__name__, request)
             return templates.TemplateResponse(
                 request,

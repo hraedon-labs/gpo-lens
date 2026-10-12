@@ -29,13 +29,41 @@ def _load() -> ModuleType:
 gate = _load()
 
 
+def _released_changelog(text: str) -> str:
+    """The CHANGELOG as a tag would see it: a leading ``## Unreleased`` section is
+    allowed during development (tests/test_version.py enforces its ``Draft
+    **vX.Y.Z**`` target) and refused by the gate at tag time
+    (test_unreleased_top_section_is_refused_at_tag_time), so the copy drops it
+    and these tests exercise the latest released heading against every version
+    source."""
+    if text.startswith("# ") or text.lstrip().startswith("## Unreleased"):
+        head, sep, rest = text.partition("## Unreleased")
+        if sep:
+            nxt = rest.find("\n## ")
+            return head + (rest[nxt + 1 :] if nxt != -1 else "")
+    return text
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    for name in ("pyproject.toml", "uv.lock", "CHANGELOG.md"):
+    for name in ("pyproject.toml", "uv.lock"):
         shutil.copy(_ROOT / name, tmp_path / name)
+    changelog = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    (tmp_path / "CHANGELOG.md").write_text(_released_changelog(changelog), encoding="utf-8")
     (tmp_path / "src" / "gpo_lens").mkdir(parents=True)
     shutil.copy(_ROOT / "src" / "gpo_lens" / "__init__.py", tmp_path / "src" / "gpo_lens")
     return tmp_path
+
+
+def test_unreleased_top_section_is_refused_at_tag_time(repo: Path) -> None:
+    changelog = repo / "CHANGELOG.md"
+    changelog.write_text(
+        "# Changelog\n\n## Unreleased\n\nDraft **v9.9.9**\n\n"
+        + changelog.read_text(encoding="utf-8").split("\n", 1)[1],
+        encoding="utf-8",
+    )
+    problems, _ = gate.check(f"v{__version__}", repo)
+    assert any("Unreleased" in p for p in problems), problems
 
 
 def test_current_tree_agrees_with_its_own_tag(repo: Path) -> None:
@@ -93,10 +121,16 @@ def test_built_metadata_must_match(repo: Path, tmp_path: Path) -> None:
     assert problems == [f"{wheel.name} METADATA is '0.0.1', tag says '{__version__}'"]
 
 
-def test_cli_exit_codes_and_notes(tmp_path: Path) -> None:
+def test_cli_exit_codes_and_notes(repo: Path, tmp_path: Path) -> None:
+    # Run a copy of the CLI from inside the released-state tree (its ROOT is its
+    # own parent directory), so the exit codes are exercised even while the real
+    # tree carries a development `## Unreleased` section.
+    (repo / "scripts").mkdir()
+    script = repo / "scripts" / "check_release_version.py"
+    shutil.copy(_SCRIPT, script)
     notes = tmp_path / "notes.md"
     ok = subprocess.run(
-        [sys.executable, str(_SCRIPT), "--tag", f"v{__version__}", "--notes-out", str(notes)],
+        [sys.executable, str(script), "--tag", f"v{__version__}", "--notes-out", str(notes)],
         capture_output=True,
         text=True,
         check=False,
@@ -104,7 +138,7 @@ def test_cli_exit_codes_and_notes(tmp_path: Path) -> None:
     assert ok.returncode == 0, ok.stderr
     assert notes.read_text(encoding="utf-8").strip()
     bad = subprocess.run(
-        [sys.executable, str(_SCRIPT), "--tag", "v0.0.1"],
+        [sys.executable, str(script), "--tag", "v0.0.1"],
         capture_output=True,
         text=True,
         check=False,

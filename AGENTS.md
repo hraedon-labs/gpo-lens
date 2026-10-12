@@ -57,7 +57,25 @@ narrates facts the core computed. See `README.md` for the full charter.
   joins use it (see `normalize.canonical_guid`).
 - **BOM-tolerant JSON:** collector JSON may carry a UTF-8 BOM (PowerShell 5.1).
   Always load with `utf-8-sig`.
-- **Import boundary:** Core modules (`model`, `normalize`, `ingest`, `store`, `queries`, `snapshot_diff`, `detection`, `admx_parser`, `display`, `report`, `events`, `sinks`, `query_dispatch`, `authz`, `topology`, `registry_pol`, `paths`, `danger`, `merge`, `trend`, `findings`, `finding_model`, `_legacy_findings`) must never import `narration` or `web`. An architecture test enforces this.
+- **Import boundary:** Core modules (`model`, `normalize`, `ingest`, `store`, `queries`, `snapshot_diff`, `detection`, `admx_parser`, `display`, `report`, `events`, `sinks`, `query_dispatch`, `authz`, `topology`, `registry_pol`, `paths`, `danger`, `merge`, `trend`, `findings`, `finding_model`, `_legacy_findings`, `redaction`) must never import `narration` or `web`. An architecture test enforces this.
+- **No cpassword value at rest.** `redaction.redact_element_tree` redacts
+  labelled GPP `cpassword` values in the whole report tree before any field is
+  read, and `redaction.sanitize_estate` chases the values discovered (report,
+  SYSVOL, any input) through the estate — in `ingest.load_estate`, again in
+  `save_estate`, and through finding text in `evaluate_finding_lifecycle_v2`.
+  Copies are rewritten only in fields listed in `redaction.REWRITABLE_FIELDS`
+  (and `store.REWRITABLE_COLUMNS` for the v11 migration); anywhere else they
+  raise `CredentialInIdentityError`. When you add a model field or a column,
+  classify it there (unlisted means structural). Never add a path that stores,
+  hashes or prints a value; findings carry `CPASSWORD_FINDING_DETAIL` only.
+  Multi-input loaders discover over all inputs before one sanitize
+  (`_parse_report_root(..., sanitize=False)`). Results are verified
+  independently (`residual_locations`, `store._verify_snapshot_rows`,
+  `store.verify_committed_estate`); never gate discovery on a contiguous
+  `cpassword` substring of serialized data without the mixed-content check.
+  Schema v11 scrubs older databases, verifies by rediscovery (rolling back on
+  a residual), and purges free pages (`store._scrub_cpassword_at_rest`,
+  `_purge_free_pages`).
 
 ## Build / test / lint
 
@@ -126,10 +144,22 @@ strict per-script allowlists (commands, .NET calls, redirections, `using`/type
 references, AST node types, local functions, exact scheduled-task argument
 vectors), exact pinning of every binding of every write/receiver/exec variable
 and its dependencies (`PINNED_VARS`), refusal of provider/global/automatic-
-variable writes, and the exact text plus control-flow context of every
-write/delete/exec operation (`GUARDED_OPS`). A collector change that touches a
-write, a guard or a pinned variable therefore also needs a hand edit to those
-tables, with a reason. Every reviewer bypass probe is a regression case in
+variable writes, the exact text plus control-flow context of every
+command invocation, .NET method call and property access
+(`GUARDED_OPS`), a type allowlist for every cast/`-as`/`-is`/
+parameter-constraint/`[type]` construct (`check_cast_types`; computed types
+refused), a digest of every local function body
+(`LOCAL_FUNCTION_BODIES`) and of each script's param block
+(`SCRIPT_HEADERS`), and the exact uses of secret-bearing variables
+(`SECRET_USES`), every expression-valued pipeline input (`PIPELINE_INPUTS`),
+and a digest of every statement of every block body (`STATEMENT_DIGESTS`).
+These tables are hand-maintained; the generator never writes them (a test
+enforces it). Because `STATEMENT_DIGESTS` covers every statement, **any**
+collector edit fails the semantic layer until a human updates the tables:
+print candidates with `python scripts/print_statement_digests.py`
+(print-only, never wired into the generator), review them against the change,
+and paste them in with a reason. The other checks remain the floor that still
+refuses a harmful edit even when the digests are updated. Every reviewer bypass probe is a regression case in
 `test_reviewer_probes_are_flagged` asserted to fail at its intended check and to
 change the golden tree. Every PowerShell file under `scripts/` must be
 classified. Locally the test skips when `pwsh` is absent; in CI it fails.
@@ -154,6 +184,7 @@ classified. Locally the test skips when `pwsh` is absent; in CI it fails.
 | `sinks.py` | Event sinks for NDJSON file export and Splunk HEC |
 | `query_dispatch.py` | Centralized query dispatch table (single source of truth for CLI and web) |
 | `merge.py` | Per-CSE merge-resolution model + principal resultant (Plan 021). Token, security-gate eval, CSE merge modes |
+| `redaction.py` | Ingest-time GPP `cpassword` redaction (element tree, stored JSON, inline text); `CPASSWORD_MARKER`, `CPASSWORD_FINDING_DETAIL` |
 | `trend.py` | Posture-over-time metrics from snapshot history — `compute_trend`, `changes_only`, `sparkline`, `TrendPoint` |
 | `finding_model.py` | Plan 024 — durable finding identity protocol (`FindingCandidate`, `EvidenceRef`, `ClaimLevel`), fingerprint computation, occurrence/observation/triage data types, core query result types |
 | `narration.py` | Tier 3 — LLM narration (`call_llm`, `explain_findings`, `route_question`). Optional; core never imports this |

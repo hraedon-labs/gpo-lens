@@ -10,3 +10,13 @@
 *.gif binary
 *.ico binary
 *.pdf binary
+
+# The in-scope collector scripts are hashed byte-for-byte by the collector gate
+# (tests/test_collector_readonly.py); fix their line endings so a checkout
+# cannot change the golden inventory.
+scripts/Export-GpoEstate.ps1 text eol=lf
+scripts/Export-GroupMembers.ps1 text eol=lf
+scripts/Export-Principals.ps1 text eol=lf
+scripts/Run-GpoLensCollection.ps1 text eol=lf
+scripts/GpoLensCollectionMarker.ps1 text eol=lf
+scripts/Register-GpoLensCollection.ps1 text eol=lf

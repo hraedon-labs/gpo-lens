@@ -135,22 +135,16 @@ function Get-NormText {
     return (($Text -replace '\s+', ' ').Trim())
 }
 
-function ConvertTo-Lf {
-    param([string]$Text)
-    if ($null -eq $Text) { return $null }
-    return $Text.Replace("`r`n", "`n")
-}
-
 function Format-ScalarValue {
     # Returns @($ok, $value). $value is a string, $true, or a string array.
     param($Value)
-    if ($Value -is [string]) { return @($true, (ConvertTo-Lf $Value)) }
+    if ($Value -is [string]) { return @($true, $Value) }
     if ($Value -is [bool]) { return @($true, $Value) }
     if ($Value -is [enum]) { return @($true, $Value.ToString()) }
     if ($Value -is [System.Management.Automation.Language.ITypeName]) { return @($true, $Value.FullName) }
     if ($Value -is [System.Management.Automation.VariablePath]) { return @($true, $Value.UserPath) }
     if ($Value -is [System.Management.Automation.Language.Token]) {
-        return @($true, ('{0}:{1}' -f $Value.Kind, (ConvertTo-Lf $Value.Text)))
+        return @($true, ('{0}:{1}' -f $Value.Kind, $Value.Text))
     }
     if ($Value -is [System.Management.Automation.Language.DynamicKeyword]) { return @($true, $Value.Keyword) }
     if ($Value -is [System.Management.Automation.Language.ScriptRequirements]) {
@@ -351,6 +345,69 @@ function Get-TypeNames {
     return $names
 }
 
+# Resolve a parameter token the way PowerShell does: against the cmdlet's real
+# parameter metadata (names + aliases, exact then unambiguous prefix) when the
+# cmdlet is available in this session, else against the common parameters (which
+# every cmdlet accepts). Returns the canonical full parameter name (lowercased)
+# or, when it cannot be resolved, the lowercased token itself (fail-closed: an
+# unresolved token never equals a pinned full name). DeepSeek round 5: `-Pi`
+# uniquely resolves to -PipelineVariable.
+$script:CommonParameters = [ordered]@{
+    Debug = @('db'); ErrorAction = @('ea'); ErrorVariable = @('ev')
+    InformationAction = @('infa'); InformationVariable = @('iv'); OutBuffer = @('ob')
+    OutVariable = @('ov'); PipelineVariable = @('pv'); ProgressAction = @('proga')
+    Verbose = @('vb'); WarningAction = @('wa'); WarningVariable = @('wv')
+    WhatIf = @('wi'); Confirm = @('cf')
+}
+$script:CmdletParamCache = @{}
+# Resolve parameters only against PowerShell's own core modules, loaded up
+# front, with module auto-loading off: fast (no PSModulePath scan per unknown
+# cmdlet) and identical on every runner (an RSAT host would otherwise resolve
+# AD/GroupPolicy/ScheduledTasks cmdlets that a Linux runner cannot). Commands
+# outside these modules fall back to the common-parameter table.
+Import-Module Microsoft.PowerShell.Management, Microsoft.PowerShell.Utility, Microsoft.PowerShell.Security -ErrorAction SilentlyContinue
+$PSModuleAutoLoadingPreference = 'None'
+
+function Get-CmdletParameterNames {
+    param([string]$Name)
+    if (-not $Name) { return $null }
+    if ($script:CmdletParamCache.ContainsKey($Name)) { return $script:CmdletParamCache[$Name] }
+    $result = $null
+    try {
+        $cmd = Get-Command -Name $Name -ErrorAction Stop
+        # Follow an alias to its target so parameter metadata is the real one.
+        while ($cmd.CommandType -eq 'Alias' -and $cmd.ResolvedCommand) { $cmd = $cmd.ResolvedCommand }
+        if ($cmd.Parameters -and $cmd.Parameters.Count -gt 0) {
+            $map = [ordered]@{}
+            foreach ($entry in $cmd.Parameters.GetEnumerator()) {
+                $map[$entry.Key] = @($entry.Value.Aliases)
+            }
+            $result = $map
+        }
+    } catch { $result = $null }
+    $script:CmdletParamCache[$Name] = $result
+    return $result
+}
+
+function Resolve-ParameterName {
+    # Returns @(canonicalName, resolved) where resolved is $true when the token
+    # bound to a real parameter (of the cmdlet when known, else a common param).
+    param([string]$Command, [string]$Token)
+    if (-not $Token) { return @($Token, $false) }
+    $cf = $Token.ToLowerInvariant()
+    $known = $null -ne (Get-CmdletParameterNames $Command)
+    $map = Get-CmdletParameterNames $Command
+    if ($null -eq $map) { $map = $script:CommonParameters }
+    foreach ($key in $map.Keys) { if ($key.ToLowerInvariant() -eq $cf) { return @($key.ToLowerInvariant(), $true) } }
+    foreach ($key in $map.Keys) {
+        foreach ($alias in $map[$key]) { if ($alias.ToLowerInvariant() -eq $cf) { return @($key.ToLowerInvariant(), $true) } }
+    }
+    $matches = @($map.Keys | Where-Object { $_.ToLowerInvariant().StartsWith($cf) })
+    if ($matches.Count -eq 1) { return @($matches[0].ToLowerInvariant(), $true) }
+    # Not a parameter of the cmdlet (when known) nor a common parameter.
+    return @($cf, (-not $known))
+}
+
 function Get-AstKind {
     param($Ast)
     if ($null -eq $Ast) { return $null }
@@ -507,16 +564,21 @@ function New-Binding {
 }
 
 function Get-SourceFacts {
+    # Digest of the exact bytes (no normalization): line endings are fixed to LF
+    # by .gitattributes, and the gate refuses CR and non-ASCII bytes.
     param([string]$File)
     $bytes = [System.IO.File]::ReadAllBytes($File)
     $nonAscii = 0
-    foreach ($b in $bytes) { if ($b -gt 127) { $nonAscii++ } }
-    $text = ConvertTo-Lf ([System.Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF))
+    $cr = 0
+    foreach ($b in $bytes) {
+        if ($b -gt 127) { $nonAscii++ }
+        if ($b -eq 13) { $cr++ }
+    }
     $hash = [System.Security.Cryptography.SHA256]::Create()
     try {
-        $digest = ([System.BitConverter]::ToString($hash.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($text))) -replace '-', '').ToLowerInvariant()
+        $digest = ([System.BitConverter]::ToString($hash.ComputeHash($bytes)) -replace '-', '').ToLowerInvariant()
     } finally { $hash.Dispose() }
-    return @($digest, $nonAscii)
+    return @($digest, $nonAscii, $cr)
 }
 
 $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -581,6 +643,13 @@ foreach ($file in $Path) {
         continue
     }
 
+    # The script's own attributes and param block ([CmdletBinding(...)],
+    # parameters and their validators), pinned by digest in the gate.
+    $headerRows = [System.Collections.Generic.List[object]]::new()
+    foreach ($attr in $ast.Attributes) { Add-AstRows -Node $attr -Depth 0 -Role 'Attributes' -Rows $headerRows -Unsupported $unsupported }
+    if ($null -ne $ast.ParamBlock) { Add-AstRows -Node $ast.ParamBlock -Depth 0 -Role 'ParamBlock' -Rows $headerRows -Unsupported $unsupported }
+
+
     $functionDefs = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true))
     $functions = @($functionDefs | ForEach-Object { $_.Name })
     $functionParams = @()
@@ -598,8 +667,12 @@ foreach ($file in $Path) {
                 }
             }
         }
+        $bodyRows = [System.Collections.Generic.List[object]]::new()
+        $bodyUnsupported = [System.Collections.Generic.List[string]]::new()
+        Add-AstRows -Node $fd -Depth 0 -Role 'Function' -Rows $bodyRows -Unsupported $bodyUnsupported
         $functionParams += [pscustomobject][ordered]@{
             name = $fd.Name
+            body_rows = $bodyRows.ToArray()
             params = @($params | ForEach-Object { $_.Name.VariablePath.UserPath })
             pipeline_params = @($pipeline | Sort-Object -Unique)
         }
@@ -627,13 +700,15 @@ foreach ($file in $Path) {
                     $kind = (Get-AstKind $elems[$ei + 1])
                     $ei++
                 }
-                $arguments += [pscustomobject][ordered]@{ parameter = $el.ParameterName; value = $pv; value_kind = $kind }
+                $resolved = Resolve-ParameterName $name $el.ParameterName
+                $arguments += [pscustomobject][ordered]@{ parameter = $el.ParameterName; parameter_canonical = $resolved[0]; parameter_resolved = [bool]$resolved[1]; value = $pv; value_kind = $kind }
             } else {
-                $arguments += [pscustomobject][ordered]@{ parameter = $null; value = (Get-Text $el); value_kind = (Get-AstKind $el) }
+                $arguments += [pscustomobject][ordered]@{ parameter = $null; parameter_canonical = $null; parameter_resolved = $true; value = (Get-Text $el); value_kind = (Get-AstKind $el) }
             }
         }
         $record = [ordered]@{
             name = $name
+            cmdlet_known = ($null -ne (Get-CmdletParameterNames $name))
             line = $node.Extent.StartLineNumber
             invocation = [string]$node.InvocationOperator
             text = $node.Extent.Text
@@ -701,6 +776,7 @@ foreach ($file in $Path) {
         if ($left -is [System.Management.Automation.Language.MemberExpressionAst]) {
             $memberAssignments += [pscustomobject][ordered]@{
                 line = $node.Extent.StartLineNumber
+                function = (Get-EnclosingFunction $node)
                 target = $left.Extent.Text
                 receiver_var = (Get-RootVariable $left.Expression)
                 receiver_types = @(Get-TypeNames $left.Expression)
@@ -708,6 +784,7 @@ foreach ($file in $Path) {
         } elseif ($left -is [System.Management.Automation.Language.IndexExpressionAst]) {
             $indexAssignments += [pscustomobject][ordered]@{
                 line = $node.Extent.StartLineNumber
+                function = (Get-EnclosingFunction $node)
                 target = $left.Extent.Text
                 root_var = (Get-RootVariable $left)
                 operator = [string]$node.Operator
@@ -781,6 +858,68 @@ foreach ($file in $Path) {
         }
     }
 
+    # Every variable reference with the statement it occurs in (for the
+    # secret-variable use pins) and every parameter declaration's attributes.
+    $variableUses = @()
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.VariableExpressionAst] }, $true)) {
+        $owner = $node.Parent
+        while ($null -ne $owner -and -not ($owner -is [System.Management.Automation.Language.StatementAst]) -and
+            -not ($owner -is [System.Management.Automation.Language.ParameterAst])) { $owner = $owner.Parent }
+        # The right-hand side of an assignment is reported as the assignment, so
+        # the gate can see where a value flows.
+        while ($null -ne $owner -and $owner.Parent -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+            [object]::ReferenceEquals($owner.Parent.Right, $owner)) { $owner = $owner.Parent }
+        $variableUses += [pscustomobject][ordered]@{
+            name = $node.VariablePath.UserPath
+            function = (Get-EnclosingFunction $node)
+            statement = (Get-NormText (Get-Text $owner))
+        }
+    }
+    # Pipeline input expressions: a pipeline element that is an expression, not a
+    # command (e.g. `@([pscustomobject]@{...}) + @(Get-ChildItem ...) | ForEach`).
+    # These feed downstream commands/scriptblocks but are not CommandAsts, so the
+    # gate pins them by text + context (Sol round 7).
+    $pipelineInputs = @()
+    foreach ($node in $ast.FindAll({ param($n) ($n -is [System.Management.Automation.Language.PipelineAst]) -and
+                $n.PipelineElements.Count -ge 2 }, $true)) {
+        foreach ($el in $node.PipelineElements) {
+            if ($el -is [System.Management.Automation.Language.CommandExpressionAst]) {
+                $pipelineInputs += [pscustomobject][ordered]@{
+                    text = (Get-NormText (Get-Text $el))
+                    function = (Get-EnclosingFunction $el)
+                    context = (Get-NodeContext $el)
+                }
+            }
+        }
+    }
+
+    # Every branch/loop condition (if/elseif, while, do, for, switch, foreach
+    # source): the gate pins every variable they read.
+    $conditions = @()
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -or
+                $n -is [System.Management.Automation.Language.LoopStatementAst] -or
+                $n -is [System.Management.Automation.Language.SwitchStatementAst] }, $true)) {
+        $parts = @()
+        if ($node -is [System.Management.Automation.Language.IfStatementAst]) {
+            foreach ($clause in $node.Clauses) { $parts += $clause.Item1 }
+        } else {
+            $parts += $node.Condition
+            if ($node -is [System.Management.Automation.Language.ForStatementAst]) { $parts += $node.Initializer; $parts += $node.Iterator }
+        }
+        foreach ($part in $parts) {
+            if ($null -eq $part) { continue }
+            $conditions += [pscustomobject][ordered]@{ text = (Get-NormText (Get-Text $part)); function = (Get-EnclosingFunction $node) }
+        }
+    }
+    $parameterDecls = @()
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ParameterAst] }, $true)) {
+        $parameterDecls += [pscustomobject][ordered]@{
+            name = $node.Name.VariablePath.UserPath
+            function = (Get-EnclosingFunction $node)
+            attributes = @($node.Attributes | ForEach-Object { Get-NormText $_.Extent.Text })
+        }
+    }
+
     # Set-Variable / New-Variable / [ref] indirections name a variable in a
     # string, invisible to the assignment AST; record them as assignments too.
     $indirectWrites = @()
@@ -820,6 +959,61 @@ foreach ($file in $Path) {
         }
     }
 
+    # Every type by how it is used: conversion targets (casts), parameter type
+    # constraints, and type literals (static receivers, enum/type objects, the
+    # operand of -as). The gate allowlists each kind separately.
+    # Every construct that converts to or references a type, classified by role so
+    # the gate routes each through the right allowlist. One usage per node — no
+    # double counting — so a count-parity meta-test can prove nothing is missed:
+    #   convert     ConvertExpressionAst cast / `[T]@{}` (its .Type TypeConstraintAst)
+    #   as          `$x -as [T]` (BinaryExpressionAst, right TypeExpressionAst)
+    #   is/isnot    `$x -is [T]` / `-isnot [T]`
+    #   constraint  param([T]$x) (TypeConstraintAst not under a cast)
+    #   reference   a bare [T] literal (static receiver, argument value, enum)
+    # A non-literal conversion type (`-as $typeVar`) is recorded computed=$true.
+    $typeUsages = @()
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ConvertExpressionAst] }, $true)) {
+        $typeUsages += [pscustomobject][ordered]@{ role = 'convert'; type = $node.Type.TypeName.FullName; computed = $false }
+    }
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.BinaryExpressionAst] -and
+                $n.Operator -in @('As', 'Is', 'IsNot') }, $true)) {
+        $role = ([string]$node.Operator).ToLowerInvariant()
+        if ($node.Right -is [System.Management.Automation.Language.TypeExpressionAst]) {
+            $typeUsages += [pscustomobject][ordered]@{ role = $role; type = $node.Right.TypeName.FullName; computed = $false }
+        } else {
+            $typeUsages += [pscustomobject][ordered]@{ role = $role; type = (Get-NormText (Get-Text $node.Right)); computed = $true }
+        }
+    }
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.TypeConstraintAst] -and
+                -not ($n.Parent -is [System.Management.Automation.Language.ConvertExpressionAst]) }, $true)) {
+        $typeUsages += [pscustomobject][ordered]@{ role = 'constraint'; type = $node.TypeName.FullName; computed = $false }
+    }
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.TypeExpressionAst] }, $true)) {
+        $typeUsages += [pscustomobject][ordered]@{ role = 'reference'; type = $node.TypeName.FullName; computed = $false }
+    }
+    # Counts straight from the AST for the parity meta-test.
+    $typeNodeCounts = [pscustomobject][ordered]@{
+        convert = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ConvertExpressionAst] }, $true)).Count
+        binary_typeop = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.BinaryExpressionAst] -and
+                    $n.Operator -in @('As', 'Is', 'IsNot') }, $true)).Count
+        constraint_not_cast = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.TypeConstraintAst] -and
+                    -not ($n.Parent -is [System.Management.Automation.Language.ConvertExpressionAst]) }, $true)).Count
+        type_expr = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.TypeExpressionAst] }, $true)).Count
+    }
+    # Every property access (getter or setter; method calls are `members`), with
+    # its control-flow context: a getter can have side effects.
+    $properties = @()
+    foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.MemberExpressionAst] -and
+                -not ($n -is [System.Management.Automation.Language.InvokeMemberExpressionAst]) }, $true)) {
+        $properties += [pscustomobject][ordered]@{
+            text = (Get-NormText (Get-Text $node))
+            static = [bool]$node.Static
+            member = (Get-StringValue $node.Member)
+            function = (Get-EnclosingFunction $node)
+            context = (Get-NodeContext $node)
+        }
+    }
+
     $typeReferences = @()
     foreach ($n in (Get-TypeNames $ast)) {
         $typeReferences += $n
@@ -829,8 +1023,10 @@ foreach ($file in $Path) {
         path = $file
         source_sha256 = $facts[0]
         source_non_ascii_bytes = $facts[1]
+        source_cr_bytes = $facts[2]
         parse_errors = $parseErrorText
         ast_rows = $rows.ToArray()
+        header_rows = $headerRows.ToArray()
         unsupported_nodes = @($unsupported | Sort-Object -Unique)
         script_requirements = ($null -ne $ast.ScriptRequirements)
         node_types = @($ast.FindAll({ $true }, $true) | ForEach-Object { $_.GetType().Name } | Sort-Object -Unique)
@@ -846,10 +1042,17 @@ foreach ($file in $Path) {
         other_assignments = $otherAssignments
         variable_assignments = $variableAssignments
         variable_refs = $variableRefs
+        variable_uses = $variableUses
+        conditions = $conditions
+        pipeline_inputs = $pipelineInputs
+        parameter_decls = $parameterDecls
         indirect_writes = $indirectWrites
         redirections = $redirections
         using_statements = $usings
         type_references = $typeReferences
+        type_usages = $typeUsages
+        type_node_counts = $typeNodeCounts
+        properties = $properties
     }
 }
 $sha.Dispose()

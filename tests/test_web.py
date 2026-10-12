@@ -1734,7 +1734,9 @@ class TestAuditLog:
         assert entry["action"] == "ingest"
         assert entry["outcome"] == "success"
         assert entry["principal"] == "local-analyst"
-        assert "fixture.zip" in str(entry["detail"])
+        # The client-supplied upload name is never recorded (cpassword r5).
+        assert "fixture.zip" not in str(entry["detail"])
+        assert "bytes" in str(entry["detail"]) and "GPOs" in str(entry["detail"])
         assert entry["request_id"] is not None
 
     def test_ingest_failure_writes_audit_entry(self, audit_client: object, tmp_path: Path) -> None:

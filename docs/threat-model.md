@@ -16,7 +16,7 @@ enforced, this document says so. Report a gap through [SECURITY.md](../SECURITY.
 |-------|----------------|----------------|
 | Collector exports (`AllGPOs.xml`, `gpo-metadata.json`, `principals.json`, `group-members.json`, `SYSVOL-Policies/` copy, the ZIP) | Collector output root on the DC/RSAT host; transfer medium; analysis host | The full GPO estate: names, OU paths, delegation, SIDs, settings and every GPP XML file — including any `cpassword` attribute (an AES key Microsoft published; MS14-025), which is a recoverable credential. |
 | SQLite database (`--db`, plus `-wal`/`-shm`) | Analysis host | Persisted snapshots: GPOs, links, settings (`setting.raw` holds the parsed setting subtree), delegation, findings, triage notes and actors. |
-| `cpassword` hits | Recomputed from SYSVOL files at ingest; persisted only as a masked finding | A live credential if leaked. See residual risk R1 for what the database actually retains. |
+| `cpassword` values | Discovered across every input of an import and replaced with `[redacted cpassword]` before anything is written (schema v11); the finding carries no characters of the value and no hash or fingerprint | A live credential if leaked. See residual risk R1 for where unredacted copies can still exist. |
 | Narration payloads | In memory; sent to the configured LLM endpoint | Whatever the code path sends leaves the host. The web paths and CLI paths differ deliberately (see "Egress"). |
 | Audit log (`audit.log` beside the DB or `GPO_LENS_AUDIT_LOG`) | Analysis host | Who ingested, deleted, triaged or narrated, and when. |
 | Auth material | Environment: `GPO_LENS_AUTH_TOKEN`, `GPO_LENS_API_KEY`, `GPO_LENS_HEC_TOKEN`; a service-account password handed to Task Scheduler | Each grants access to the app, the LLM endpoint or Splunk. |
@@ -72,8 +72,8 @@ it receives; physical access.
 
 | Threat | Mitigation | Evidence |
 |--------|------------|----------|
-| Collector writes to AD, GPO or SYSVOL | **Two-layer gate.** A CI check parses (never executes) every DC/RSAT-side script with the PowerShell AST. (1) **Golden syntax tree:** a committed file holds, per script, an order-preserving serialization of the *whole* AST (every node with its operators, names, string values, flags, `#Requires`, attributes and arguments, in source order) plus a digest of the source text (CRLF normalized), so any edit — including a reorder, a changed argument, an index assignment, a `#Requires` line or a comment — fails the comparison until regenerated. A meta-test proves the serializer covers every AST node type and property of the running PowerShell and that sampled systematic mutations (single tokens, statement swaps, negated conditions, inserted statements) all change the tree. (2) **Semantic floor:** the generator refuses to regenerate unless the semantic checks pass, so what it can admit is bounded by them: commands (plus a never-allowed list: alias/variable/drive/location/module/job cmdlets), dynamic invocations, `using`, redirections (`$null` only), `New-Object`/`Add-Type` forms, static/instance .NET calls, a closed set of AST node types, no `#Requires`/background jobs/non-ASCII source, the exact set of local functions, and the exact text *and control-flow context* (enclosing conditions, loops, try blocks and preceding guards) of every write/delete/exec/task operation. AD/GroupPolicy cmdlets must be `Get-*`; only `Register-GpoLensCollection.ps1` may use the ScheduledTasks cmdlets, each with a pinned argument vector. `[ADSI]`/`System.DirectoryServices.*`/COM/WMI/CIM/runspace type references are rejected; inline C# for `Add-Type` is pinned by SHA-256. The golden comparison is the completeness guarantee; the semantic floor is what a regeneration cannot get past, and a human still reviews the golden diff. Every reviewer bypass probe (four rounds, two lineages) is a regression case asserted to fail at its intended check and to change the golden tree. | `tests/test_collector_readonly.py`; `tests/powershell/Get-ScriptCallInventory.ps1`; `tests/powershell/collector-inventory.json`; `scripts/gen_collector_inventory.py`; CI job `collector-readonly` |
-| Collector writes local files outside its outputs | Dataflow confinement: every write root, every receiver of an instance-method call / property write / index write, every splatted variable, every exec or scheduled-task input, and transitively every variable their bindings read, is pinned to the **exact set of its bindings** — assignments of any operator, parameter defaults, `foreach` variables, `[ref]` arguments, `++`/`--`, local-function call-site arguments and splats, variable-writing common parameters, and property/index writes on the object. A rebind of any kind is not in the set and fails. Provider/drive and `$global:` assignment targets (`${alias:…}`, `$env:…`, `${C:\file}`), multiple assignment, writes to automatic/preference variables (beyond `$ErrorActionPreference = 'Stop'` and `$matches`), any use of `$PSDefaultParameterValues`/`$PSModuleAutoLoadingPreference`/`$ExecutionContext`, unlisted index writes, computed `-OutVariable`-style names and `ForEach-Object <MethodName>` are refused. Each write target must be exactly one of a committed set of pinned path expressions per script; file redirections must target `$null`; `New-Item` may not create a symlink/junction/hardlink or name a provider. | `tests/test_collector_readonly.py` (`test_local_writes_stay_under_declared_roots`, `test_pinned_variables_are_not_rebound`, `test_no_unpinnable_or_engine_bindings`, `test_write_and_exec_operations_keep_their_guards`, `test_inventory_matches_golden`, `test_reviewer_probes_are_flagged`) |
+| Collector writes to AD, GPO or SYSVOL | **Two-layer gate.** A CI check parses (never executes) every DC/RSAT-side script with the PowerShell AST. (1) **Golden syntax tree:** a committed file holds, per script, an order-preserving serialization of the *whole* AST (every node with its operators, names, string values, flags, `#Requires`, attributes and arguments, in source order) plus a digest of the exact source bytes (LF pinned by `.gitattributes`; CR and non-ASCII bytes refused), so any edit — including a reorder, a changed argument, an index assignment, a `#Requires` line or a comment — fails the comparison until regenerated. A meta-test proves the serializer covers every AST node type and property of the running PowerShell and that sampled systematic mutations (single tokens, statement swaps, negated conditions, inserted statements) all change the tree. (2) **Semantic floor:** the generator refuses to regenerate unless the semantic checks pass, so what it can admit is bounded by them: commands (plus a never-allowed list: alias/variable/drive/location/module/job cmdlets), dynamic invocations, `using`, redirections (`$null` only), `New-Object`/`Add-Type` forms, static/instance .NET calls, a closed set of AST node types, no `#Requires`/background jobs/non-ASCII source, the exact set of local functions and a hand-maintained digest of each one's whole syntax tree (so a helper's return value or behaviour cannot change unreviewed), a hand-maintained digest of each script's attributes and param block (`SupportsShouldProcess`, validators), and the exact text *and control-flow context* (enclosing conditions, loops, try blocks and preceding guards) of **every command invocation** and every write/delete/exec/handle-lifetime .NET call. Every read or write of a secret-bearing variable (the service-account credential, the extracted password, and anything assigned from them) must be one of the committed uses; no command argument may carry a UNC/remote path, and no string literal anywhere in a script may look like a UNC, `//host`, device or URL path except the two listed ones (the domain's own SYSVOL Policies share, and the `(\\+)$` backslash-doubling regex in the task-argument helper); every `TaskName` parameter must carry the shared validator that refuses wildcard/path/quote characters (so `-Unregister` can match only one task). Command, function, parameter, member, type, assembly and variable names are compared case-insensitively, and every parameter token is resolved to its full name the way PowerShell binds it (unambiguous prefixes such as `-Pi` for `-PipelineVariable`, and aliases such as `-ov`), using the cmdlet's real metadata; a token matching no real parameter of a known cmdlet is refused. AD/GroupPolicy cmdlets must be `Get-*`; only `Register-GpoLensCollection.ps1` may use the ScheduledTasks cmdlets, each with a pinned argument vector. `[ADSI]`/`System.DirectoryServices.*`/COM/WMI/CIM/runspace type references are rejected; inline C# for `Add-Type` is pinned by SHA-256. The golden comparison is the completeness guarantee; the semantic floor is what a regeneration cannot get past, and a human still reviews the golden diff. Every reviewer bypass probe (four rounds, two lineages) is a regression case asserted to fail at its intended check and to change the golden tree. | `tests/test_collector_readonly.py`; `tests/powershell/Get-ScriptCallInventory.ps1`; `tests/powershell/collector-inventory.json`; `scripts/gen_collector_inventory.py`; CI job `collector-readonly` |
+| Collector writes local files outside its outputs | Dataflow confinement: every write root, every receiver of an instance-method call / property write / index write, every splatted variable, **every variable read by any command argument, .NET call argument or branch/loop condition**, and transitively every variable their bindings read (the gate computes this closure from the AST and requires the pin table to equal it), is pinned, per scope (the function that makes the binding; `ForEach-Object`/`Where-Object` scriptblocks count as their caller's scope), to the **exact set of its bindings** — assignments of any operator, parameter defaults, `foreach` variables, `[ref]` arguments, `++`/`--`, local-function call-site arguments and splats, variable-writing common parameters, and property/index writes on the object. A rebind of any kind is not in the set and fails. Provider/drive and `$global:` assignment targets (`${alias:…}`, `$env:…`, `${C:\file}`), multiple assignment, writes to automatic/preference variables (beyond `$ErrorActionPreference = 'Stop'` and `$matches`), any use of `$PSDefaultParameterValues`/`$PSModuleAutoLoadingPreference`/`$ExecutionContext`, unlisted index writes, computed `-OutVariable`-style names and `ForEach-Object <MethodName>` are refused. Each write target must be exactly one of a committed set of pinned path expressions per script; file redirections must target `$null`; `New-Item` may not create a symlink/junction/hardlink or name a provider. | `tests/test_collector_readonly.py` (`test_local_writes_stay_under_declared_roots`, `test_pinned_variables_are_not_rebound`, `test_no_unpinnable_or_engine_bindings`, `test_write_and_exec_operations_keep_their_guards`, `test_inventory_matches_golden`, `test_reviewer_probes_are_flagged`) |
 | Retention or log rotation deletes outside the output root, or follows a link | Owner marker required before any write; reparse points refused before retention deletes; marker opened with link-count check. | `scripts/Run-GpoLensCollection.ps1:67-99,115-126,183-195`; `scripts/GpoLensCollectionMarker.ps1:3-68`; `tests/powershell/collection.Tests.ps1` |
 | Service-account password exposure during task registration | Prompted via `Get-Credential`, passed only to `Register-ScheduledTask`, variables cleared in `finally`; gMSA path supplies no password. | `scripts/Register-GpoLensCollection.ps1:148-164`; `tests/powershell/collection.Tests.ps1` ("registers a gMSA Password principal without supplying a password") |
 | Non-ASCII byte breaks parsing under Windows PowerShell 5.1 and a run silently collects less | Every `scripts/*.ps1` must parse and be ASCII-only. | `tests/powershell/scripts-parse.Tests.ps1` |
@@ -103,7 +103,7 @@ it receives; physical access.
 | Threat | Mitigation | Evidence |
 |--------|------------|----------|
 | Other local users read the estate | DB and `-wal`/`-shm` chmod 0600 on every `init_db` and read-write open. POSIX only: `os.chmod` cannot express this on Windows, where the IIS installer grants the app-pool identity Modify on the install directory and relies on inherited NTFS ACLs. | `src/gpo_lens/store.py:619-645`; `src/gpo_lens/web/_helpers.py:109-118`; `tests/test_store.py` (`test_init_db_restricts_file_permissions_to_owner_only`, `test_init_db_retightens_permissions_on_existing_db`); `scripts/install-windows.ps1:867-875` |
-| Raw credential persisted | `cpassword` findings store a masked value; finding evidence carries no raw value. **But see residual R1:** a credential attribute present in the GPMC report XML is stored unmasked in `setting.raw`. | `src/gpo_lens/detection/_hygiene.py:147-151`; `src/gpo_lens/finding_model.py:108`; `tests/test_plan024.py::TestEvidenceSafety::test_evidence_no_raw_cpassword` |
+| Raw credential persisted | Since schema v11 ingest redacts every labelled `cpassword` value (attribute or key in any casing or namespace, `<cpassword>` element, inline or escaped, split across XML nodes) and chases canonical copies through descriptive fields and finding text; a copy in an identity field refuses the import (`CredentialInIdentityError`). The result is re-verified over the sanitized estate, the rows written and the database/`-wal`/`-shm`/`-journal` bytes; a residual refuses the import (`CpasswordResidualError`). Upgrading an older database scrubs stored values the same way. Ingest warnings, logs, errors and `audit.log` are scrubbed against every discovered value. The finding stores `****` only; no hash is kept. | `src/gpo_lens/redaction.py`; `src/gpo_lens/ingest.py`; `src/gpo_lens/store.py` (v11 migration); `src/gpo_lens/detection/_hygiene.py` (`mask_cpassword`); `tests/test_cpassword_redaction.py`; `tests/test_cpassword_diagnostics.py`; `tests/test_cpassword_review_probes.py`; `CHANGELOG.md` (Security, Upgrade notes) |
 | Ingest lock file abuse | Created 0600. | `src/gpo_lens/web/app.py:190` |
 
 ### B5 — Web server
@@ -158,21 +158,16 @@ cleartext if an operator configures that.
 
 These are known and not mitigated by code at this commit.
 
-- **R1 — Credential attributes in the GPMC report XML are persisted unmasked in
-  `setting.raw`.** Measured on this commit: adding
-  `cpassword="<probe>"` to a GPP `<Properties>` element in
-  `tests/golden_estate/AllGPOs.xml` and ingesting it stores the probe verbatim
-  in the `setting.raw` JSON column. The web GPO dossier, settings search and
-  dossier Markdown/CSV exports showed that setting as `[REDACTED]` and never
-  the probe (checked with the same probe; `safe_output` masks on the way
-  out). Other read paths were not exhaustively probed. Whether a real GPMC
-  report carries the `cpassword` attribute was not verified in this pass. The
-  `cpassword` finding itself stores only the first four characters plus
-  `****` (`src/gpo_lens/detection/_hygiene.py:147-151`) — still a partial
-  disclosure. At rest, the only protection is the database file mode (B4).
-  Owner decision: redact credential attributes at ingest (changes stored
-  `raw`, and potentially setting fingerprints and diffs) or accept and
-  document.
+- **R1 — Unredacted `cpassword` copies outside the database.** The database
+  no longer stores `cpassword` values (redacted at ingest since schema v11; the
+  earlier "stored unmasked in `setting.raw`" acceptance is withdrawn). What
+  remains: the original exports on the collector host and drop share, and any
+  database backup taken before upgrading, still contain the values (see
+  `CHANGELOG.md` upgrade notes and R9). Copies are chased only for values of at
+  least 12 characters that look like GPP ciphertext or mix letters and digits
+  (from 8 characters inside the carrying setting); a short or word-like value
+  is redacted only where it is labelled. A crafted export with a copy in an
+  identity field can block its own import (it is refused, never stored).
 - **R2 — No per-user identity in the app.** Every accepted caller on the
   loopback path is the same principal with view, ingest, delete, triage and
   narrate rights (`src/gpo_lens/web/auth.py:61-67`). Remote access control is
@@ -188,18 +183,35 @@ These are known and not mitigated by code at this commit.
   archive.
 - **R5 — Limits of the collector gate.** It is static and reasons only about
   the committed scripts.
-  - *Completeness* comes from the golden syntax tree, not from the semantic
-    rules: any edit changes it, and a regeneration is permitted only when the
-    semantic floor passes. The floor is a set of allowlists and pins, not a
-    proof of read-only behaviour; an edit it admits (e.g. a new `return`, a
-    changed message, a new pure read) is caught only as a golden diff that a
-    reviewer must read. The one normalization is CRLF->LF (so a checkout's line
-    endings cannot change the inventory); a LF<->CRLF change inside a multi-line
-    string literal is therefore not detected.
-  - Guard pinning is intraprocedural: the context of an operation records the
-    conditions, loops, try blocks, early-exit `if`s and `Assert-*` calls around
-    it *in its own function*; a guard in a caller (or a guard implemented any
-    other way) is protected only by the golden tree.
+  - *Completeness* is structural, not rule-by-rule. The golden syntax tree
+    changes on any edit (its source digest is over exact bytes, LF pinned by
+    `.gitattributes`, CR refused), and a hand-maintained digest table
+    (`STATEMENT_DIGESTS`) pins every statement of every block body — top-level
+    and inside each function/scriptblock — by a digest of its normalized AST
+    subtree. Because that table is part of the semantic layer the generator must
+    pass, and the generator never writes it, **a regeneration of any statement
+    edit is refused until a human updates the table** — so "could a new
+    allowlisted statement shape regenerate unreviewed?" has a structural answer,
+    not a new rule each round. The other semantic checks are then the floor that
+    still catches a *harmful* edit even when someone does update the digests:
+    they are allowlists and pins, not a proof of read-only behaviour. A
+    print-only helper (`scripts/print_statement_digests.py`, never wired into
+    the generator) prints candidate digests for review.
+  - The floor itself is broad: every command invocation, every .NET method call and every property
+    access is pinned by exact text, multiplicity and control-flow context; every
+    expression-valued pipeline input is pinned the same way; every type-conversion or
+    type-reference construct (a cast, `-as`/`-is`/`-isnot`, a parameter
+    constraint, a bare `[type]` literal) is routed through a type allowlist —
+    a conversion target must be an inert value type and a reference must be a
+    committed type the scripts use, a computed type is refused; every variable read
+    by a command/method argument, a pipeline input or a branch/loop condition is
+    binding-pinned (transitively); and secret-bearing variables have an
+    allowlist of uses. Interprocedural reasoning is by pinning, not analysis:
+    every local function body and each script's param block are pinned by
+    digest, and every call to a writer function is a guarded operation with its
+    caller's context. A guard implemented other than as an `if` that exits, an
+    `Assert-*` call or an exit statement is protected by the golden tree and the
+    statement/body digests.
   - Instance methods are bound to a pinned receiver *variable*, not a resolved
     runtime type; the type-reference denylist (`[ADSI]`,
     `System.DirectoryServices.*`, COM, WMI/CIM, runspace) is the backstop.

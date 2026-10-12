@@ -28,7 +28,7 @@ Source: `gpo_lens.findings.INTRINSIC_DETECTOR_VERSIONS`, the registry of every e
 | `broken_ref:*` | 2 | Malformed path, or a script / scheduled-task path / GPP file reference missing from the GPO's own collected SYSVOL (`malformed_path`, `missing_script`, `scheduled_task_path`, `gpp_file_ref`); external UNC and machine-local paths are inventoried, never flagged |
 | `broken_wmi_ref` | 1 | GPO references a WMI filter that is not in the export |
 | `coverage_gap` | 1 | GPO missing from the export versus `gpo-inventory.json`, a `collection-errors.json` entry, missing SYSVOL (GPP/cpassword detectors blind), or an unreadable Preferences subtree |
-| `cpassword` | 1 | `cpassword` attribute in a known GPP XML file in collected SYSVOL (MS14-025) |
+| `cpassword` | 2 | `cpassword` attribute in a known GPP XML file in collected SYSVOL (MS14-025) |
 | `danger:audit_subcategory_override` | 1 | Advanced Audit subcategories authored without the force-subcategory option in the same GPO (authoring caveat; not a device-level claim) |
 | `danger:gpo_owner_nonadmin` | 1 | GPO owned by a non-admin trustee |
 | `danger:gpo_writable_nonadmin` | 1 | GPO writable by a non-admin trustee |

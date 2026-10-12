@@ -38,7 +38,7 @@ import dataclasses
 import hashlib
 import json
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -1679,7 +1679,7 @@ def evaluation_runs(
 # danger rules share an evaluator/version and their full rule content is hashed.
 INTRINSIC_DETECTOR_VERSIONS = {
     "coverage_gap": "1",
-    "cpassword": "1",
+    "cpassword": "2",
     "ms16_072": "1",
     "version_skew": "1",
     "dangling_link": "1",
@@ -1995,6 +1995,7 @@ def evaluate_finding_lifecycle_v2(
     admx: AdmxResolver | None = None,
     application_version: str = "",
     commit: bool = True,
+    cpassword_values: Iterable[str] | None = None,
 ) -> LifecycleResult:
     """Run the Plan 024 evaluation pipeline end-to-end.
 
@@ -2023,6 +2024,13 @@ def evaluate_finding_lifecycle_v2(
         admx=admx,
         rules=rules,
     )
+    # Detectors read SYSVOL files directly; chase any cpassword value they
+    # copied into finding text before it is stored (identity fields refuse).
+    from gpo_lens.redaction import scrub_records, sysvol_cpassword_values
+
+    if cpassword_values is None:
+        cpassword_values = sysvol_cpassword_values(estate.gpos)
+    candidates = scrub_records(candidates, cpassword_values, "FindingCandidate")
 
     run_id = create_evaluation_run(
         conn,

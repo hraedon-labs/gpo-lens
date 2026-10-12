@@ -48,6 +48,11 @@ _STRUCTURAL = {
     "_parse_single_gpo": "one <GPO> element (part of parse_report)",
     "_parse_gplink": "gPLink attribute text (part of parse_inheritance / sites)",
     "parse_report_xml": "bytes entry point of parse_report (baseline/golden uploads)",
+    # cpassword redaction plumbing (merged from main, schema v11): wrappers that
+    # redact and copy-chase a report tree before parse_report reads it.
+    "_parse_report_file": "file entry point of parse_report that also returns cpassword values",
+    "_parse_report_root": "redact + parse + copy-chase one report tree (part of parse_report)",
+    "_parse_report_root_guarded": "body of _parse_report_root under guarded diagnostics",
 }
 
 
@@ -172,7 +177,11 @@ def test_every_ingest_reader_has_a_row_and_rows_name_real_readers() -> None:
 
 
 def test_every_load_estate_input_has_a_row() -> None:
-    tree = ast.parse(inspect.getsource(ingest.load_estate))
+    # load_estate delegates to _load_estate (cpassword-guarded diagnostics, from
+    # main); the input file names live in the delegate.
+    tree = ast.parse(
+        inspect.getsource(ingest.load_estate) + "\n" + inspect.getsource(ingest._load_estate)
+    )
     literals = {
         node.value
         for node in ast.walk(tree)

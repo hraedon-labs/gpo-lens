@@ -515,7 +515,7 @@ def test_restrict_db_permissions_warns_on_failure(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "chmod", fail_chmod)
 
-    with pytest.warns(UserWarning, match="Could not restrict DB permissions"):
+    with pytest.warns(UserWarning, match="Could not restrict permissions on the database"):
         store.restrict_db_permissions(conn)
     conn.close()
 

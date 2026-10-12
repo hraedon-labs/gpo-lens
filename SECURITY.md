@@ -59,6 +59,9 @@ In scope — vulnerabilities in gpo-lens itself, including:
 - Leakage of estate data: credentials or secrets (including `cpassword`
   values) appearing unredacted in web pages, exports, logs, narration payloads
   or error messages; database or audit files readable by other local users.
+  Since schema v11 every `cpassword` value is redacted at ingest (no hash is
+  kept), so any `cpassword` value or copy found in a database, `-wal`/`-journal`
+  file, event payload or finding is a vulnerability, not a known limitation.
 - Web access-control bypass: Host allow-list, CSRF, loopback-trust, bearer
   token or permission checks that can be evaded.
 - Narration egress beyond what is documented (estate strings reaching the LLM
