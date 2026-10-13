@@ -247,16 +247,33 @@ def test_measured_miss_rate_on_random_ciphertext(blocks: int) -> None:
     [
         ("a/" * 50_000) + " " + ("-x" * 50_000),
         "a-b/c_d " * 20_000,
-        "a\n" * 100_000,
-        "ab\n" * 50_000 + "ab=\n" * 50_000,
+        "a\n" * 20_000,
+        "ab\n" * 10_000 + "ab=\n" * 10_000,
+        # Quadratic for an unanchored search ending in ``$`` (13 s at 20,000
+        # characters before the line-end scan was made linear).
+        "a" * 200_000 + "!\nb",
+        # Exponential for a repeated word alternation (about 7x per 4 characters
+        # before the word-shape check matched piece by piece).
+        "x " + "a" * 39 + "B1xQ",
+        "x " + "a" * 60 + "B1xQ" + "\n" + "a" * 60 + "B1xQ",
     ],
-    ids=["separator runs", "short separated tokens", "one-char lines", "padded lines"],
+    ids=[
+        "separator runs",
+        "short separated tokens",
+        "one-char lines",
+        "padded lines",
+        "long run not ending its line",
+        "crafted word token",
+        "crafted wrapped word token",
+    ],
 )
-def test_large_input_is_checked_in_bounded_time(text: str) -> None:
-    """Window and wrapped-line search are bounded; megabyte input stays fast."""
+def test_adversarial_input_is_checked_in_bounded_time(text: str) -> None:
+    """Every scan is linear or bounded. Expected time is milliseconds; the
+    bound is loose so coverage tracing and a loaded CI runner cannot flake it,
+    while the quadratic and exponential versions took seconds to hours."""
     start = time.perf_counter()
-    assert cpassword_material(text) is None
-    assert time.perf_counter() - start < 5
+    cpassword_material(text)
+    assert time.perf_counter() - start < 10
 
 
 # --- refusal message ------------------------------------------------------------

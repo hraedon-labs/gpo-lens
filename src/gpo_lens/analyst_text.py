@@ -84,8 +84,10 @@ _HINTS: dict[str, str] = {
 }
 
 # A base64 run (standard or URL-safe alphabet) with any trailing padding.
+# Every pattern here is matched with ``finditer``/``fullmatch`` only, never an
+# unanchored ``search`` ending in ``$`` (quadratic on a long run).
 _TOKEN = re.compile(r"[A-Za-z0-9+/_-]+(?:[ \t]*=)*")
-_LINE_END_TOKEN = re.compile(r"[A-Za-z0-9+/_-]+(?:[ \t]*=)*[ \t]*$")
+_TOKEN_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/_-")
 _HEX = re.compile(r"[0-9A-Fa-f]+")
 _SEPARATORS = "-_/"
 # Bounds on the extra candidates (the window search is quadratic in separators).
@@ -97,10 +99,9 @@ _MAX_SEPARATORS = 64
 _MAX_WRAPPED_LINES = 32
 # An identifier or path made of words: acronyms (``AD``), Capitalised words
 # (``To``, ``Secure``), lowercase words of two or more letters, digit runs and
-# separators.
-_WORD = r"[A-Z]{2,}(?![a-z])|[A-Z][a-z]+|[a-z]{2,}"
-_WORDY = re.compile(rf"(?:{_WORD}|[0-9]+|[-_/+.])+")
-_WORD_SEGMENT = re.compile(_WORD)
+# separators. Matched piece by piece (``finditer``), never as a repeated
+# alternation, which backtracks exponentially on a crafted token.
+_WORD_PIECE = re.compile(r"[A-Z]{2,}(?![a-z])|[A-Z][a-z]+|[a-z]{2,}|[0-9]+|[-_/+.]")
 _MIN_MEAN_WORD = 4
 _ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
@@ -208,10 +209,9 @@ def _wrapped(text: str) -> Iterator[str]:
     for i in range(len(lines) - 1):
         if sizes[i + 1] < 0:
             continue
-        match = _LINE_END_TOKEN.search(lines[i])
-        if match is None:
+        head = _line_end_token(lines[i])
+        if head is None:
             continue
-        head = match.group(0).strip()
         length = len(canonical(head))
         for j in range(i + 1, min(len(lines), i + 1 + _MAX_WRAPPED_LINES)):
             if sizes[j] < 0:
@@ -221,6 +221,21 @@ def _wrapped(text: str) -> Iterator[str]:
                 break
             if _block_length(length):
                 yield head + "".join(stripped[i + 1 : j + 1])
+
+
+def _line_end_token(line: str) -> str | None:
+    """The token (with any ``=`` padding) that ends *line*, or None. A linear
+    scan from the end."""
+    end = len(line.rstrip(" \t"))
+    stop = end
+    while stop and line[stop - 1] in "= \t":
+        stop -= 1
+    start = stop
+    while start and line[start - 1] in _TOKEN_CHARS:
+        start -= 1
+    if start == stop:
+        return None
+    return line[start:end]
 
 
 def _block_length(n: int) -> bool:
@@ -285,10 +300,17 @@ def _decodes_to_text(body: str) -> bool:
 
 def _word_shaped(token: str) -> bool:
     original = token.rstrip("= \t")
-    if not _WORDY.fullmatch(original):
+    position = 0
+    words: list[int] = []
+    for piece in _WORD_PIECE.finditer(original):
+        if piece.start() != position:
+            return False
+        position = piece.end()
+        if piece.group()[0].isalpha():
+            words.append(position - piece.start())
+    if position != len(original):
         return False
-    words = _WORD_SEGMENT.findall(original)
-    return bool(words) and sum(map(len, words)) >= _MIN_MEAN_WORD * len(words)
+    return bool(words) and sum(words) >= _MIN_MEAN_WORD * len(words)
 
 
 # --- existing rows (read-only) ----------------------------------------------------
