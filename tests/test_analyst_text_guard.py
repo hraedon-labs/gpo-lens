@@ -178,8 +178,7 @@ NOT_REFUSED = {
     ),
     "kb url": (
         "https://support.microsoft.com/en-us/topic/ms14-025-vulnerability-in-group-"
-        "policy-preferences-could-allow-elevation-of-privilege-may-13-2014-"
-        + str(_GUID)
+        "policy-preferences-could-allow-elevation-of-privilege-may-13-2014-" + str(_GUID)
     ),
     "wiki url": "https://wiki.example.test/display/SEC/GPO+Baseline+Exceptions?pageId=123456#R",
     "unc path": (

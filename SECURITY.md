@@ -64,8 +64,8 @@ In scope — vulnerabilities in gpo-lens itself, including:
   file, event payload or finding is a vulnerability, not a known limitation.
   Analyst-typed text is refused rather than redacted (see
   [Credentials in analyst-typed text](#credentials-in-analyst-typed-text)); a
-  path that stores or sends such text without the guard, or a GPP cpassword in
-  a common form that the guard misses, is in scope.
+  path that stores or sends such text without the guard, or a miss outside the
+  limits documented there, is in scope.
 - Web access-control bypass: Host allow-list, CSRF, loopback-trust, bearer
   token or permission checks that can be evaded.
 - Narration egress beyond what is documented (estate strings reaching the LLM

@@ -88,9 +88,10 @@ _TOKEN = re.compile(r"[A-Za-z0-9+/_-]+(?:[ \t]*=)*")
 _LINE_END_TOKEN = re.compile(r"[A-Za-z0-9+/_-]+(?:[ \t]*=)*[ \t]*$")
 _HEX = re.compile(r"[0-9A-Fa-f]+")
 _SEPARATORS = "-_/"
-# Affix windows are tried only inside bounded tokens (the work is quadratic in
-# separators). A GPP password is at most 127 UTF-16 characters, so ciphertext
-# never exceeds 344 base64 characters; the bounds leave generous room.
+# Bounds on the extra candidates (the window search is quadratic in separators).
+# GPP values are short (an 8-15 character password is 43 base64 characters);
+# 512 characters is 24 AES blocks (384 bytes, roughly a 190-character UTF-16
+# password).
 _MAX_WINDOW = 512
 _MAX_SEPARATORS = 64
 _MAX_WRAPPED_LINES = 32
