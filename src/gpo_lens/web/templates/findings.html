@@ -156,6 +156,7 @@
               <input type="hidden" name="return_lifecycle" value="{{ f_lifecycle }}">
               <input type="hidden" name="return_triage" value="{{ f_triage }}">
               <input type="hidden" name="return_page" value="{{ pag.page if pag else '' }}">
+              <p class="gp-triage-error" role="alert" hidden></p>
               <button type="submit" class="gp-btn primary">Save decision</button>
             </form>
           </details>
@@ -179,5 +180,8 @@
 
 {% if pag %}
 {{ pg.pagination(pag, f_base_qs) }}
+{% endif %}
+{% if can_triage %}
+<script src="{{ url_for('static', path='triage-form.js') }}"></script>
 {% endif %}
 {% endblock %}

@@ -228,6 +228,7 @@ def test_no_secret_cli_read_commands_do_not_redact(tmp_path, capsys, monkeypatch
             "resultant": ["resultant", sid, "--dn", "cn=reader,dc=lab,dc=example,dc=com"],
             "ask": ["ask", "broken refs", "--no-narrate"],
             "explain-setting": ["explain-setting", "Lab"],
+            "analyst-text-check": ["analyst-text-check"],
         }
     )
     events_file = tmp_path / "events.ndjson"

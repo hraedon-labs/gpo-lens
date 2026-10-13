@@ -23,6 +23,7 @@ the diff; a rule with no entry in ``BASELINE_REASONS`` cannot be baselined.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -183,8 +184,9 @@ def test_acknowledge_a_finding_round_trip(page: Page, fresh_server: LiveServer) 
     review.locator("summary").click()
     form.locator("select[name=status]").select_option("acknowledged")
     form.locator("textarea[name=note]").fill("browser test: synthetic acknowledgement")
-    form.get_by_role("button", name="Save decision").click()
-    page.wait_for_url(re.compile(r"/findings(\?|$)"))
+    # triage-form.js posts with fetch and navigates once the decision is saved.
+    with page.expect_navigation(url=re.compile(r"/findings(\?|$)")):
+        form.get_by_role("button", name="Save decision").click()
 
     rows = fresh_server.query(events, finding_id)
     assert rows == [("acknowledged", "browser test: synthetic acknowledgement", "local-analyst")]
@@ -192,6 +194,52 @@ def test_acknowledge_a_finding_round_trip(page: Page, fresh_server: LiveServer) 
     row = page.locator("tr", has=page.locator(f'form[action$="/findings/{finding_id}/triage"]'))
     expect(row.locator(".gp-chip", has_text="acknowledged")).to_be_visible()
     assert health.problems == []
+
+
+def test_refused_note_keeps_the_draft_and_never_echoes_it(
+    page: Page, fresh_server: LiveServer
+) -> None:
+    """A note carrying GPP ciphertext is refused in place: the reason shows in
+    the form, the draft stays editable, nothing is stored or echoed."""
+    health = PageHealth(page)
+    _goto(page, fresh_server.url + "/findings")
+    review = page.locator("details.gp-triage").first
+    form = review.locator("form.gp-triage-form")
+    action = form.get_attribute("action")
+    assert action is not None
+    finding_id = int(re.search(r"/findings/(\d+)/triage", action).group(1))  # type: ignore[union-attr]
+    events = "SELECT action, note, actor FROM finding_triage_event WHERE occurrence_id = ?"
+    # Two random AES blocks, base64 without padding: the shape GPP writes.
+    secret = base64.b64encode(hashlib.sha256(b"browser-refusal").digest()).decode().rstrip("=")
+    draft = f"old local admin cpassword was {secret} - removed"
+
+    review.locator("summary").click()
+    form.locator("select[name=status]").select_option("acknowledged")
+    note = form.locator("textarea[name=note]")
+    note.fill(draft)
+    with page.expect_response(re.compile(r"/findings/\d+/triage$")) as refused:
+        form.get_by_role("button", name="Save decision").click()
+    assert refused.value.status == 400
+    assert secret not in refused.value.text()
+
+    error = form.locator(".gp-triage-error")
+    expect(error).to_be_visible()
+    expect(error).to_contain_text("looks like it contains a Group Policy Preferences cpassword")
+    expect(error).to_have_attribute("role", "alert")
+    assert secret not in error.inner_text()
+    expect(note).to_have_value(draft)
+    assert page.url == fresh_server.url + "/findings"
+    assert fresh_server.query(events, finding_id) == []
+
+    note.fill("old local admin password removed from Groups.xml")
+    with page.expect_navigation(url=re.compile(r"/findings(\?|$)")):
+        form.get_by_role("button", name="Save decision").click()
+    assert fresh_server.query(events, finding_id) == [
+        ("acknowledged", "old local admin password removed from Groups.xml", "local-analyst")
+    ]
+    # The refused POST is the only problem: its 400 and the browser's report of it.
+    assert health.problems, "the refusal should have been observed"
+    assert all("400" in problem for problem in health.problems), health.problems
 
 
 def _golden_zip() -> bytes:

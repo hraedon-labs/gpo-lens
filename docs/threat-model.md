@@ -104,6 +104,7 @@ it receives; physical access.
 |--------|------------|----------|
 | Other local users read the estate | DB and `-wal`/`-shm` chmod 0600 on every `init_db` and read-write open. POSIX only: `os.chmod` cannot express this on Windows, where the IIS installer grants the app-pool identity Modify on the install directory and relies on inherited NTFS ACLs. | `src/gpo_lens/store.py:619-645`; `src/gpo_lens/web/_helpers.py:109-118`; `tests/test_store.py` (`test_init_db_restricts_file_permissions_to_owner_only`, `test_init_db_retightens_permissions_on_existing_db`); `scripts/install-windows.ps1:867-875` |
 | Raw credential persisted | Since schema v11 ingest redacts every labelled `cpassword` value (attribute or key in any casing or namespace, `<cpassword>` element, inline or escaped, split across XML nodes) and chases canonical copies through descriptive fields and finding text; a copy in an identity field refuses the import (`CredentialInIdentityError`). The result is re-verified over the sanitized estate, the rows written and the database/`-wal`/`-shm`/`-journal` bytes; a residual refuses the import (`CpasswordResidualError`). Upgrading an older database scrubs stored values the same way. Ingest warnings, logs, errors and `audit.log` are scrubbed against every discovered value. The finding stores `****` only; no hash is kept. | `src/gpo_lens/redaction.py`; `src/gpo_lens/ingest.py`; `src/gpo_lens/store.py` (v11 migration); `src/gpo_lens/detection/_hygiene.py` (`mask_cpassword`); `tests/test_cpassword_redaction.py`; `tests/test_cpassword_diagnostics.py`; `tests/test_cpassword_review_probes.py`; `CHANGELOG.md` (Security, Upgrade notes) |
+| Analyst types or pastes a credential into stored text | Ingest redaction cannot recognise a value typed later (no hash is kept), so the triage note and rationale go through `analyst_text.check_analyst_text`, which refuses — never rewrites — a labelled cpassword in any form ingest recognises or an unlabelled GPP-ciphertext-shaped token; the web form answers 400 and nothing is written. A test enumerates every analyst-text write path. Older rows are listed by id (never value) by `gpo-lens analyst-text-check`. Limits: see R1. | `src/gpo_lens/analyst_text.py`; `src/gpo_lens/findings.py` (`triage_finding`, `append_triage_event`); `src/gpo_lens/web/routes/findings.py`; `tests/test_analyst_text_guard.py`; `SECURITY.md` (Credentials in analyst-typed text) |
 | Ingest lock file abuse | Created 0600. | `src/gpo_lens/web/app.py:190` |
 
 ### B5 — Web server
@@ -135,10 +136,10 @@ on the path:
 | Path | What is sent | Evidence |
 |------|--------------|----------|
 | Web `/explain` (page explanations) | Only an allowlisted projection: integer counts with fixed labels, snapshot/run IDs and a fixed caveat. The payload is HMAC-signed with a per-process random key, expires after one hour and is capped at 12,000 bytes; the model may only return fact IDs, which are fact-checked against the payload. No estate string is sent. | `src/gpo_lens/web/page_narration.py:62-150,154`; `tests/test_page_narration.py` (`test_tampering_never_reaches_narration`, `test_fact_check_rejects_claims_absent_from_payload`, `test_safe_projection_validation_and_bounds`) |
-| Web `/ask` | The user's question only (control characters stripped, 500 characters), framed by random delimiters, for routing to a deterministic query. Query results are not sent. | `src/gpo_lens/web/_helpers.py:132-137`; `src/gpo_lens/narration.py:232-237`; `tests/test_page_narration.py::test_ask_does_not_send_serialized_results_to_narration` |
-| CLI `ask` | The question **and the deterministic query result**, passed through `safe_data` with the estate's discovered secrets. Estate strings (GPO names, setting values) leave the host. | `src/gpo_lens/cli/_narration.py:72-84` |
-| CLI `doctor --explain` | The doctor findings list through `safe_data`. Estate strings leave the host. | `src/gpo_lens/cli/_hygiene.py:264`; `src/gpo_lens/narration.py:268-274` |
-| CLI `explain-setting` | The setting identity, truncated to 500 characters. | `src/gpo_lens/cli/_narration.py:141` |
+| Web `/ask` | The user's question only (control characters stripped, 500 characters), framed by random delimiters, for routing to a deterministic query. Query results are not sent. A question carrying cpassword material is refused (400) before it is sent or stored in `audit.narrate`. | `src/gpo_lens/web/_helpers.py:132-137`; `src/gpo_lens/narration.py:232-237`; `tests/test_page_narration.py::test_ask_does_not_send_serialized_results_to_narration`; refusal: `src/gpo_lens/web/routes/ask.py:93-100`, `tests/test_analyst_text_guard.py::test_web_ask_refuses_before_storing_or_sending` |
+| CLI `ask` | The question **and the deterministic query result**, passed through `safe_data` with the estate's discovered secrets. Estate strings (GPO names, setting values) leave the host. A question carrying cpassword material is refused (exit 1) before anything is sent. | `src/gpo_lens/cli/_narration.py:43,87-99` |
+| CLI `doctor --explain` | The doctor findings list through `safe_data`. Estate strings leave the host. | `src/gpo_lens/cli/_hygiene.py:267`; `src/gpo_lens/narration.py:268-274` |
+| CLI `explain-setting` | The setting identity, truncated to 500 characters; refused (exit 1) if it carries cpassword material. | `src/gpo_lens/cli/_narration.py:155-158` |
 | CLI `events` to Splunk HEC | Change events. Opt-in via `GPO_LENS_HEC_URL` + `GPO_LENS_HEC_TOKEN`; warns on `http://`; `GPO_LENS_HEC_VERIFY_TLS=false` disables certificate verification. | `src/gpo_lens/sinks.py:84-106,123-126` |
 
 The LLM endpoint accepts `http://` as well as `https://`
@@ -168,6 +169,17 @@ These are known and not mitigated by code at this commit.
   (from 8 characters inside the carrying setting); a short or word-like value
   is redacted only where it is labelled. A crafted export with a copy in an
   identity field can block its own import (it is refused, never stored).
+  Analyst-typed text (triage notes and rationales, Ask questions, the
+  `explain-setting` identity) is checked by `analyst_text.check_analyst_text`
+  and refused when it carries a labelled value or an unlabelled
+  GPP-ciphertext-shaped token. That check is heuristic (measured rates in
+  `SECURITY.md`): it misses about 0.13 % of one-block values (passwords up to 7
+  characters) and a value deliberately broken up or glued to other letters,
+  and it refuses base64 digests of 16/32/48 bytes as a known false positive.
+  Notes and questions stored before v1.5.0 are not rewritten (the triage log is
+  append-only); `gpo-lens analyst-text-check` lists their ids for the operator.
+  Search terms are not stored by gpo-lens but travel in URLs, so a reverse
+  proxy's access log may record them.
 - **R2 — No per-user identity in the app.** Every accepted caller on the
   loopback path is the same principal with view, ingest, delete, triage and
   narrate rights (`src/gpo_lens/web/auth.py:61-67`). Remote access control is

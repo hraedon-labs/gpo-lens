@@ -50,6 +50,7 @@ CORE_MODULES: tuple[str, ...] = (
     "finding_model",
     "_legacy_findings",
     "redaction",
+    "analyst_text",
 )
 
 FORBIDDEN_PACKAGES: tuple[str, ...] = ("narration", "web")

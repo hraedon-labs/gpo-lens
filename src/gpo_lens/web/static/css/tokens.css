@@ -761,6 +761,10 @@ a.gp-ind:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; 
 }
 .gp-triage-meta { margin-top: 6px; font-size: var(--fs-xs); color: var(--text-3); }
 .gp-triage-note { margin-top: 4px; color: var(--text-2); overflow-wrap: anywhere; }
+.gp-triage-error {
+  margin: 0; padding: 6px 8px; border-left: 3px solid var(--crit); border-radius: 4px;
+  background: var(--crit-soft); color: var(--text); overflow-wrap: anywhere;
+}
 
 /* ---------- Plan 025 WI-3: Explore / Tools directory pages ---------- */
 .gp-dir-intro { max-width: 68ch; margin: 0 0 20px; }

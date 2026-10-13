@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from gpo_lens.analyst_text import check_analyst_text
 from gpo_lens.finding_model import (
     FINGERPRINT_VERSION,
     ClaimLevel,
@@ -176,6 +177,8 @@ def triage_finding(
     """
     if status not in ("open", "acknowledged", "accepted_risk"):
         raise ValueError(f"invalid triage status: {status!r}")
+    # Refused before anything is read or written; the error never echoes it.
+    check_analyst_text(note, "note")
     note = (note or "")[:2000]
     actor = (actor or "unknown")[:256]
 
@@ -749,7 +752,15 @@ def append_triage_event(
     *rationale* is required for ``accepted_risk`` (Plan 024 §8: "Accepted risk
     requires actor, rationale, timestamp, and optional expiry").
     *expires_at* is the optional expiry for risk acceptance.
+
+    *note* and *rationale* are analyst-typed: text carrying GPP cpassword
+    material is refused with
+    :class:`~gpo_lens.analyst_text.CpasswordInAnalystTextError` (a
+    ``ValueError``) before anything is written, because this log is
+    append-only.
     """
+    check_analyst_text(note, "note")
+    check_analyst_text(rationale, "rationale")
     if action not in _VALID_TRIAGE_ACTIONS:
         raise ValueError(f"invalid triage action: {action!r}")
     if action == "accepted_risk" and not rationale.strip():
@@ -777,6 +788,9 @@ def append_triage_event(
 
     note = (note or "")[:2000]
     rationale = (rationale or "")[:2000]
+    # Truncation can cut a token into a different shape: check what is stored.
+    check_analyst_text(note, "note")
+    check_analyst_text(rationale, "rationale")
     actor = (actor or "unknown")[:256]
     expires_iso = expires_at.isoformat() if expires_at else None
 

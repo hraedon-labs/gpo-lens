@@ -145,6 +145,16 @@ No hash is kept, so replacing one cpassword with another is not a visible
 change in diffs or events; the finding persists on the GPO until the attribute
 is removed, which is the remediation.
 
+Text an analyst types after ingest cannot be redacted against a value the
+database no longer holds, so a triage note or rationale, an Ask question and an
+`explain-setting` identity that carry a cpassword are **refused, not stored or
+sent**: a labelled value in any form ingest recognises, or an unlabelled token
+shaped like GPP ciphertext. The refusal names the field and the reason, never
+the value; the triage form keeps the draft so the analyst can remove it.
+`gpo-lens analyst-text-check` lists the ids of older rows that would now be
+refused (read-only). False-positive and miss rates are in
+[`SECURITY.md`](SECURITY.md#credentials-in-analyst-typed-text).
+
 The first read-write open by this release (`ingest`, `serve` or a web upload)
 scrubs databases written by earlier releases: it discovers values in every
 column whatever its declared type or the value's storage class (BLOBs are read
@@ -228,6 +238,7 @@ uv run gpo-lens export --help
 | `gpp-tasks` / `gpp-groups` | Scheduled-task configuration / local-group membership changes |
 | `resultant <principal_sid>` | Supported snapshot principal merge model, with explicit unevaluated gates |
 | `events` / `events-export` | Read snapshot change events / send NDJSON or optional Splunk HEC output |
+| `analyst-text-check` | Read-only: ids of stored triage notes, rationales and Ask questions that carry cpassword material (never the values) |
 | `serve --open` | Start the local web UI |
 
 ## Machine-readable output

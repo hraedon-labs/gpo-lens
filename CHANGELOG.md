@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-Draft **v1.5.0** — release target and date TBD by the owner (it carries a
-one-way schema migration, so a patch number was not assumed).
+Draft **v1.5.0** — the release number is confirmed by the owner (it carries a
+one-way schema migration); the date is set when it is cut.
 
 ### Security
 
@@ -44,6 +44,37 @@ one-way schema migration, so a patch number was not assumed).
   count hits and the finding lifecycle tracks presence per GPO, and any
   cpassword is already compromised, so rotation is not a remediation and is
   not shown as a change.
+- **Analyst-typed text carrying a GPP cpassword is refused, not stored.**
+  Ingest redaction cannot know a value typed after it, so a triage note or
+  risk-acceptance rationale, an Ask question (stored in the `audit.narrate`
+  event and sent to the model) and the `explain-setting` identity sent to the
+  model now pass one guard, `gpo_lens.analyst_text.check_analyst_text`, before
+  they are stored or sent. It refuses — never rewrites — text holding a
+  labelled cpassword in any form the ingest redactor recognises (inline,
+  escaped, JSON, XML element, split across XML nodes, character references)
+  or an unlabelled token with the shape the estate-wide copy chaser uses
+  (base64 of whole AES blocks, at least 22 characters, compared
+  canonically), minus shapes Windows-written ciphertext cannot have (pure
+  hex, one letter case, non-canonical base64, base64 of text, word-built
+  identifiers and paths). The web triage form and Ask answer `400` with the
+  reason ("looks like a Group Policy Preferences cpassword; remove it — the
+  value is a recoverable credential"); the triage form keeps the draft in
+  place (a small script submits it without leaving the page), and the CLI
+  exits 1. Nothing echoes the value: the HTTP body, `audit.log` (a `triage`
+  `refused` entry), the `audit.narrate` event (question stored empty,
+  outcome `refused`) and exception text name the field only. Measured
+  false-positive and miss rates, and the known false positives (base64
+  digests of 16/32/48 bytes; prose such as `cpassword: removed`), are in
+  `SECURITY.md`. A test enumerates every analyst-text write path (SQL
+  writes, event writes, web form fields, model calls), so a new one fails
+  until it is guarded or classified.
+
+### Added
+
+- `gpo-lens analyst-text-check [--json]`: read-only (`mode=ro`) list of the
+  ids of stored triage notes, rationales and Ask questions that the guard
+  would now refuse — table, column, row id and kind of match, never the
+  value. Exits 1 when it lists any row.
 
 ### Changed
 
@@ -75,6 +106,10 @@ one-way schema migration, so a patch number was not assumed).
   occurrences continue rather than restart. Allow free disk space about the
   size of the database. Read-only commands do not migrate.
 - Backups and original exports made before upgrading still contain the values.
+- Triage history and audit events written before this release are not
+  rewritten: the triage log is append-only history. Run
+  `gpo-lens analyst-text-check` to list the ids of rows that would now be
+  refused and decide per row (back up the database before editing it).
 - A schema-v11 database cannot be opened by v1.4.0 or earlier.
 
 ## v1.4.0 — 2026-10-06

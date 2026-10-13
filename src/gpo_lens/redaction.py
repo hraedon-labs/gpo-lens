@@ -245,7 +245,13 @@ def normalized_values(values: Iterable[str]) -> set[str]:
     return {v for v in out if v and v != marker}
 
 
-def _ciphertext_shaped(value: str) -> bool:
+def ciphertext_shaped(value: str) -> bool:
+    """Could *value* be GPP ciphertext? Base64 of whole 16-byte AES blocks, at
+    least :data:`UNBOUNDED_CHASE_LENGTH` characters, compared canonically.
+
+    The estate-wide :class:`Chaser` and the analyst-text guard
+    (``gpo_lens.analyst_text``) share this predicate.
+    """
     body = canonical(value)
     if len(body) < UNBOUNDED_CHASE_LENGTH or not _B64_BODY.fullmatch(body):
         return False
@@ -259,7 +265,7 @@ def chase_eligible(value: str) -> bool:
     body = canonical(value)
     if len(body) < MIN_CHASE_LENGTH or body in canonical(CPASSWORD_MARKER):
         return False
-    if _ciphertext_shaped(body):
+    if ciphertext_shaped(body):
         return True
     return any(c.isalpha() for c in body) and any(c.isdigit() for c in body)
 
@@ -287,7 +293,7 @@ class Chaser:
         self.local = local
         self.values: tuple[str, ...] = tuple(sorted(eligible, key=lambda v: (-len(v), v)))
         self.exact = frozenset(normalized) if local else frozenset()
-        self._unbounded = frozenset(v for v in eligible if not local and _ciphertext_shaped(v))
+        self._unbounded = frozenset(v for v in eligible if not local and ciphertext_shaped(v))
         # JSON text escapes quotes and backslashes; such values need a walk.
         self.walk_needed = any(
             any(c in v for c in '"\\') or not v.isprintable() or not v.isascii()

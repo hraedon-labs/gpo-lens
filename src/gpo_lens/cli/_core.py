@@ -25,6 +25,7 @@ from gpo_lens.cli._export import EXPORT_VIEWS, cmd_export
 from gpo_lens.cli._helpers import DEFAULT_DB, _begin_output, _end_output, _set_json_kind
 from gpo_lens.cli._helpers import _safe_print as print
 from gpo_lens.cli._hygiene import (
+    cmd_analyst_text_check,
     cmd_blocked,
     cmd_broken_refs,
     cmd_cpassword,
@@ -495,6 +496,14 @@ _COMMANDS: list[CliCommand] = [
                 help="Add an LLM-powered plain-English explanation of findings",
             ),
         ],
+    ),
+    CliCommand(
+        name="analyst-text-check",
+        func=cmd_analyst_text_check,
+        help=(
+            "List ids of stored triage notes, rationales and Ask questions that "
+            "carry GPP cpassword material (read-only; never prints values)"
+        ),
     ),
     CliCommand(
         name="report",
