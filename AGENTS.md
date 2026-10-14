@@ -76,15 +76,20 @@ narrates facts the core computed. See `README.md` for the full charter.
   Schema v11 scrubs older databases, verifies by rediscovery (rolling back on
   a residual), and purges free pages (`store._scrub_cpassword_at_rest`,
   `_purge_free_pages`).
-- **Analyst-typed text is refused, never rewritten, when it carries a
-  cpassword.** Ingest redaction cannot know a value typed after it, so every
-  path that stores or sends analyst text (triage note and rationale, the Ask
-  question, the `explain-setting` identity sent to the model) calls
-  `analyst_text.check_analyst_text` first. `tests/test_analyst_text_guard.py`
-  enumerates the write paths (SQL writes to `analyst_text.ANALYST_TEXT_COLUMNS`,
-  `append_event` call sites, web `Form` fields, LLM calls): a new one fails it
-  until it is guarded or classified there. Refusals name the field, never the
-  value; `gpo-lens analyst-text-check` lists ids of older rows (read-only).
+- **Operator-supplied text is refused, never rewritten, when it carries a
+  cpassword.** Ingest redaction cannot know a value supplied after it, so every
+  path that stores or sends such text (triage note, rationale and actor, the
+  Ask question, event `principal`s, the `explain-setting` identity sent to the
+  model, a forwarded user name) calls `analyst_text.check_analyst_text` (or
+  `valid_principal_name`) first, on `checked_slice(...)` of what it keeps. The
+  guard is total: it returns or raises `CpasswordInAnalystTextError`.
+  `tests/test_analyst_text_guard.py` inventories write paths and request
+  sources (SQL writes to `ANALYST_TEXT_COLUMNS` and `events`, `append_event`
+  call sites and payload keys, web inputs including `Header`, raw
+  header/cookie/query reads, LLM calls) and checks each guarded field: a new
+  one fails it until it is guarded or classified there. It is a heuristic; read
+  its blind-spot list. Refusals name the field, never the value;
+  `gpo-lens analyst-text-check` lists ids of older rows (read-only).
 
 ## Build / test / lint
 

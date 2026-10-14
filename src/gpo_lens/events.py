@@ -9,6 +9,8 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
 
+from gpo_lens.analyst_text import ANALYST_TEXT_EVENT_FIELDS, check_analyst_text
+
 
 def init_events_table(conn: sqlite3.Connection) -> None:
     conn.execute(
@@ -52,6 +54,18 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _guard_payload(event_type: str, payload: object) -> None:
+    """Refuse operator-supplied payload fields (the Ask question, a principal
+    name) that carry GPP cpassword material: the event log is hash-chained
+    history and is exported to sinks, so nothing is written instead."""
+    if not isinstance(payload, dict):
+        return
+    for kind, field in ANALYST_TEXT_EVENT_FIELDS:
+        value = payload.get(field)
+        if (kind == "*" or kind == event_type) and isinstance(value, str):
+            check_analyst_text(value, field)
+
+
 def append_event(
     conn: sqlite3.Connection,
     event_type: str,
@@ -60,6 +74,7 @@ def append_event(
     *,
     commit: bool = True,
 ) -> int:
+    _guard_payload(event_type, payload)
     ts = datetime.now(UTC).isoformat()
     payload_str = json.dumps(payload, sort_keys=True)
     if not conn.in_transaction:
@@ -84,6 +99,8 @@ def append_events(
     schema_version: int = 1,
     commit: bool = True,
 ) -> list[int]:
+    for event_type, payload in events:
+        _guard_payload(event_type, payload)
     ts = datetime.now(UTC).isoformat()
     if not conn.in_transaction:
         conn.execute("BEGIN IMMEDIATE")

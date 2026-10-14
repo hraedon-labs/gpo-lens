@@ -44,37 +44,55 @@ one-way schema migration); the date is set when it is cut.
   count hits and the finding lifecycle tracks presence per GPO, and any
   cpassword is already compromised, so rotation is not a remediation and is
   not shown as a change.
-- **Analyst-typed text carrying a GPP cpassword is refused, not stored.**
-  Ingest redaction cannot know a value typed after it, so a triage note or
-  risk-acceptance rationale, an Ask question (stored in the `audit.narrate`
-  event and sent to the model) and the `explain-setting` identity sent to the
-  model now pass one guard, `gpo_lens.analyst_text.check_analyst_text`, before
-  they are stored or sent. It refuses — never rewrites — text holding a
-  labelled cpassword in any form the ingest redactor recognises (inline,
-  escaped, JSON, XML element, split across XML nodes, character references)
-  or an unlabelled token with the shape the estate-wide copy chaser uses
-  (base64 of whole AES blocks, at least 22 characters, compared
-  canonically), minus shapes Windows-written ciphertext cannot have (pure
-  hex, one letter case, non-canonical base64, base64 of text, word-built
-  identifiers and paths). The web triage form and Ask answer `400` with the
-  reason ("looks like a Group Policy Preferences cpassword; remove it — the
-  value is a recoverable credential"); the triage form keeps the draft in
-  place (a small script submits it without leaving the page), and the CLI
-  exits 1. Nothing echoes the value: the HTTP body, `audit.log` (a `triage`
-  `refused` entry), the `audit.narrate` event (question stored empty,
-  outcome `refused`) and exception text name the field only. Measured
-  false-positive and miss rates, and the known false positives (base64
-  digests of 16/32/48 bytes; prose such as `cpassword: removed`), are in
-  `SECURITY.md`. A test enumerates every analyst-text write path (SQL
-  writes, event writes, web form fields, model calls), so a new one fails
-  until it is guarded or classified.
+- **Operator-supplied text carrying a GPP cpassword is refused, not stored.**
+  Ingest redaction cannot know a value supplied after it, so a triage note or
+  risk-acceptance rationale, the triage actor, an Ask question (stored in the
+  `audit.narrate` event and sent to the model), the `principal` of every audit
+  event and the `explain-setting` identity sent to the model now pass one
+  guard, `gpo_lens.analyst_text.check_analyst_text`, before they are stored or
+  sent. It refuses — never rewrites — text holding a labelled cpassword in any
+  form the ingest redactor recognises (inline, escaped, JSON, XML element,
+  split across XML nodes, character references), an unlabelled token with the
+  shape the estate-wide copy chaser uses (base64 of whole AES blocks, at least
+  22 characters, compared canonically; also wrapped across lines with prose
+  before and after it), minus shapes Windows-written ciphertext cannot have
+  (pure hex, one letter case, non-canonical base64, base64 of text, word-built
+  identifiers and paths), and structure it cannot inspect (nesting beyond the
+  redactor's recursion limit, XML entity declarations). The guard is total, so
+  crafted input gets a refusal, never an HTTP 500. The web triage form and Ask
+  answer `400` with the reason ("looks like a Group Policy Preferences
+  cpassword; remove it — the value is a recoverable credential"); the triage
+  form keeps the draft in place (a small script submits it without leaving the
+  page), and the CLI exits 1. Nothing echoes the value: the HTTP body,
+  `audit.log` (a `triage` `refused` entry), the `audit.narrate` event (question
+  stored empty, outcome `refused`) and exception text name the field only.
+  Callers check what they store plus a 1,024-character margin past the
+  truncation, so the work per request is bounded. Measured miss and
+  false-positive rates, and the known false positives (base64 of any whole
+  number of AES blocks, including base64 digests and PEM certificate lines;
+  prose such as `cpassword: removed`), are in `SECURITY.md`. A static test
+  inventories write paths and request sources (SQL and event writes with their
+  payload keys, web inputs including headers, raw header/cookie/query reads,
+  model calls) and fails until a new one is guarded field by field or
+  classified; it is a heuristic, and its blind spots are listed in the test.
+- **Forwarded user names are validated.** With
+  `GPO_LENS_FORWARDED_USER_HEADER` set, the header names the principal, which
+  is stored as the triage actor and in audit events and logged to
+  `audit.log`. It must now be an account name — `user`, `user@domain` or
+  `DOMAIN\user`, at most 256 characters — with no cpassword material;
+  anything else is refused with `401` (previously control characters were
+  stripped and the value cut at 256 characters). `audit.log` writes a name
+  that carries cpassword material as `[refused principal name]`.
 
 ### Added
 
 - `gpo-lens analyst-text-check [--json]`: read-only (`mode=ro`) list of the
-  ids of stored triage notes, rationales and Ask questions that the guard
-  would now refuse — table, column, row id and kind of match, never the
-  value. Exits 1 when it lists any row.
+  ids of stored triage notes, rationales and actors, Ask questions and event
+  principals that the guard would now refuse — table, column, row id and kind
+  of match, never the value. Exits 1 when it lists any row.
+- `scripts/measure_analyst_text_guard.py`: reproducible measurement of the
+  guard's miss rate on random GPP-shaped ciphertext (the figures in
+  `SECURITY.md`).
 
 ### Changed
 
@@ -110,6 +128,10 @@ one-way schema migration); the date is set when it is cut.
   rewritten: the triage log is append-only history. Run
   `gpo-lens analyst-text-check` to list the ids of rows that would now be
   refused and decide per row (back up the database before editing it).
+- Deployments using `GPO_LENS_FORWARDED_USER_HEADER`: a forwarded name that is
+  not an account name (for example over 256 characters, or with `+`, `/`, `=`,
+  `,` or `<`) now gets `401` instead of being cut or passed through. IIS
+  `{LOGON_USER}` (`DOMAIN\user`) is accepted.
 - A schema-v11 database cannot be opened by v1.4.0 or earlier.
 
 ## v1.4.0 — 2026-10-06

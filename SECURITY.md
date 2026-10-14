@@ -62,7 +62,8 @@ In scope — vulnerabilities in gpo-lens itself, including:
   Since schema v11 every `cpassword` value is redacted at ingest (no hash is
   kept), so any `cpassword` value or copy found in a database, `-wal`/`-journal`
   file, event payload or finding is a vulnerability, not a known limitation.
-  Analyst-typed text is refused rather than redacted (see
+  Operator-supplied text (triage notes, Ask questions, forwarded user names)
+  is refused rather than redacted (see
   [Credentials in analyst-typed text](#credentials-in-analyst-typed-text)); a
   path that stores or sends such text without the guard, or a miss outside the
   limits documented there, is in scope.
@@ -90,25 +91,40 @@ Out of scope (welcome as regular issues):
 ## Credentials in analyst-typed text
 
 Ingest redacts every `cpassword` value and keeps no hash or fingerprint of one,
-so nothing at rest can recognise a value an analyst types or pastes later. Every
-path that stores or sends analyst-typed text therefore passes one guard,
+so nothing at rest can recognise a value an operator types or pastes later. The
+paths below that store or send operator-supplied text pass one guard,
 `gpo_lens.analyst_text.check_analyst_text`, which **refuses** (never rewrites)
 the text:
 
 | Path | Stored or sent | On refusal |
 |------|----------------|------------|
-| Web triage form (`POST /findings/{id}/triage`) and `findings.triage_finding` / `append_triage_event` | `finding_triage_event.note`, `.rationale` (append-only) | `400` with the reason; nothing written; `audit.log` records `triage` / `refused` with the field name. The form keeps the draft in place (a script submits it without leaving the page; without JavaScript the browser shows the 400 page). |
+| Web triage form (`POST /findings/{id}/triage`) and `findings.triage_finding` / `append_triage_event` | `finding_triage_event.note`, `.rationale`, `.actor` (append-only) | `400` with the reason; nothing written; `audit.log` records `triage` / `refused` with the field name. The form keeps the draft in place (a script submits it without leaving the page; without JavaScript the browser shows the 400 page). |
 | Web Ask (`POST /ask`) | the `audit.narrate` event, and the model provider | `400` page with the reason and an empty question box; the model is not called; the event records `"question": ""`, outcome `refused` |
 | CLI `ask` | the model provider | exit 1, reason on stderr, model not called |
 | CLI `explain-setting` (model fallback) | the model provider | exit 1, reason on stderr, model not called |
+| Forwarded-user header (`GPO_LENS_FORWARDED_USER_HEADER`) | becomes the principal name: triage `actor`, the `principal` of audit events, `audit.log` | the name must be an account name (`user`, `user@domain` or `DOMAIN\user`, at most 256 characters; letters, digits, `.`, `-`, `_`, `'`, `$` and inner spaces only) with no cpassword material, or the request is refused with `401`; the value is never echoed |
+| Event log (`events.append_event` / `append_events`) | `payload.question` of `audit.narrate`, `payload.principal` of every event | `CpasswordInAnalystTextError`; nothing written (defence in depth behind the rows above) |
+| `audit.log` | the principal name | a name carrying cpassword material is written as `[refused principal name]` (defence in depth) |
 
 The refusal names the field and the reason ("looks like it contains a Group
 Policy Preferences cpassword; remove it — the value is a recoverable
-credential…"), never the value or any part of it. `tests/test_analyst_text_guard.py`
-enumerates every write path from the source (SQL writes to the triage tables,
-`append_event` call sites, web `Form`/`File` fields, model calls): a new one fails
-the test until it is guarded or classified. Search terms and filters are not
-stored by gpo-lens; they appear in URLs, so a reverse proxy's access log may
+credential…"), never the value or any part of it. Callers check what they
+store or send plus 1,024 characters past a truncation point
+(`analyst_text.checked_slice`), so a value cut by the 2,000-character note limit
+is still refused while the work per request stays bounded; text beyond that is
+discarded, never stored.
+
+`tests/test_analyst_text_guard.py` keeps a static inventory of write paths and
+request sources: SQL writes to the triage tables and the event log, dynamic SQL,
+`append_event` call sites and their payload keys, model calls, declared web
+inputs (`Form`/`File`/`Body`/`Header`/`Query`/`Cookie`), POST-route parameters,
+raw `headers`/`cookies`/`query_params` reads and request body reads. Each must
+be guarded field by field before its sink, or classified with a reason, or the
+test fails. It is a heuristic, not dataflow analysis; its blind spots (SQL
+assembled outside string literals, values renamed before a sink, sinks reached
+through helpers, new tables nobody listed, writes outside SQLite/events/
+`audit.log`/model calls) are listed in the test. Search terms and filters are
+not stored by gpo-lens; they appear in URLs, so a reverse proxy's access log may
 record them, which the app cannot refuse.
 
 **What is refused.** (a) A labelled cpassword in any form the ingest redactor
@@ -118,48 +134,72 @@ word split across XML nodes, character references. `cpassword=""` and the
 redaction marker carry no value and pass. (b) An unlabelled token with the
 shape the ingest copy chaser uses (`redaction.ciphertext_shaped`: base64 of
 whole 16-byte AES blocks, at least 22 characters, after removing whitespace,
-mapping URL-safe base64 to standard and stripping `=` padding), also when it is
-wrapped across lines or follows `pw-` or a path separator — unless it has a
-shape Windows-written ciphertext cannot have: pure hex; one letter case only;
+mapping URL-safe base64 to standard and stripping `=` padding). Tokens are also
+tried wrapped across lines — a token ending a line, joined with following
+one-token lines and with the token that starts the next line, so prose may come
+before and after the value — and between `-`, `_` and `/` inside a token
+(`pw-<value>`, `/var/<value>/x`). A candidate is let through when it has a shape
+Windows-written ciphertext cannot have: pure hex; one letter case only;
 non-canonical base64 (unused bits of the last character set); base64 that
 decodes to printable ASCII or to at least a quarter NUL bytes (UTF-16 text,
 e.g. a PowerShell `-EncodedCommand`); or an identifier or path built from words
 (CamelCase, kebab, snake or `/`-separated, word segments averaging at least four
-letters).
+letters). (c) Text the guard cannot inspect fully is refused as
+*uninspectable*: structure nested beyond the redactor's recursion limit, or XML
+the safe parser rejects for another reason than not being XML (entity
+declarations, external references). The guard is total: it returns or raises
+`CpasswordInAnalystTextError`, so a crafted input cannot turn a refusal into an
+HTTP 500.
 
-**Measured behaviour** (2026-10-13, `cpassword_material` at this commit):
+**Measured behaviour** (2026-10-13). Miss rates are reproducible with
+`python scripts/measure_analyst_text_guard.py` (fixed seeds, 200,000 samples per
+size; the tests run the same function with fewer samples and pin upper bounds).
+The false-positive corpora are local files, not in this repository.
 
 | Input | Refused |
 |-------|---------|
-| Random GPP-shaped ciphertext, 1 AES block (passwords up to 7 characters), 200,000 samples | 99.868 % (264 missed: random strings that happen to look word-built) |
-| 2 blocks (8–15 characters), 200,000 samples | 99.9985 % (3 missed) |
-| 3 and 4 blocks, 200,000 samples each | 100 % |
+| Random GPP-shaped ciphertext, 1 AES block (passwords up to 7 characters) | 99.88 % (241 of 200,000 missed: random strings that happen to look word-built) |
+| 2 blocks (8–15 characters) | 99.9995 % (1 missed) |
+| 3 and 4 blocks | 100 % |
 | GPO/AD/PKI project prose (23,666 unique paragraphs from this and sibling repositories) | 7 paragraphs (0.03 %) |
-| Technical Markdown (137,718 paragraphs, dense with file paths and random ids) | 126 (0.09 %), mostly `/`-separated paths with random-looking segments |
+| Technical Markdown (146,460 paragraphs, dense with file paths and random ids) | 137 (0.09 %), mostly `/`-separated paths with random-looking segments |
 | CPython 3.14 standard-library source (131,688 lines) | 2 |
-| Repository docs paragraphs that discuss cpassword (65) | 2, both quoting `cpassword="…"` |
 
-Hex digests (SHA-1/SHA-256/MD5/SHA-512, either case), certificate thumbprints,
-GUIDs with or without braces, SIDs, URLs, UNC and file paths, registry paths,
-distinguished names, setting names and cmdlets of exactly one block's length
-(`DisableIPSourceRouting`, `ConvertTo-SecureString`) and ordinary prose pass;
-the tests pin each case.
+Hex digests (SHA-1/SHA-256/MD5/SHA-512, either case), certificate thumbprints
+and serials, GUIDs with or without braces, SIDs, URLs, UNC and file paths,
+registry paths, distinguished names, event XML, setting names and cmdlets of
+exactly one block's length (`DisableIPSourceRouting`, `ConvertTo-SecureString`),
+hard-wrapped prose and ordinary prose pass; the tests pin each case.
 
-**Known false positives.** Base64 of any 16-, 32- or 48-byte value is
-indistinguishable from GPP ciphertext: a base64 MD5 or SHA-256 digest, a base64
-GUID, a random key or session token. Write digests in hex. Prose that puts a
-word straight after `cpassword:` or `cpassword=` (`cpassword: removed`) is an
-assignment to the ingest redactor too. The refusal message explains both.
+**Known false positives.**
+
+- Base64 of any whole number of AES blocks — 16, 32, 48, 64, 80, … bytes — is
+  indistinguishable from GPP ciphertext: a base64 MD5, SHA-256, SHA-384 or
+  SHA-512 digest, a base64 GUID, a random key or session token, and **any
+  64-character line of a PEM certificate** (48 bytes). Refer to a certificate
+  by its thumbprint or serial (hex) and write digests in hex.
+- Longer base64 blobs of other sizes can hold a block-length run between two
+  `/` (or `-`, `_`), which the window search refuses: measured about 0.1–0.5 %
+  of 20–24-byte values, 3–6 % at 40–56 bytes, 15 % at 100 bytes and 29 % at
+  200 bytes.
+- Prose that puts a word straight after `cpassword:` or `cpassword=`
+  (`cpassword: removed`) is an assignment to the ingest redactor too.
+- Deeply nested JSON or XML that mentions `cpassword`, and XML with entity
+  declarations, are refused as uninspectable.
+
+The refusal message explains each case.
 
 **Known limits.** The guard is for accidents, not a determined insider: a value
-deliberately broken up (spaces inside it, homoglyphs, re-encoding) or glued to
+deliberately broken up (spaces or zero-width characters inside it), re-encoded
+(percent- or entity-encoding, a Unicode look-alike in the label) or glued to
 other letters passes, as does the measured fraction of one-block values above.
 
 **Rows written before this guard** are not rewritten: the triage log is
 append-only history. `gpo-lens analyst-text-check` (read-only) lists the table,
-column and id of every stored note, rationale or Ask question the guard would
-now refuse, never the value, and exits 1 when it lists any; the operator
-decides what to do (back up the database before editing it).
+column and id of every stored note, rationale, triage actor, Ask question and
+event principal the guard would now refuse, never the value, and exits 1 when it
+lists any; the operator decides what to do (back up the database before editing
+it).
 
 ## Threat model
 

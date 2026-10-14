@@ -9,6 +9,8 @@ from enum import Enum
 
 from fastapi import Depends, Header, HTTPException, Request
 
+from gpo_lens.analyst_text import valid_principal_name
+
 
 class Permission(Enum):
     VIEW = "view"
@@ -83,13 +85,31 @@ def _forwarded_user(request: Request) -> str | None:
     wiring. The value only *names* the principal so audit-log entries carry
     the real operator instead of ``local-analyst``; it grants nothing beyond
     the loopback permission set.
+
+    The name is stored (``finding_triage_event.actor``, audit events) and
+    logged, so it must be an account name — ``user``, ``user@domain`` or
+    ``DOMAIN\\user``, at most 256 characters, with no GPP cpassword material
+    (:func:`gpo_lens.analyst_text.valid_principal_name`). Anything else is
+    refused with 401 (fail closed: a proxy sending something else is
+    misconfigured), and the value is never echoed.
     """
     header_name = os.environ.get("GPO_LENS_FORWARDED_USER_HEADER", "")
     if not header_name:
         return None
     raw = request.headers.get(header_name, "")
     cleaned = "".join(ch for ch in raw if ord(ch) >= 32).strip()
-    return cleaned[:256] or None
+    if not cleaned:
+        return None
+    if not valid_principal_name(cleaned):
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "The forwarded user name is not an account name (user, user@domain "
+                "or DOMAIN\\user, at most 256 characters); check the proxy's "
+                "forwarded-user header."
+            ),
+        )
+    return cleaned
 
 
 def _is_loopback(host: str | None) -> bool:

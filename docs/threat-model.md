@@ -93,7 +93,7 @@ it receives; physical access.
 | Symlink entries | Rejected from the header mode and again after write. | `src/gpo_lens/collection_zip.py:106-108,133-134` |
 | Decompression bomb / resource exhaustion | 500 MiB archive, 2 GiB expanded (counted on actual bytes, not headers), 1000:1 per-entry ratio, 120,000 members, 60,000 directories, 32 MiB of names, depth 24. Shared by CLI and web. | `src/gpo_lens/collection_zip.py:18-26,65-88,109-132`; `tests/test_collection_zip.py` (`test_shared_size_limits`, `test_ratio_limit_is_shared_with_web`, `test_expansion_cap_is_enforced_before_writing_beyond_budget`); `tests/test_review_zip_limits.py` |
 | Partial extraction left on disk after a failure | Every failure removes extracted children before re-raising; temporary directories are removed after ingest. | `src/gpo_lens/collection_zip.py:138-159,170-180`; `src/gpo_lens/web/routes/ingest.py:168-170`; `tests/test_collection_zip.py::test_cli_ingests_zip_and_removes_temporary_files` |
-| Oversized web upload / slow-drip upload | Streamed to disk with a 500 MiB cap; stops reading at the cap instead of draining. Non-upload POST bodies capped at 10 MiB by `Content-Length`. | `src/gpo_lens/web/_helpers.py:90-102`; `src/gpo_lens/web/app.py:454-472` |
+| Oversized web upload / slow-drip upload | Streamed to disk with a 500 MiB cap; stops reading at the cap instead of draining. Non-upload POST bodies capped at 10 MiB by `Content-Length`. | `src/gpo_lens/web/_helpers.py:90-102`; `src/gpo_lens/web/app.py:467-485` |
 | XML entity expansion / external entities | All untrusted XML is parsed with `defusedxml`. | `src/gpo_lens/ingest.py:17`; `src/gpo_lens/detection/_gpp.py:12`; `src/gpo_lens/admx_parser.py:34` |
 | Ambiguous archive (two estates) silently merged | Exactly one `AllGPOs.xml` is required. | `src/gpo_lens/collection_zip.py:162-167`; `tests/test_collection_zip.py::test_cli_rejects_missing_or_ambiguous_estate` |
 | Partial estate presented as complete | Coverage gaps from `gpo-inventory.json`, `collection-errors.json` and unreadable SYSVOL subtrees are persisted and surfaced as findings. | `AGENTS.md` "Coverage honesty"; `src/gpo_lens/ingest.py:1904,1965`; `tests/test_coverage.py` |
@@ -104,27 +104,27 @@ it receives; physical access.
 |--------|------------|----------|
 | Other local users read the estate | DB and `-wal`/`-shm` chmod 0600 on every `init_db` and read-write open. POSIX only: `os.chmod` cannot express this on Windows, where the IIS installer grants the app-pool identity Modify on the install directory and relies on inherited NTFS ACLs. | `src/gpo_lens/store.py:619-645`; `src/gpo_lens/web/_helpers.py:109-118`; `tests/test_store.py` (`test_init_db_restricts_file_permissions_to_owner_only`, `test_init_db_retightens_permissions_on_existing_db`); `scripts/install-windows.ps1:867-875` |
 | Raw credential persisted | Since schema v11 ingest redacts every labelled `cpassword` value (attribute or key in any casing or namespace, `<cpassword>` element, inline or escaped, split across XML nodes) and chases canonical copies through descriptive fields and finding text; a copy in an identity field refuses the import (`CredentialInIdentityError`). The result is re-verified over the sanitized estate, the rows written and the database/`-wal`/`-shm`/`-journal` bytes; a residual refuses the import (`CpasswordResidualError`). Upgrading an older database scrubs stored values the same way. Ingest warnings, logs, errors and `audit.log` are scrubbed against every discovered value. The finding stores `****` only; no hash is kept. | `src/gpo_lens/redaction.py`; `src/gpo_lens/ingest.py`; `src/gpo_lens/store.py` (v11 migration); `src/gpo_lens/detection/_hygiene.py` (`mask_cpassword`); `tests/test_cpassword_redaction.py`; `tests/test_cpassword_diagnostics.py`; `tests/test_cpassword_review_probes.py`; `CHANGELOG.md` (Security, Upgrade notes) |
-| Analyst types or pastes a credential into stored text | Ingest redaction cannot recognise a value typed later (no hash is kept), so the triage note and rationale go through `analyst_text.check_analyst_text`, which refuses — never rewrites — a labelled cpassword in any form ingest recognises or an unlabelled GPP-ciphertext-shaped token; the web form answers 400 and nothing is written. A test enumerates every analyst-text write path. Older rows are listed by id (never value) by `gpo-lens analyst-text-check`. Limits: see R1. | `src/gpo_lens/analyst_text.py`; `src/gpo_lens/findings.py` (`triage_finding`, `append_triage_event`); `src/gpo_lens/web/routes/findings.py`; `tests/test_analyst_text_guard.py`; `SECURITY.md` (Credentials in analyst-typed text) |
-| Ingest lock file abuse | Created 0600. | `src/gpo_lens/web/app.py:190` |
+| Operator types or pastes a credential into stored or sent text | Ingest redaction cannot recognise a value supplied later (no hash is kept), so the triage note, rationale and actor, the Ask question and the event `principal` go through `analyst_text.check_analyst_text`, which refuses — never rewrites — a labelled cpassword in any form ingest recognises, an unlabelled GPP-ciphertext-shaped token (also wrapped across lines with prose around it), or structure it cannot inspect; the web routes answer 400 and nothing is written. A forwarded-user header must be an account name with no such material or the request gets 401; `audit.log` masks a name that carries one. Callers check what they store plus a 1,024-character margin, so the work is bounded. A static test inventories write paths and request sources (a heuristic; its blind spots are listed in the test). Older rows are listed by id (never value) by `gpo-lens analyst-text-check`. Limits: see R1. | `src/gpo_lens/analyst_text.py`; `src/gpo_lens/findings.py` (`triage_finding`, `append_triage_event`); `src/gpo_lens/events.py` (`_guard_payload`); `src/gpo_lens/web/auth.py` (`_forwarded_user`); `src/gpo_lens/web/routes/findings.py`; `tests/test_analyst_text_guard.py`; `tests/test_web_auth.py::TestForwardedUser`; `SECURITY.md` (Credentials in analyst-typed text) |
+| Ingest lock file abuse | Created 0600. | `src/gpo_lens/web/app.py:203` |
 
 ### B5 — Web server
 
 | Threat | Mitigation | Evidence |
 |--------|------------|----------|
-| Unauthenticated network exposure | `serve` refuses a non-loopback bind unless `GPO_LENS_AUTH_TOKEN` is set. Without a token, only loopback TCP peers are accepted; with one, a constant-time bearer check applies even from loopback. | `src/gpo_lens/cli/_serve.py:28-34`; `src/gpo_lens/web/auth.py:112-140`; `tests/test_forwarded_proto.py` (non-loopback bind returns 1); `tests/test_web_auth.py` |
-| Forwarded headers spoof the client address | uvicorn runs with `proxy_headers=False`; `X-Forwarded-Proto` is honored for scheme only and only from a loopback peer; `X-Forwarded-User` is opt-in, loopback-only and names (never elevates) the principal. | `src/gpo_lens/cli/_serve.py:51-58`; `src/gpo_lens/web/app.py:426-441`; `src/gpo_lens/web/auth.py:74-92`; `tests/test_forwarded_proto.py`; `tests/test_web_auth.py` (`test_header_ignored_from_remote_peer`) |
-| DNS rebinding | Outermost ASGI middleware validates exactly one well-formed `Host` against `GPO_LENS_ALLOWED_HOSTS` (loopback names only when unset) before auth, CSRF or URL generation. | `src/gpo_lens/web/allowed_hosts.py:32-76`; `src/gpo_lens/web/app.py:571-577`; `tests/test_allowed_hosts.py` (`test_rebinding_rejected_before_auth_csrf_and_redirects`, `test_rebinding_cannot_read_or_delete_populated_snapshot`) |
-| CSRF on state-changing requests | POST/PUT/PATCH/DELETE require an `Origin` (or, absent that, `Referer`) that is a loopback origin or matches the request `Host`; neither header means rejection. | `src/gpo_lens/web/app.py:474-495`; `tests/test_csrf.py` |
-| Privilege separation between actions | Routes declare a permission (view / ingest / triage / narrate / admin); a test fails if a route declares none. | `src/gpo_lens/web/auth.py:13-37,143-152`; `tests/test_web_auth.py::TestRoutePermissions::test_all_routes_declare_a_permission` |
-| Brute force / request flooding | Per-client-IP rate limits: 10/min for `/ask` and `/explain`, 3 per 5 min for ingest, 100/min general. | `src/gpo_lens/web/app.py:497-509`; `src/gpo_lens/web/rate_limit.py`; `tests/test_rate_limit.py` |
-| API discovery surface | OpenAPI, Swagger and ReDoc endpoints disabled. | `src/gpo_lens/web/app.py:242` |
+| Unauthenticated network exposure | `serve` refuses a non-loopback bind unless `GPO_LENS_AUTH_TOKEN` is set. Without a token, only loopback TCP peers are accepted; with one, a constant-time bearer check applies even from loopback. | `src/gpo_lens/cli/_serve.py:28-34`; `src/gpo_lens/web/auth.py:132-160`; `tests/test_forwarded_proto.py` (non-loopback bind returns 1); `tests/test_web_auth.py` |
+| Forwarded headers spoof the client address | uvicorn runs with `proxy_headers=False`; `X-Forwarded-Proto` is honored for scheme only and only from a loopback peer; `X-Forwarded-User` is opt-in, loopback-only and names (never elevates) the principal; the name must be an account name (`user`, `user@domain`, `DOMAIN\user`, at most 256 characters) with no cpassword material, or the request gets 401. | `src/gpo_lens/cli/_serve.py:51-58`; `src/gpo_lens/web/app.py:439-454`; `src/gpo_lens/web/auth.py:76-112`; `tests/test_forwarded_proto.py`; `tests/test_web_auth.py` (`test_header_ignored_from_remote_peer`, `test_forwarded_name_that_is_not_an_account_name_fails_closed`) |
+| DNS rebinding | Outermost ASGI middleware validates exactly one well-formed `Host` against `GPO_LENS_ALLOWED_HOSTS` (loopback names only when unset) before auth, CSRF or URL generation. | `src/gpo_lens/web/allowed_hosts.py:32-76`; `src/gpo_lens/web/app.py:586-590`; `tests/test_allowed_hosts.py` (`test_rebinding_rejected_before_auth_csrf_and_redirects`, `test_rebinding_cannot_read_or_delete_populated_snapshot`) |
+| CSRF on state-changing requests | POST/PUT/PATCH/DELETE require an `Origin` (or, absent that, `Referer`) that is a loopback origin or matches the request `Host`; neither header means rejection. | `src/gpo_lens/web/app.py:487-508`; `tests/test_csrf.py` |
+| Privilege separation between actions | Routes declare a permission (view / ingest / triage / narrate / admin); a test fails if a route declares none. | `src/gpo_lens/web/auth.py:15-39,163-172`; `tests/test_web_auth.py::TestRoutePermissions::test_all_routes_declare_a_permission` |
+| Brute force / request flooding | Per-client-IP rate limits: 10/min for `/ask` and `/explain`, 3 per 5 min for ingest, 100/min general. | `src/gpo_lens/web/app.py:510-522`; `src/gpo_lens/web/rate_limit.py`; `tests/test_rate_limit.py` |
+| API discovery surface | OpenAPI, Swagger and ReDoc endpoints disabled. | `src/gpo_lens/web/app.py:255` |
 
 ### B6 — Browser
 
 | Threat | Mitigation | Evidence |
 |--------|------------|----------|
-| Stored XSS from estate strings (GPO names, setting values) | Jinja2 autoescaping for `.html` templates (Starlette's `select_autoescape()`); no template uses `|safe`. | `src/gpo_lens/web/app.py:313`; `grep -rn '|safe' src/gpo_lens/web/templates` returns nothing |
-| Script injection, framing, MIME sniffing | `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'`, `X-Frame-Options: DENY`, `nosniff`, strict referrer policy. All JS, CSS and fonts are served from `/static`. | `src/gpo_lens/web/app.py:443-452`; `tests/test_ui_regression.py` (`test_security_headers_on_every_page`); `tests/test_web.py` (`test_csp_forbids_inline_scripts`) |
+| Stored XSS from estate strings (GPO names, setting values) | Jinja2 autoescaping for `.html` templates (Starlette's `select_autoescape()`); no template uses `|safe`. | `src/gpo_lens/web/app.py:326`; `grep -rn '|safe' src/gpo_lens/web/templates` returns nothing |
+| Script injection, framing, MIME sniffing | `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'`, `X-Frame-Options: DENY`, `nosniff`, strict referrer policy. All JS, CSS and fonts are served from `/static`. | `src/gpo_lens/web/app.py:456-465`; `tests/test_ui_regression.py` (`test_security_headers_on_every_page`); `tests/test_web.py` (`test_csp_forbids_inline_scripts`) |
 | Secrets rendered in pages or downloads | `safe_output` masks credential values (including flattened copies, escaped variants and URL userinfo) and omits raw XML/SDDL fields in every human export and view payload. | `src/gpo_lens/safe_output.py`; `tests/test_review_output_safety.py`; `tests/test_credential_projection.py`; `tests/test_broken_ref_redaction.py` |
 | CSV formula injection | Cells starting with formula characters are prefixed. | `src/gpo_lens/web/_helpers.py:383-387` |
 
@@ -136,10 +136,10 @@ on the path:
 | Path | What is sent | Evidence |
 |------|--------------|----------|
 | Web `/explain` (page explanations) | Only an allowlisted projection: integer counts with fixed labels, snapshot/run IDs and a fixed caveat. The payload is HMAC-signed with a per-process random key, expires after one hour and is capped at 12,000 bytes; the model may only return fact IDs, which are fact-checked against the payload. No estate string is sent. | `src/gpo_lens/web/page_narration.py:62-150,154`; `tests/test_page_narration.py` (`test_tampering_never_reaches_narration`, `test_fact_check_rejects_claims_absent_from_payload`, `test_safe_projection_validation_and_bounds`) |
-| Web `/ask` | The user's question only (control characters stripped, 500 characters), framed by random delimiters, for routing to a deterministic query. Query results are not sent. A question carrying cpassword material is refused (400) before it is sent or stored in `audit.narrate`. | `src/gpo_lens/web/_helpers.py:132-137`; `src/gpo_lens/narration.py:232-237`; `tests/test_page_narration.py::test_ask_does_not_send_serialized_results_to_narration`; refusal: `src/gpo_lens/web/routes/ask.py:93-100`, `tests/test_analyst_text_guard.py::test_web_ask_refuses_before_storing_or_sending` |
+| Web `/ask` | The user's question only (control characters stripped, 500 characters), framed by random delimiters, for routing to a deterministic query. Query results are not sent. A question carrying cpassword material is refused (400) before it is sent or stored in `audit.narrate`. | `src/gpo_lens/web/_helpers.py:132-137`; `src/gpo_lens/narration.py:232-237`; `tests/test_page_narration.py::test_ask_does_not_send_serialized_results_to_narration`; refusal: `src/gpo_lens/web/routes/ask.py:97-104`, `tests/test_analyst_text_guard.py::test_web_ask_refuses_before_storing_or_sending` |
 | CLI `ask` | The question **and the deterministic query result**, passed through `safe_data` with the estate's discovered secrets. Estate strings (GPO names, setting values) leave the host. A question carrying cpassword material is refused (exit 1) before anything is sent. | `src/gpo_lens/cli/_narration.py:43,87-99` |
 | CLI `doctor --explain` | The doctor findings list through `safe_data`. Estate strings leave the host. | `src/gpo_lens/cli/_hygiene.py:267`; `src/gpo_lens/narration.py:268-274` |
-| CLI `explain-setting` | The setting identity, truncated to 500 characters; refused (exit 1) if it carries cpassword material. | `src/gpo_lens/cli/_narration.py:155-158` |
+| CLI `explain-setting` | The setting identity, truncated to 500 characters; refused (exit 1) if it carries cpassword material. | `src/gpo_lens/cli/_narration.py:155-160` |
 | CLI `events` to Splunk HEC | Change events. Opt-in via `GPO_LENS_HEC_URL` + `GPO_LENS_HEC_TOKEN`; warns on `http://`; `GPO_LENS_HEC_VERIFY_TLS=false` disables certificate verification. | `src/gpo_lens/sinks.py:84-106,123-126` |
 
 The LLM endpoint accepts `http://` as well as `https://`
@@ -169,25 +169,28 @@ These are known and not mitigated by code at this commit.
   (from 8 characters inside the carrying setting); a short or word-like value
   is redacted only where it is labelled. A crafted export with a copy in an
   identity field can block its own import (it is refused, never stored).
-  Analyst-typed text (triage notes and rationales, Ask questions, the
-  `explain-setting` identity) is checked by `analyst_text.check_analyst_text`
-  and refused when it carries a labelled value or an unlabelled
-  GPP-ciphertext-shaped token. That check is heuristic (measured rates in
-  `SECURITY.md`): it misses about 0.13 % of one-block values (passwords up to 7
-  characters) and a value deliberately broken up or glued to other letters,
-  and it refuses base64 digests of 16/32/48 bytes as a known false positive.
-  Notes and questions stored before v1.5.0 are not rewritten (the triage log is
-  append-only); `gpo-lens analyst-text-check` lists their ids for the operator.
+  Operator-supplied text (triage notes, rationales and actors, Ask questions,
+  the `explain-setting` identity, forwarded user names) is checked by
+  `analyst_text.check_analyst_text` and refused when it carries a labelled
+  value, an unlabelled GPP-ciphertext-shaped token, or structure the check
+  cannot inspect. That check is heuristic (measured rates in `SECURITY.md`): it
+  misses about 0.12 % of one-block values (passwords up to 7 characters) and a
+  value deliberately broken up, re-encoded or glued to other letters, and it
+  refuses base64 of any whole number of AES blocks (digests, keys, PEM
+  certificate lines) as a known false positive. Its write-path inventory is a
+  static test, not dataflow analysis. Notes, questions and names stored before
+  v1.5.0 are not rewritten (the triage log is append-only);
+  `gpo-lens analyst-text-check` lists their ids for the operator.
   Search terms are not stored by gpo-lens but travel in URLs, so a reverse
   proxy's access log may record them.
 - **R2 — No per-user identity in the app.** Every accepted caller on the
   loopback path is the same principal with view, ingest, delete, triage and
-  narrate rights (`src/gpo_lens/web/auth.py:61-67`). Remote access control is
+  narrate rights (`src/gpo_lens/web/auth.py:63-69`). Remote access control is
   entirely the reverse proxy's job; a misconfigured proxy exposes everything.
   Rate limits key on client IP, so behind a proxy all users share one bucket.
 - **R3 — Loopback is trusted.** Any local process or user that can reach
   `127.0.0.1:<port>` is the analyst. The CSRF check accepts any `localhost`
-  origin on any port (`src/gpo_lens/web/app.py:332-347`), so a page served by
+  origin on any port (`src/gpo_lens/web/app.py:345-360`), so a page served by
   another local web app on the same host can make state-changing requests.
 - **R4 — Exports carry no integrity protection.** A tampered ZIP can remove
   GPOs, settings or coverage evidence and produce a false all-clear. Coverage
@@ -251,7 +254,7 @@ These are known and not mitigated by code at this commit.
 - **R8 — Windows file permissions.** On IIS the DB relies on directory ACLs;
   `restrict_db_permissions` is effectively a no-op on Windows. The audit log is
   opened with `logging.FileHandler` and is not chmod-tightened on any platform
-  (`src/gpo_lens/web/app.py:126-130`).
+  (`src/gpo_lens/web/app.py:128-131`).
 - **R9 — Exports at rest outside gpo-lens.** The collector output root keeps up
   to `-Retention` (default 14) exports including SYSVOL `cpassword` files, and
   the `-CopyTo` share holds delivered ZIPs. Their ACLs are the operator's.

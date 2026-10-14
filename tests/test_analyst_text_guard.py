@@ -24,6 +24,7 @@ from __future__ import annotations
 import ast
 import base64
 import hashlib
+import importlib.util
 import json
 import random
 import re
@@ -234,12 +235,23 @@ def test_exclusions_never_drop_canonical_ciphertext_shapes() -> None:
 _FN_BOUNDS = {1: 0.003, 2: 0.0002, 3: 0.0, 4: 0.0}
 
 
+def _measure_script():  # type: ignore[no-untyped-def]
+    spec = importlib.util.spec_from_file_location(
+        "measure_analyst_text_guard", ROOT / "scripts" / "measure_analyst_text_guard.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 @pytest.mark.parametrize("blocks", sorted(_FN_BOUNDS))
 def test_measured_miss_rate_on_random_ciphertext(blocks: int) -> None:
-    rng = random.Random(blocks)  # noqa: S311 - reproducible test data
-    samples = [_ciphertext(blocks, rng) for _ in range(20_000)]
-    misses = sum(1 for value in samples if cpassword_material(value) is None)
-    assert misses <= _FN_BOUNDS[blocks] * len(samples), misses
+    """Same function and seeds as scripts/measure_analyst_text_guard.py, which
+    produces the figures SECURITY.md quotes (with 200,000 samples)."""
+    samples = 20_000
+    misses = _measure_script().miss_count(blocks, samples)
+    assert misses <= _FN_BOUNDS[blocks] * samples, misses
 
 
 @pytest.mark.parametrize(
@@ -633,42 +645,618 @@ def test_analyst_text_check_cli_clean_database_exits_zero(
     assert "No stored analyst text" in capsys.readouterr().out
 
 
+# --- review round 1 regressions ---------------------------------------------------------------
+#
+# Each probe from the two-lineage review of 4687510 (Sol, DeepSeek) as a test.
+
+_LOOPBACK = ("127.0.0.1", 50000)
+# A forwarded-user header carrying GPP-shaped ciphertext (Sol B1).
+_HEADER_VALUE = base64.b64encode(hashlib.sha256(b"forwarded-user-probe").digest()).decode()
+
+
+def test_forwarded_user_value_used_by_the_review_probe_is_cpassword_shaped() -> None:
+    assert cpassword_material(_HEADER_VALUE) == "ciphertext"
+
+
+def _loopback_client(db: Path, monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+    from fastapi.testclient import TestClient
+
+    from gpo_lens.web.app import create_app
+
+    monkeypatch.delenv("GPO_LENS_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("GPO_LENS_FORWARDED_USER_HEADER", "X-Forwarded-User")
+    return TestClient(
+        create_app(str(db)),
+        base_url="http://127.0.0.1",
+        client=_LOOPBACK,
+        headers={"Origin": "http://127.0.0.1"},
+    )
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        _HEADER_VALUE,  # base64 alphabet: refused by shape
+        "RXx2nznYZEGZwOW9vPvIWzfOkcveH8Gw6mtE8TBDbdc",  # no + / =: refused by the guard
+    ],
+)
+def test_forwarded_user_header_carrying_a_cpassword_reaches_no_sink(
+    web_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, header: str
+) -> None:
+    """Sol B1: the header named the principal and was written to the Ask event,
+    the triage actor and audit.log unguarded. It is now refused on entry."""
+    monkeypatch.setenv("GPO_LENS_API_KEY", "test-key")
+    client = _loopback_client(web_db, monkeypatch)
+    finding_id = _first_finding_id(web_db)
+    route = MagicMock(return_value={"query": "estate_summary", "params": {}})
+    with patch("gpo_lens.narration.route_question", route):
+        ask = client.post(
+            "/ask", data={"question": "summary"}, headers={"X-Forwarded-User": header}
+        )
+    triage = client.post(
+        f"/findings/{finding_id}/triage",
+        data={"status": "acknowledged", "note": "clean"},
+        headers={"X-Forwarded-User": header},
+        follow_redirects=False,
+    )
+    assert ask.status_code == 401
+    assert triage.status_code == 401
+    route.assert_not_called()
+    for response in (ask, triage):
+        assert header not in response.text
+    conn = sqlite3.connect(web_db)
+    try:
+        assert _event_rows(conn) == 0
+        assert refusable_rows(conn) == []
+    finally:
+        conn.close()
+    assert header.encode() not in _all_bytes(web_db)
+    audit = tmp_path / "audit.log"
+    assert not audit.exists() or header not in audit.read_text(encoding="utf-8")
+
+    # A valid account name still names the principal and is stored as actor.
+    ok = client.post(
+        f"/findings/{finding_id}/triage",
+        data={"status": "acknowledged", "note": "clean"},
+        headers={"X-Forwarded-User": "CONTOSO\\alice"},
+        follow_redirects=False,
+    )
+    assert ok.status_code == 303
+    conn = sqlite3.connect(web_db)
+    try:
+        assert conn.execute("SELECT actor FROM finding_triage_event").fetchall() == [
+            ("CONTOSO\\alice",)
+        ]
+    finally:
+        conn.close()
+
+
+def test_core_writers_refuse_a_cpassword_in_the_actor() -> None:
+    """Sol B1 / DeepSeek N5: the core writers' actor argument was unconstrained."""
+    from gpo_lens.findings import append_triage_event, triage_finding
+
+    conn, finding_id = _db_with_finding()
+    try:
+        with pytest.raises(CpasswordInAnalystTextError) as info:
+            triage_finding(conn, finding_id, "acknowledged", "clean", _HEADER_VALUE)
+        assert info.value.field == "actor"
+        with pytest.raises(CpasswordInAnalystTextError):
+            append_triage_event(conn, finding_id, "commented", _HEADER_VALUE, note="clean")
+        assert _event_rows(conn) == 0
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    ("event_type", "field"),
+    [("audit.narrate", "principal"), ("audit.ingest", "principal"), ("audit.narrate", "question")],
+)
+def test_event_log_refuses_a_cpassword_in_operator_fields(event_type: str, field: str) -> None:
+    from gpo_lens.events import append_event, append_events, init_events_table
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        init_events_table(conn)
+        with pytest.raises(CpasswordInAnalystTextError):
+            append_event(conn, event_type, {field: _HEADER_VALUE, "outcome": "x"})
+        with pytest.raises(CpasswordInAnalystTextError):
+            append_events(conn, [(event_type, {field: _HEADER_VALUE})])
+        assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_audit_log_never_records_a_cpassword_principal_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Defence in depth behind the header validation: _audit masks the name."""
+    from types import SimpleNamespace
+
+    from starlette.requests import Request
+
+    from gpo_lens.web.app import _audit
+    from gpo_lens.web.auth import LOCAL_PRINCIPAL, Principal
+
+    log = tmp_path / "audit.log"
+    monkeypatch.setenv("GPO_LENS_AUDIT_LOG", str(log))
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/x",
+            "headers": [],
+            "app": SimpleNamespace(state=SimpleNamespace(db_path=str(tmp_path / "db"))),
+            "state": {"request_id": "r"},
+        }
+    )
+    principal = Principal(_HEADER_VALUE, "forwarded", LOCAL_PRINCIPAL.permissions)
+    _audit("snapshot_delete", principal, "failure", "snapshot 1 not found", request)
+    text = log.read_text(encoding="utf-8")
+    assert _HEADER_VALUE not in text
+    assert json.loads(text.splitlines()[-1])["principal"] == "[refused principal name]"
+
+
+def test_checker_reports_actor_and_event_principal_rows(web_db: Path) -> None:
+    """Sol B1: analyst-text-check reported none of the persisted header copies."""
+    conn = sqlite3.connect(web_db)
+    try:
+        finding_id = conn.execute("SELECT id FROM finding ORDER BY id LIMIT 1").fetchone()[0]
+        triage_id = conn.execute(
+            "INSERT INTO finding_triage_event (occurrence_id, action, actor, occurred_at) "
+            "VALUES (?, 'acknowledged', ?, '2025-01-01T00:00:00+00:00')",
+            (finding_id, _HEADER_VALUE),
+        ).lastrowid
+        event_id = conn.execute(
+            "INSERT INTO events (timestamp, event_type, schema_version, payload) "
+            "VALUES ('2025-01-01T00:00:00+00:00', 'audit.ingest', 1, ?)",
+            (json.dumps({"principal": _HEADER_VALUE}),),
+        ).lastrowid
+        conn.commit()
+        rows = {(r.table, r.column, r.row_id) for r in refusable_rows(conn)}
+    finally:
+        conn.close()
+    assert rows == {
+        ("finding_triage_event", "actor", triage_id),
+        ("events", "payload.principal", event_id),
+    }
+
+
+# Sol B2 / DeepSeek N1: a wrapped value with prose after the last wrapped line.
+_WRAPPED_WITH_PROSE = [
+    f"old {PUBLISHED_EXAMPLE[:32]}\n{PUBLISHED_EXAMPLE[32:]} removed",
+    f"old {CT2[:20]}\n{CT2[20:]} ok",
+    f"value {CT2[:20]}\n{CT2[20:]}",
+    f"note:\n{CT3[:30]}\n{CT3[30:50]}\n{CT3[50:]} - rotated.",
+    f"{CT2[:20]}\n{CT2[20:]}, removed from Groups.xml",
+]
+
+
+@pytest.mark.parametrize("text", _WRAPPED_WITH_PROSE)
+def test_wrapped_value_with_prose_after_it_is_refused(text: str) -> None:
+    assert cpassword_material(text) == "ciphertext"
+
+
+def test_wrapped_value_with_prose_is_refused_by_core_triage() -> None:
+    from gpo_lens.findings import triage_finding
+
+    conn, finding_id = _db_with_finding()
+    try:
+        with pytest.raises(CpasswordInAnalystTextError):
+            triage_finding(conn, finding_id, "acknowledged", _WRAPPED_WITH_PROSE[0], "alice")
+        assert _event_rows(conn) == 0
+    finally:
+        conn.close()
+
+
+def test_wrapped_value_with_prose_is_refused_by_web_triage(web_db: Path) -> None:
+    finding_id = _first_finding_id(web_db)
+    resp = _client(web_db).post(
+        f"/findings/{finding_id}/triage",
+        data={"status": "acknowledged", "note": _WRAPPED_WITH_PROSE[0]},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 400
+    assert PUBLISHED_EXAMPLE[:32] not in resp.text
+
+
+def test_wrapped_value_with_prose_is_refused_by_cli_ask(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gpo_lens.cli import main
+
+    monkeypatch.setenv("GPO_LENS_API_KEY", "test-key")
+    db = _cli_db(tmp_path)
+    route = MagicMock(return_value={"query": "estate_summary", "params": {}})
+    with patch("gpo_lens.narration.route_question", route):
+        code = main(["--db", str(db), "ask", _WRAPPED_WITH_PROSE[0]])
+    out, err = capsys.readouterr()
+    assert code == 1
+    route.assert_not_called()
+    assert PUBLISHED_EXAMPLE[:32] not in out + err
+
+
+def test_hard_wrapped_prose_is_not_refused_by_the_line_join() -> None:
+    """The new join (last token of a line + first token of the next) on
+    ordinary hard-wrapped prose: word-built joins are excluded."""
+    text = (
+        "Reviewed the Default Domain Policy with the security team; the\n"
+        "Administrators group change is expected and the ticket is CHG0012345.\n"
+        "DisableIPSourceRouting stays 2, AllowInsecureGuestAuth stays 0, and the\n"
+        "ConvertTo-SecureString call in the logon script was removed."
+    )
+    assert cpassword_material(text) is None
+
+
+# DeepSeek B1: the guard must be total.
+def _total(text: str) -> None:
+    try:
+        check_analyst_text(text, "note")
+    except CpasswordInAnalystTextError:
+        pass
+
+
+_DEPTHS = [1_000, 1_200, 5_000, 20_000, 50_000]
+
+
+@pytest.mark.parametrize("depth", _DEPTHS)
+@pytest.mark.parametrize(
+    "shape",
+    [
+        lambda d: "[" * d + '"cpassword"' + "]" * d,
+        lambda d: '{"a":' * d + '"cpassword"' + "}" * d,
+        lambda d: '{"a":' * d + '"\\u0063password"' + "}" * d,
+        lambda d: "<a>" * d + "cpassword" + "</a>" * d,
+        lambda d: "".join(f"<a{i}>t" for i in range(d)) + "cpass<b/>word=x" + "</x>",
+        lambda d: "<a>t" * d + 'cpass<b/>word="x"' + "</a>" * d,
+        lambda d: "<b/>" * d + "cpassword",
+    ],
+    ids=["json-array", "json-object", "json-escape", "xml", "xml-broken", "xml-mixed", "xml-flat"],
+)
+def test_guard_is_total_on_deep_structure(shape, depth: int) -> None:  # type: ignore[no-untyped-def]
+    _total(shape(depth))
+
+
+def test_deep_structure_that_cannot_be_inspected_is_refused_as_uninspectable() -> None:
+    for text in (
+        "[" * 1200 + '"cpassword"' + "]" * 1200,
+        '{"a":' * 5000 + '"cpassword"' + "}" * 5000,
+    ):
+        assert cpassword_material(text) == "uninspectable"
+    with pytest.raises(CpasswordInAnalystTextError) as info:
+        check_analyst_text("[" * 1200 + '"cpassword"' + "]" * 1200, "note")
+    assert "could not be checked" in str(info.value)
+    assert info.value.kind == "uninspectable"
+
+
+def test_xml_with_entity_declarations_is_uninspectable() -> None:
+    text = '<!DOCTYPE x [<!ENTITY p "password">]><x>c&p;="hunter2"</x>'
+    assert cpassword_material(text) == "uninspectable"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "\\u" * 1000,
+        "\\u0041" * 1000,
+        "\x00" * 100 + "cpassword=x",
+        "\x01\x02" * 500 + "cpassword: y",
+        "\ud800" * 10 + "cpassword: z",
+        "<a>\ud800</a> cpassword",
+        "\u202e" + "cpassword" + "\u202c",
+        "\ufeffcpassword=q",
+        "c\u0301password=x",
+        "<" * 10_000,
+        "&" * 10_000,
+        "<![CDATA[" * 1000,
+    ],
+)
+def test_guard_is_total_on_exotic_text(text: str) -> None:
+    _total(text)
+
+
+def test_guard_is_total_on_random_bytes() -> None:
+    rng = random.Random(7)  # noqa: S311 - reproducible test data
+    alphabet = '<>&;="\\{}[]/:aAcpasword0123456789+-_ \n\t'
+    for _ in range(2_000):
+        raw = rng.randbytes(rng.randrange(0, 400))
+        _total(raw.decode("latin-1"))
+        _total(raw.decode("utf-8", "surrogateescape"))
+        _total("".join(rng.choice(alphabet) for _ in range(rng.randrange(0, 200))))
+
+
+def test_deep_json_is_a_400_not_a_500_on_web_triage_and_ask(
+    web_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DeepSeek B1: the web routes answered HTTP 500 (uncaught RecursionError)."""
+    from fastapi.testclient import TestClient
+
+    from gpo_lens.web.app import create_app
+
+    monkeypatch.setenv("GPO_LENS_API_KEY", "test-key")
+    client = TestClient(
+        create_app(str(web_db)),
+        headers={"Authorization": "Bearer test-secret-token", "Origin": "http://testserver"},
+        raise_server_exceptions=False,
+    )
+    finding_id = _first_finding_id(web_db)
+    route = MagicMock(return_value={"query": "estate_summary", "params": {}})
+    deep = "[" * 1200 + '"cpassword"' + "]" * 1200
+    nested = '{"a":' * 1500 + '"cpassword"' + "}" * 1500  # the reviewer's exact probe
+    for text in (deep, nested):
+        triage = client.post(
+            f"/findings/{finding_id}/triage",
+            data={"status": "acknowledged", "note": text},
+            follow_redirects=False,
+        )
+        assert triage.status_code in (303, 400), triage.status_code
+        with patch("gpo_lens.narration.route_question", route):
+            ask = client.post("/ask", data={"question": text})
+        assert ask.status_code in (200, 400), ask.status_code
+    deep_triage = client.post(
+        f"/findings/{finding_id}/triage",
+        data={"status": "acknowledged", "note": deep},
+        follow_redirects=False,
+    )
+    assert deep_triage.status_code == 400
+
+
+def test_checker_survives_a_stored_row_that_cannot_be_inspected(web_db: Path) -> None:
+    conn = sqlite3.connect(web_db)
+    try:
+        finding_id = conn.execute("SELECT id FROM finding ORDER BY id LIMIT 1").fetchone()[0]
+        conn.execute(
+            "INSERT INTO finding_triage_event (occurrence_id, action, actor, occurred_at, note) "
+            "VALUES (?, 'commented', 'old', '2025-01-01T00:00:00+00:00', ?)",
+            (finding_id, '{"a":' * 5000 + '"cpassword"' + "}" * 5000),
+        )
+        conn.commit()
+        kinds = {r.kind for r in refusable_rows(conn)}
+    finally:
+        conn.close()
+    assert kinds == {"uninspectable"}
+
+
+# DeepSeek N3: the guarded slice is bounded whatever the submitted size.
+@pytest.mark.parametrize(
+    "note",
+    [
+        "a\n" * 500_000,
+        "ab=\n" * 250_000,
+        "a-b/c_d " * 125_000,
+        "x " * 1_000 + CT2 + " " + "a\n" * 500_000,  # value inside the stored part
+    ],
+    ids=["one-char lines", "padded lines", "separated tokens", "value then 1 MB"],
+)
+def test_megabyte_triage_note_is_checked_in_bounded_time(note: str) -> None:
+    from gpo_lens.findings import triage_finding
+
+    conn, finding_id = _db_with_finding()
+    try:
+        start = time.perf_counter()
+        try:
+            triage_finding(conn, finding_id, "acknowledged", note, "alice")
+        except CpasswordInAnalystTextError:
+            assert CT2 in note
+        else:
+            assert CT2 not in note
+        assert time.perf_counter() - start < 2
+    finally:
+        conn.close()
+
+
+def test_a_value_only_past_the_checked_slice_is_never_stored() -> None:
+    """Text beyond what is stored plus STRADDLE_MARGIN is not checked because
+    it is discarded by the 2000-character truncation."""
+    from gpo_lens.analyst_text import STRADDLE_MARGIN
+    from gpo_lens.findings import triage_finding
+
+    conn, finding_id = _db_with_finding()
+    try:
+        note = "x " * ((2000 + STRADDLE_MARGIN) // 2 + 10) + CT2
+        triage_finding(conn, finding_id, "acknowledged", note, "alice")
+        stored = conn.execute("SELECT note FROM finding_triage_event").fetchone()[0]
+        assert CT2 not in stored and len(stored) == 2000
+    finally:
+        conn.close()
+
+
+# DeepSeek predicate probe, recorded: refused forms and documented limits.
+def _ds_ct(blocks: int) -> str:
+    raw = hashlib.sha512(b"x" * 32).digest()
+    while len(raw) < 16 * blocks:
+        raw += hashlib.sha512(raw).digest()
+    return base64.b64encode(raw[: 16 * blocks]).decode().rstrip("=")
+
+
+_DS2 = _ds_ct(2)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        _ds_ct(1),
+        _DS2,
+        _ds_ct(3),
+        _DS2.replace("+", "-").replace("/", "_"),
+        _DS2 + "==",
+        _DS2[:20] + "\n" + _DS2[20:],
+        _DS2[:20] + "\n" + _DS2[20:] + " ok",
+        "value " + _DS2[:20] + "\n" + _DS2[20:],
+        f'cpassword="{_DS2}"',
+        f"<cpassword>{_DS2}</cpassword>",
+        "cpassword=%22" + _DS2 + "%22",
+        f"cpassword=&quot;{_DS2}&quot;",
+        'cpassw\u043erd="' + _DS2 + '"',
+        "value:" + _DS2,
+        "`" + _DS2 + "`",
+        "/var/" + _DS2 + "/x",
+        "pw-" + _DS2,
+        "\\\\server\\" + _DS2,
+    ],
+)
+def test_review_probe_forms_are_refused(text: str) -> None:
+    assert cpassword_material(text) is not None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        _DS2[:20] + " " + _DS2[20:],
+        _DS2[:20] + "\u200b" + _DS2[20:],
+        _DS2[:20] + "\t" + _DS2[20:],
+        "cpassword%3D%22" + _DS2 + "%22",
+        "x" + _DS2,
+    ],
+    ids=["space", "zero-width", "tab", "percent-encoded label", "glued to a word"],
+)
+def test_documented_limits_pass(text: str) -> None:
+    """SECURITY.md "Known limits": deliberate break-up, re-encoding or gluing."""
+    assert cpassword_material(text) is None
+
+
+@pytest.mark.parametrize("size", [16, 32, 48, 64, 80, 96, 112, 128])
+def test_base64_of_any_whole_number_of_blocks_is_a_documented_false_positive(
+    size: int,
+) -> None:
+    """DeepSeek N2: not only 16/32/48 bytes; SECURITY.md now says so."""
+    rng = random.Random(size)  # noqa: S311 - reproducible test data
+    for _ in range(20):
+        assert cpassword_material(base64.b64encode(rng.randbytes(size)).decode())
+
+
+@pytest.mark.parametrize(
+    ("size", "low", "high"),
+    [(20, 0.0, 0.02), (24, 0.0, 0.02), (40, 0.005, 0.08), (100, 0.08, 0.25), (200, 0.2, 0.4)],
+)
+def test_base64_of_other_sizes_is_refused_only_through_separator_windows(
+    size: int, low: float, high: float
+) -> None:
+    """A long base64 blob of any size can hold a block-length run between two
+    ``/`` (or ``-``/``_``), which the window search refuses. SECURITY.md quotes
+    these measured rates (2,000 samples, seed 1)."""
+    rng = random.Random(1)  # noqa: S311 - reproducible test data
+    samples = [base64.b64encode(rng.randbytes(size)).decode() for _ in range(2_000)]
+    refused = sum(1 for value in samples if cpassword_material(value)) / len(samples)
+    assert low <= refused <= high, refused
+    # Without a separator inside, a non-block size is never refused.
+    plain = [v for v in samples if not set(v) & set("/-_")]
+    assert plain and not any(cpassword_material(v) for v in plain)
+
+
+def test_pem_certificate_lines_are_refused_with_a_practical_hint() -> None:
+    """Sol N1: a 64-character PEM line is base64 of 48 bytes. Documented; the
+    hint names certificates and points to the thumbprint."""
+    line = base64.b64encode(bytes(range(48))).decode()
+    pem = f"-----BEGIN CERTIFICATE-----\n{line}\n-----END CERTIFICATE-----"
+    with pytest.raises(CpasswordInAnalystTextError) as info:
+        check_analyst_text(pem, "note")
+    assert "certificate" in str(info.value) and "thumbprint" in str(info.value)
+    assert line not in str(info.value)
+
+
 # --- inventory: every write path goes through the guard -------------------------------------
 #
-# Each sink below is either GUARDED (the function calls check_analyst_text, or a
-# helper that does, before the sink) or classified with the reason it carries
-# no analyst-typed text. A new sink fails these tests until it is one or the
-# other.
+# Each sink and each request source below is either GUARDED or classified with
+# the reason it carries no operator-supplied text. GUARDED means: for every
+# listed field, the function passes an expression naming that field to a guard
+# call (check_analyst_text, or a helper that calls it) on a line before its
+# first sink. A new sink, source, payload key or field fails these tests until
+# it is guarded or classified.
+#
+# Blind spots (this is a static heuristic, not dataflow analysis):
+# * SQL writes are found from string constants and f-strings; SQL assembled by
+#   concatenation, ``.format`` or in another module's helper is not seen, and a
+#   new table/column of operator text must be added to ANALYST_TEXT_COLUMNS by
+#   hand before it is inventoried at all.
+# * "Guarded" is per function and per field name: a value renamed or copied to
+#   another variable before the sink, or a sink reached through a helper in
+#   another function, is not traced.
+# * Event payloads are checked by literal dict keys; a payload built elsewhere
+#   (the ingest change events, the scrub record) is classified as a whole.
+# * Request sources are the declared FastAPI parameters (Form/File/Body/Header/
+#   Query/Cookie), POST-route parameters, ``.headers``/``.cookies``/
+#   ``.query_params`` reads, ASGI ``scope["headers"]`` and request body reads.
+#   ``request.state``, path parameters of GET routes, and anything a template
+#   renders are not inventoried; GET routes are asserted to hold no sink, but a
+#   sink reached through a helper they call is not seen.
+# * Writes outside SQLite, the event log, audit.log and model calls (files,
+#   subprocesses, other network egress) are not inventoried.
 
-GUARD_CALLS = frozenset({"check_analyst_text", "_refused"})
+GUARD_CALLS = frozenset(
+    {"check_analyst_text", "_refused", "_guard_payload", "valid_principal_name"}
+)
 ANALYST_TABLES = frozenset(table for table, _ in ANALYST_TEXT_COLUMNS)
 
+# Per guarded function, the field names each needing its own guard call.
+GUARDED_FIELDS: dict[tuple[str, str], frozenset[str]] = {
+    ("gpo_lens.findings", "append_triage_event"): frozenset({"note", "rationale", "actor"}),
+    ("gpo_lens.findings", "triage_finding"): frozenset({"note", "actor"}),
+    ("gpo_lens.events", "append_event"): frozenset({"payload"}),
+    ("gpo_lens.events", "append_events"): frozenset({"payload"}),
+    ("gpo_lens.web.routes.ask", "register.ask_post"): frozenset({"question", "sanitized"}),
+    ("gpo_lens.cli._narration", "cmd_ask"): frozenset({"args.question"}),
+    ("gpo_lens.cli._narration", "cmd_explain_setting"): frozenset({"identity"}),
+    ("gpo_lens.web.auth", "_forwarded_user"): frozenset({"cleaned"}),
+}
+
 SQL_WRITERS = {
-    # Analyst-text tables (finding_triage_event, finding_triage).
+    # Operator-text tables (finding_triage_event, finding_triage).
     ("gpo_lens.findings", "append_triage_event"): "GUARDED",
     ("gpo_lens.findings", "expire_risk_acceptances"): (
-        "system text: 'Risk acceptance expired at <timestamp>'"
+        "system text: actor 'system', note 'Risk acceptance expired at <timestamp>'"
     ),
     ("gpo_lens.store", "_migrate_schema"): (
         "v7->v8 copies existing finding_triage rows; older rows are reported by "
         "analyst-text-check, never rewritten"
     ),
+    # The event log: every payload passes _guard_payload first.
+    ("gpo_lens.events", "append_event"): "GUARDED",
+    ("gpo_lens.events", "append_events"): "GUARDED",
+    ("gpo_lens.events", "rehash_event_chain"): "rewrites prev_hash only",
 }
 DYNAMIC_SQL_WRITERS = {
     ("gpo_lens.store", "_scrub_guarded"): (
         "v11 cpassword scrub: replaces discovered values with the redaction marker"
     ),
 }
-EVENT_WRITERS = {
-    ("gpo_lens.web.routes.ask", "register.ask_post"): "GUARDED",
-    ("gpo_lens.web.routes.ask", "register._refuse"): (
-        "refusal record: the question is stored as an empty string"
+# append_event(s) call sites and the payload keys each may write. Keys listed in
+# ANALYST_TEXT_EVENT_FIELDS are guarded centrally by events._guard_payload.
+EVENT_WRITERS: dict[tuple[str, str], frozenset[str] | str] = {
+    ("gpo_lens.web.routes.ask", "register.ask_post"): frozenset(
+        {"principal", "question", "outcome"}
     ),
-    ("gpo_lens.web.routes.ingest", "register._ingest_post._persist"): "principal name only",
-    ("gpo_lens.web.routes.ingest", "register.ingest_delete"): "principal name and snapshot id",
-    ("gpo_lens.cli._estate", "_emit_ingest_events"): "estate change events (ingest-sanitized)",
-    ("gpo_lens.store", "_scrub_guarded"): "scrub audit event: counts and table names",
+    ("gpo_lens.web.routes.ask", "register._refuse"): frozenset(
+        {"principal", "question", "outcome"}
+    ),
+    ("gpo_lens.web.routes.ingest", "register._ingest_post._persist"): frozenset({"principal"}),
+    ("gpo_lens.web.routes.ingest", "register.ingest_delete"): frozenset(
+        {"principal", "snapshot_id"}
+    ),
+    ("gpo_lens.cli._estate", "_emit_ingest_events"): (
+        "estate change events built from the ingest-sanitized estate"
+    ),
+    ("gpo_lens.store", "_scrub_guarded"): frozenset(
+        {
+            "changed",
+            "discovered_value_count",
+            "rewritten_event_ids",
+            "rehashed_event_ids",
+            "pre_existing_broken_event_ids",
+        }
+    ),
 }
+# Payload keys that are not operator text: fixed strings, counts and ids.
+EVENT_SYSTEM_KEYS = frozenset(
+    {
+        "outcome",
+        "snapshot_id",
+        "changed",
+        "discovered_value_count",
+        "rewritten_event_ids",
+        "rehashed_event_ids",
+        "pre_existing_broken_event_ids",
+    }
+)
 LLM_CALLERS = {
     ("gpo_lens.cli._narration", "cmd_ask"): "GUARDED",
     ("gpo_lens.cli._narration", "cmd_explain_setting"): "GUARDED",
@@ -699,6 +1287,29 @@ WEB_INPUTS = {
     ("register.resultant_compute", "computer_sid"): "transient lookup, never stored",
     ("register.resultant_compute", "dn"): "transient lookup, never stored",
     ("register.resultant_compute", "computer_dn"): "transient lookup, never stored",
+    ("get_principal", "authorization"): "bearer token, compared in constant time, never stored",
+}
+# Raw request reads: (module, function, attribute) -> why it is safe.
+RAW_REQUEST_READS = {
+    ("gpo_lens.web.auth", "_forwarded_user", "headers"): (
+        "GUARDED: forwarded user name, valid_principal_name or 401"
+    ),
+    ("gpo_lens.web.app", "create_app._http_exception_handler", "headers"): (
+        "Accept, content negotiation only"
+    ),
+    ("gpo_lens.web.app", "create_app._forwarded_proto", "headers"): "X-Forwarded-Proto: scheme",
+    ("gpo_lens.web.app", "create_app._body_size_limit", "headers"): "Content-Length compared",
+    ("gpo_lens.web.app", "create_app._csrf_check", "headers"): "Origin/Referer/Host compared",
+    ("gpo_lens.web.allowed_hosts", "HostAllowListMiddleware.__call__", "scope[headers]"): (
+        "Host compared to the allow-list"
+    ),
+    ("gpo_lens.web._helpers", "parse_pagination", "query_params"): "page numbers",
+    ("gpo_lens.web._helpers", "base_qs", "query_params"): "filters echoed into links",
+    ("gpo_lens.web.routes.api", "register.run_query", "query_params"): "read-only query",
+    ("gpo_lens.web.routes.briefing", "register.briefing_page", "query_params"): "as-of",
+    ("gpo_lens.web.routes.export", "register.export_findings", "query_params"): "filters",
+    ("gpo_lens.web.routes.export", "register.export_gpo", "query_params"): "view selector",
+    ("gpo_lens.web.routes.gpo", "register.gpo_detail", "query_params"): "view selector",
 }
 
 _SQL_WRITE = re.compile(
@@ -706,22 +1317,27 @@ _SQL_WRITE = re.compile(
 )
 _EVENT_SINKS = frozenset({"append_event", "append_events"})
 _LLM_SINKS = frozenset({"route_question", "call_llm", "explain_findings"})
-_WEB_INPUTS = frozenset({"Form", "File", "Body"})
+_WEB_INPUTS = frozenset({"Form", "File", "Body", "Header", "Query", "Cookie"})
+_REQUEST_ATTRS = frozenset({"headers", "cookies", "query_params"})
+_BODY_READS = frozenset({"json", "form", "body", "stream"})
 
 
 class _Inventory(ast.NodeVisitor):
-    """Collect sinks per enclosing function (qualified within the module)."""
+    """Collect sinks and request sources per enclosing function."""
 
     def __init__(self, module: str, aliases: dict[str, str]) -> None:
         self.module = module
         self.aliases = aliases
         self.stack: list[str] = []
-        self.functions: dict[str, ast.AST] = {}
-        self.sql: set[tuple[str, str]] = set()
+        self.functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+        self.routes: dict[str, str] = {}  # function -> HTTP method
+        self.sql: dict[tuple[str, str], list[int]] = {}
         self.dynamic_sql: set[str] = set()
-        self.events: dict[str, list[int]] = {}
+        self.events: dict[str, list[ast.Call]] = {}
         self.llm: dict[str, list[int]] = {}
         self.inputs: set[tuple[str, str]] = set()
+        self.raw_reads: set[tuple[str, str]] = set()
+        self.body_reads: set[str] = set()
 
     @property
     def where(self) -> str:
@@ -731,12 +1347,14 @@ class _Inventory(ast.NodeVisitor):
         self.stack.append(node.name)
         if not isinstance(node, ast.ClassDef):
             self.functions[self.where] = node
-            args = node.args
-            positional = args.posonlyargs + args.args
-            defaults = [None] * (len(positional) - len(args.defaults)) + list(args.defaults)
-            pairs = list(zip(positional, defaults, strict=True))
-            pairs += list(zip(args.kwonlyargs, args.kw_defaults, strict=True))
-            for arg, default in pairs:
+            for decorator in node.decorator_list:
+                if (
+                    isinstance(decorator, ast.Call)
+                    and isinstance(decorator.func, ast.Attribute)
+                    and decorator.func.attr in {"get", "post", "put", "patch", "delete"}
+                ):
+                    self.routes[self.where] = decorator.func.attr
+            for arg, default in _params(node):
                 if isinstance(default, ast.Call) and self._name(default.func) in _WEB_INPUTS:
                     self.inputs.add((self.where, arg.arg))
         self.generic_visit(node)
@@ -756,7 +1374,10 @@ class _Inventory(ast.NodeVisitor):
     def visit_Constant(self, node: ast.Constant) -> None:
         if isinstance(node.value, str):
             for match in _SQL_WRITE.finditer(node.value):
-                self.sql.add((self.where, match.group(1).lower()))
+                key = (self.where, match.group(1).lower())
+                self.sql.setdefault(key, []).append(node.lineno)
+            if node.value == "headers":
+                self.raw_reads.add((self.where, "scope[headers]"))
 
     def visit_JoinedStr(self, node: ast.JoinedStr) -> None:
         literal = "".join(v.value for v in node.values if isinstance(v, ast.Constant))
@@ -766,13 +1387,35 @@ class _Inventory(ast.NodeVisitor):
             self.dynamic_sql.add(self.where)
         self.generic_visit(node)
 
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        base = ast.unparse(node.value)
+        if node.attr in _REQUEST_ATTRS and base not in {"response", "resp"}:
+            self.raw_reads.add((self.where, node.attr))
+        self.generic_visit(node)
+
     def visit_Call(self, node: ast.Call) -> None:
         name = self._name(node.func)
         if name in _EVENT_SINKS:
-            self.events.setdefault(self.where, []).append(node.lineno)
+            self.events.setdefault(self.where, []).append(node)
         if name in _LLM_SINKS:
             self.llm.setdefault(self.where, []).append(node.lineno)
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr in _BODY_READS
+            and ast.unparse(node.func.value) in {"request", "req"}
+        ):
+            self.body_reads.add(self.where)
         self.generic_visit(node)
+
+
+def _params(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[tuple[ast.arg, ast.expr | None]]:
+    args = node.args
+    positional = args.posonlyargs + args.args
+    defaults: list[ast.expr | None] = [None] * (len(positional) - len(args.defaults))
+    defaults += list(args.defaults)
+    pairs = list(zip(positional, defaults, strict=True))
+    pairs += list(zip(args.kwonlyargs, args.kw_defaults, strict=True))
+    return pairs
 
 
 def _modules() -> dict[str, _Inventory]:
@@ -798,43 +1441,64 @@ def _modules() -> dict[str, _Inventory]:
 INVENTORY = _modules()
 
 
-def _guard_lines(module: str, function: str) -> list[int]:
-    node = INVENTORY[module].functions[function]
-    return [
-        call.lineno
-        for call in ast.walk(node)
-        if isinstance(call, ast.Call) and INVENTORY[module]._name(call.func) in GUARD_CALLS
-    ]
+def _subject(expr: ast.expr) -> str:
+    """The value a guard argument checks: ``field``, ``field[:n]`` or
+    ``checked_slice(field, n)`` all check ``field``; nothing else counts."""
+    if isinstance(expr, ast.Call) and getattr(expr.func, "id", "") == "checked_slice":
+        expr = expr.args[0]
+    if isinstance(expr, ast.Subscript) and isinstance(expr.slice, ast.Slice):
+        if expr.slice.lower is None and expr.slice.step is None:
+            expr = expr.value
+    return ast.unparse(expr)
+
+
+def _guarded_fields(module: str, function: str) -> dict[str, int]:
+    """Field name -> first line of a guard call whose checked value is it.
+
+    For ``_guard_payload(event_type, payload)`` the checked value is its second
+    argument; for every other guard, its first."""
+    inv = INVENTORY[module]
+    out: dict[str, int] = {}
+    calls = [c for c in ast.walk(inv.functions[function]) if isinstance(c, ast.Call)]
+    for call in calls:
+        name = inv._name(call.func)
+        if name not in GUARD_CALLS or not call.args:
+            continue
+        checked = call.args[1] if name == "_guard_payload" else call.args[0]
+        field = _subject(checked)
+        if field in GUARDED_FIELDS[(module, function)]:
+            out[field] = min(out.get(field, call.lineno), call.lineno)
+    return out
 
 
 def _assert_guarded(module: str, function: str, sink_lines: list[int]) -> None:
-    guards = _guard_lines(module, function)
-    assert guards, f"{module}.{function} writes analyst text without check_analyst_text"
-    assert min(guards) < min(sink_lines), f"{module}.{function} guards after its sink"
+    assert sink_lines, f"{module}.{function}: no sink found"
+    guarded = _guarded_fields(module, function)
+    for field in GUARDED_FIELDS[(module, function)]:
+        assert field in guarded, f"{module}.{function} never guards {field!r}"
+        assert guarded[field] < min(sink_lines), f"{module}.{function} guards {field!r} late"
 
 
-def test_every_sql_write_to_an_analyst_text_table_is_inventoried() -> None:
+def test_every_guarded_function_is_listed_with_its_fields() -> None:
+    for (module, function), fields in GUARDED_FIELDS.items():
+        assert function in INVENTORY[module].functions, (module, function)
+        assert fields
+
+
+def test_every_sql_write_to_an_operator_text_table_is_inventoried() -> None:
     found = {
-        (module, where)
+        (module, where): lines
         for module, inv in INVENTORY.items()
-        for where, table in inv.sql
-        if table in ANALYST_TABLES
+        for (where, table), lines in inv.sql.items()
+        if table in ANALYST_TABLES or table == "events"
     }
-    assert found == set(SQL_WRITERS)
-    for (module, function), how in SQL_WRITERS.items():
+    assert set(found) == set(SQL_WRITERS)
+    for key, how in SQL_WRITERS.items():
         if how == "GUARDED":
-            node = INVENTORY[module].functions[function]
-            sinks = [
-                c.lineno
-                for c in ast.walk(node)
-                if isinstance(c, ast.Constant)
-                and isinstance(c.value, str)
-                and _SQL_WRITE.search(c.value)
-            ]
-            _assert_guarded(module, function, sinks)
+            _assert_guarded(*key, found[key])
 
 
-def test_the_guarded_triage_writer_checks_every_analyst_column() -> None:
+def test_the_guarded_triage_writer_checks_every_operator_column() -> None:
     node = INVENTORY["gpo_lens.findings"].functions["append_triage_event"]
     fields = {
         call.args[1].value
@@ -852,17 +1516,42 @@ def test_every_dynamic_sql_write_is_inventoried() -> None:
     assert found == set(DYNAMIC_SQL_WRITERS)
 
 
-def test_every_event_write_is_inventoried() -> None:
-    found = {(m, w): lines for m, inv in INVENTORY.items() for w, lines in inv.events.items()}
+def _payload_keys(call: ast.Call) -> frozenset[str] | None:
+    payload = call.args[2] if len(call.args) > 2 else None
+    for keyword in call.keywords:
+        if keyword.arg == "payload":
+            payload = keyword.value
+    if not isinstance(payload, ast.Dict):
+        return None
+    return frozenset(k.value for k in payload.keys if isinstance(k, ast.Constant))
+
+
+def test_every_event_write_and_payload_key_is_inventoried() -> None:
+    found = {(m, w): calls for m, inv in INVENTORY.items() for w, calls in inv.events.items()}
     found = {k: v for k, v in found.items() if k[0] != "gpo_lens.events"}
     assert set(found) == set(EVENT_WRITERS)
-    for key, how in EVENT_WRITERS.items():
-        if how == "GUARDED":
-            _assert_guarded(*key, found[key])
+    guarded_keys = {field for _, field in ANALYST_TEXT_EVENT_FIELDS}
+    for key, expected in EVENT_WRITERS.items():
+        if isinstance(expected, str):
+            continue  # payload built elsewhere: classified as a whole
+        keys: set[str] = set()
+        for call in found[key]:
+            literal = _payload_keys(call)
+            assert literal is not None, f"{key}: payload is no longer a literal dict"
+            keys |= literal
+        assert keys == expected, key
+        assert keys <= guarded_keys | EVENT_SYSTEM_KEYS, key
 
 
-def test_event_fields_scanned_for_older_rows_match_the_guarded_writers() -> None:
-    assert ANALYST_TEXT_EVENT_FIELDS == (("audit.narrate", "question"),)
+def test_event_payload_guard_covers_every_scanned_field() -> None:
+    from gpo_lens.events import _guard_payload
+
+    assert ANALYST_TEXT_EVENT_FIELDS == (("audit.narrate", "question"), ("*", "principal"))
+    for event_type, field in ANALYST_TEXT_EVENT_FIELDS:
+        with pytest.raises(CpasswordInAnalystTextError):
+            _guard_payload(
+                "audit.narrate" if event_type == "*" else event_type, {field: f"x {CT2}"}
+            )
 
 
 def test_every_llm_call_is_inventoried() -> None:
@@ -873,7 +1562,7 @@ def test_every_llm_call_is_inventoried() -> None:
             _assert_guarded(*key, found[key])
 
 
-def test_every_web_form_field_is_inventoried() -> None:
+def test_every_declared_web_input_is_inventoried() -> None:
     found = {key for m, inv in INVENTORY.items() if ".web." in m for key in inv.inputs}
     assert found == set(WEB_INPUTS)
     ask = INVENTORY["gpo_lens.web.routes.ask"]
@@ -895,6 +1584,52 @@ def test_every_web_form_field_is_inventoried() -> None:
             if isinstance(c, ast.Call) and getattr(c.func, "id", "") == "append_triage_event"
         ],
     )
+
+
+def test_every_raw_request_read_is_inventoried() -> None:
+    found = {(m, where, attr) for m, inv in INVENTORY.items() for where, attr in inv.raw_reads}
+    assert found == set(RAW_REQUEST_READS)
+    # The one header that names something stored is validated before return.
+    _assert_guarded(
+        "gpo_lens.web.auth",
+        "_forwarded_user",
+        [
+            node.lineno
+            for node in ast.walk(INVENTORY["gpo_lens.web.auth"].functions["_forwarded_user"])
+            if isinstance(node, ast.Return)
+            and node.value is not None
+            and not (isinstance(node.value, ast.Constant) and node.value.value is None)
+        ],
+    )
+
+
+def test_no_handler_reads_a_raw_request_body() -> None:
+    assert {(m, w) for m, inv in INVENTORY.items() for w in inv.body_reads} == set()
+
+
+def test_post_route_parameters_are_declared_inputs() -> None:
+    """A new POST parameter must be a declared Form/File field (inventoried
+    above), a dependency, the Request, or an integer path id."""
+    for module, inv in INVENTORY.items():
+        for function, method in inv.routes.items():
+            if method == "get":
+                continue
+            for arg, default in _params(inv.functions[function]):
+                annotation = ast.unparse(arg.annotation) if arg.annotation else ""
+                declared = isinstance(default, ast.Call) and inv._name(default.func) in (
+                    _WEB_INPUTS | {"Depends"}
+                )
+                assert declared or annotation in {"Request", "int"}, (module, function, arg.arg)
+
+
+def test_get_routes_hold_no_sink() -> None:
+    for module, inv in INVENTORY.items():
+        for function, method in inv.routes.items():
+            if method != "get":
+                continue
+            assert function not in inv.events, (module, function)
+            assert function not in inv.llm, (module, function)
+            assert not any(where == function for where, _ in inv.sql), (module, function)
 
 
 def test_no_json_api_route_accepts_a_request_body() -> None:

@@ -9,7 +9,7 @@ import os
 import sys
 
 from gpo_lens import queries
-from gpo_lens.analyst_text import CpasswordInAnalystTextError, check_analyst_text
+from gpo_lens.analyst_text import CpasswordInAnalystTextError, check_analyst_text, checked_slice
 from gpo_lens.cli._helpers import _get_admx, _get_estate, _render_json
 from gpo_lens.cli._helpers import _safe_print as print
 from gpo_lens.detection import mask_cpassword
@@ -152,7 +152,9 @@ def cmd_explain_setting(args: argparse.Namespace) -> int:
         "authoritative ADMX context. Begin your answer with "
         "'NARRATED/UNVERIFIED:' and keep the explanation brief and factual."
     )
-    if _refused(identity, "setting identity") or _refused(identity[:500], "setting identity"):
+    if _refused(checked_slice(identity, 500), "setting identity") or _refused(
+        identity[:500], "setting identity"
+    ):
         return 1
     try:
         answer = call_llm(system, identity[:500])

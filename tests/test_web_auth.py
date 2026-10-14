@@ -286,14 +286,41 @@ class TestForwardedUser:
         req = FakeRequest("127.0.0.1", {"X-Forwarded-User": "   "})
         assert get_principal(req) == LOOPBACK_PRINCIPAL
 
-    def test_forwarded_name_is_sanitized_and_capped(self, monkeypatch):
+    def test_forwarded_name_control_characters_are_stripped(self, monkeypatch):
         monkeypatch.delenv("GPO_LENS_AUTH_TOKEN", raising=False)
         monkeypatch.setenv("GPO_LENS_FORWARDED_USER_HEADER", "X-Forwarded-User")
-        req = FakeRequest("127.0.0.1", {"X-Forwarded-User": "al\x00ice\r\n" + "x" * 400})
-        principal = get_principal(req)
-        assert "\x00" not in principal.name
-        assert "\n" not in principal.name
-        assert len(principal.name) <= 256
+        req = FakeRequest("127.0.0.1", {"X-Forwarded-User": "CONTOSO\\al\x00ice\r\n"})
+        assert get_principal(req).name == "CONTOSO\\alice"
+
+    @pytest.mark.parametrize(
+        "name",
+        ["alice", "CONTOSO\\alice", "alice@contoso.example", "CONTOSO\\John O'Brien", "WS01$"],
+    )
+    def test_account_name_shapes_are_accepted(self, monkeypatch, name):
+        monkeypatch.delenv("GPO_LENS_AUTH_TOKEN", raising=False)
+        monkeypatch.setenv("GPO_LENS_FORWARDED_USER_HEADER", "X-Forwarded-User")
+        assert get_principal(FakeRequest("127.0.0.1", {"X-Forwarded-User": name})).name == name
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "alice" + "x" * 400,  # over 256 characters: refused, not truncated
+            "9hvdrKc5/nzvwS32jU565f3lwY+fcBJxEh3Rn2Jx1O0=",  # base64 alphabet
+            "RXx2nznYZEGZwOW9vPvIWzfOkcveH8Gw6mtE8TBDbdc",  # cpassword-shaped, no + / =
+            'cpassword="x"',
+            "<script>",
+            "a,b",
+        ],
+    )
+    def test_forwarded_name_that_is_not_an_account_name_fails_closed(self, monkeypatch, name):
+        # The name is stored (triage actor, audit events) and logged, so it is
+        # refused on entry (401) rather than truncated or passed through.
+        monkeypatch.delenv("GPO_LENS_AUTH_TOKEN", raising=False)
+        monkeypatch.setenv("GPO_LENS_FORWARDED_USER_HEADER", "X-Forwarded-User")
+        with pytest.raises(HTTPException) as exc:
+            get_principal(FakeRequest("127.0.0.1", {"X-Forwarded-User": name}))
+        assert exc.value.status_code == 401
+        assert name not in str(exc.value.detail)
 
     def test_token_mode_unaffected_by_forwarded_header(self, monkeypatch):
         # Explicit bearer auth wins; the forwarded header only applies on the

@@ -31,12 +31,22 @@ It **refuses** — it never rewrites — text that contains:
 
 Tokens are runs of the base64 alphabet (both alphabets) with any trailing
 ``=`` padding; a token that ends a line is also joined with following lines
-that each hold one token (a value wrapped across lines), and windows between
+that each hold one token and with the token that starts the next line (a value
+wrapped across lines, with prose before and after it), and windows between
 ``-``, ``_`` and ``/`` inside a token are tried too (``pw-<value>``,
 ``/tmp/<value>/x``).
 
+(c) text the guard cannot inspect fully is refused as ``uninspectable``:
+    structure nested beyond the redactor's recursion limit, or XML that the
+    safe parser rejects for another reason than not being XML (entity
+    declarations, external references). The guard is total: it returns or
+    raises :class:`CpasswordInAnalystTextError`, nothing else.
+
 The guard is for accidents, not a determined insider: a value deliberately
 broken up (spaces every four characters, homoglyphs, re-encoding) passes.
+Callers check what they store or send plus :data:`STRADDLE_MARGIN` characters
+past a truncation point (:func:`checked_slice`), so the work per request is
+bounded however large the submitted field is.
 
 Refusals carry the field name and a fixed reason, never the matched value or
 any part of it.
@@ -54,6 +64,7 @@ from base64 import b64decode
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Literal
+from xml.etree.ElementTree import ParseError
 
 import defusedxml.ElementTree as SafeET
 
@@ -66,22 +77,34 @@ from gpo_lens.redaction import (
     redact_structure,
 )
 
-Kind = Literal["labelled", "ciphertext"]
+Kind = Literal["labelled", "ciphertext", "uninspectable"]
 
 _REASON = (
     "looks like it contains a Group Policy Preferences cpassword; remove it — the "
     "value is a recoverable credential (anyone can decrypt it with the key Microsoft "
     "published, MS14-025). Nothing was saved or sent."
 )
+_UNINSPECTABLE = (
+    "could not be checked for a Group Policy Preferences cpassword (it is nested "
+    "too deeply, or is XML with entity declarations or external references); "
+    "simplify it — a cpassword is a recoverable credential (MS14-025). Nothing "
+    "was saved or sent."
+)
 _HINTS: dict[str, str] = {
     "labelled": (
         " If no value was meant, do not write a word directly after 'cpassword:' or 'cpassword='."
     ),
     "ciphertext": (
-        " If it is not a credential (for example a base64-encoded hash), "
-        "write it in hex or leave it out."
+        " If it is not a credential (for example a base64-encoded hash or a line of a "
+        "PEM certificate), refer to it by its hex hash or thumbprint, or leave it out."
     ),
+    "uninspectable": "",
 }
+
+# Characters past a truncation point that callers also check, so a value
+# straddling the cut is still seen: the longest candidate (``_MAX_WINDOW``) plus
+# room for the line breaks of a wrapped value.
+STRADDLE_MARGIN = 1024
 
 # A base64 run (standard or URL-safe alphabet) with any trailing padding.
 # Every pattern here is matched with ``finditer``/``fullmatch`` only, never an
@@ -115,17 +138,45 @@ class CpasswordInAnalystTextError(ValueError):
     def __init__(self, field: str, kind: Kind) -> None:
         self.field = field
         self.kind = kind
-        super().__init__(f"The {field} {_REASON}{_HINTS[kind]}")
+        reason = _UNINSPECTABLE if kind == "uninspectable" else _REASON
+        super().__init__(f"The {field} {reason}{_HINTS[kind]}")
 
 
 def check_analyst_text(text: str | None, field: str) -> None:
     """Raise :class:`CpasswordInAnalystTextError` if *text* carries a cpassword.
 
     *field* is a human label for the refusal ("note", "rationale", "question").
+    Total: returns, or raises :class:`CpasswordInAnalystTextError`; never
+    anything else.
     """
     kind = cpassword_material(text or "")
     if kind is not None:
         raise CpasswordInAnalystTextError(field, kind)
+
+
+def checked_slice(text: str | None, stored_length: int) -> str:
+    """The part of *text* a caller that keeps ``text[:stored_length]`` must
+    check: what it keeps plus :data:`STRADDLE_MARGIN` characters, so a value
+    cut by the truncation is still refused and the work stays bounded."""
+    return (text or "")[: stored_length + STRADDLE_MARGIN]
+
+
+# An account name forwarded by a trusted proxy: ``user``, ``user@domain`` or
+# ``DOMAIN\user``. Word characters (any script), dot, hyphen, apostrophe,
+# dollar (computer accounts) and inner spaces; never ``+``, ``/`` or ``=``.
+_ACCOUNT = re.compile(r"(?:[\w.-]{1,63}\\)?[\w.$'-]+(?: [\w.$'-]+)*(?:@[\w-]+(?:\.[\w-]+)*)?")
+MAX_PRINCIPAL_LENGTH = 256
+
+
+def valid_principal_name(name: str) -> bool:
+    """Is *name* an account name shape (and free of cpassword material)?
+
+    Used for names that arrive from outside (a forwarded-user header); the
+    built-in principals already match.
+    """
+    if not name or len(name) > MAX_PRINCIPAL_LENGTH or not _ACCOUNT.fullmatch(name):
+        return False
+    return cpassword_material(name) is None
 
 
 def cpassword_material(text: str) -> Kind | None:
@@ -135,8 +186,9 @@ def cpassword_material(text: str) -> Kind | None:
     """
     if not text:
         return None
-    if _labelled(text):
-        return "labelled"
+    labelled = _labelled(text)
+    if labelled is not None:
+        return labelled
     seen: set[str] = set()
     for token in _candidates(text):
         if token not in seen:
@@ -149,26 +201,39 @@ def cpassword_material(text: str) -> Kind | None:
 # --- (a) labelled forms ---------------------------------------------------------
 
 
-def _labelled(text: str) -> bool:
+def _labelled(text: str) -> Kind | None:
+    """``labelled``, ``uninspectable`` (structure the redactor cannot walk, or
+    XML the safe parser rejects for another reason than not being XML), or
+    None. Never raises."""
     if mentions_cpassword(text) and redact_inline(text)[1]:
-        return True
+        return "labelled"
     if mentions_cpassword(text) or "\\u" in text:
         try:
             obj = json.loads(text)
-        except (ValueError, RecursionError):
-            pass
+        except RecursionError:
+            return "uninspectable"
+        except ValueError:
+            pass  # not JSON
         else:
-            if redact_structure(obj)[1]:
-                return True
+            try:
+                if redact_structure(obj)[1]:
+                    return "labelled"
+            except RecursionError:
+                return "uninspectable"
     if "<" in text or "&" in text:
         for document in (text, f"<gpo-lens-text>{text}</gpo-lens-text>"):
             try:
                 root = SafeET.fromstring(document)
-            except Exception:  # noqa: S112 - not XML (or refused by defusedxml)
-                continue
-            if redact_element_tree(root):
-                return True
-    return False
+            except ParseError:
+                continue  # not XML
+            except Exception:  # noqa: BLE001 - entities, external refs, encoding, depth
+                return "uninspectable"
+            try:
+                if redact_element_tree(root):
+                    return "labelled"
+            except RecursionError:
+                return "uninspectable"
+    return None
 
 
 # --- (b) unlabelled ciphertext-shaped tokens -------------------------------------
@@ -197,8 +262,10 @@ def _windows(token: str) -> Iterator[str]:
 
 
 def _wrapped(text: str) -> Iterator[str]:
-    """A token ending a line joined with following one-token lines (each prefix
-    of the chain, so a value wrapped before a one-word line is still seen)."""
+    """A token ending a line joined with the following one-token lines and
+    with the token that starts the next line after them (prose may follow it),
+    each prefix of that chain, so a value wrapped across lines with commentary
+    before and after it is still seen."""
     lines = text.splitlines()
     if len(lines) < 2:
         return
@@ -207,20 +274,29 @@ def _wrapped(text: str) -> Iterator[str]:
     stripped = [line.strip() for line in lines]
     sizes = [len(canonical(p)) if _TOKEN.fullmatch(p) else -1 for p in stripped]
     for i in range(len(lines) - 1):
-        if sizes[i + 1] < 0:
-            continue
         head = _line_end_token(lines[i])
         if head is None:
             continue
         length = len(canonical(head))
+        pieces = [head]
         for j in range(i + 1, min(len(lines), i + 1 + _MAX_WRAPPED_LINES)):
             if sizes[j] < 0:
+                # The chain ends at a line with more than one token: join the
+                # token that starts it (``<rest of value> removed``).
+                lead = _TOKEN.match(stripped[j])
+                if lead is not None:
+                    piece = lead.group(0)
+                    if length + len(canonical(piece)) <= _MAX_WINDOW and _block_length(
+                        length + len(canonical(piece))
+                    ):
+                        yield "".join(pieces) + piece
                 break
             length += sizes[j]
             if length > _MAX_WINDOW:
                 break
+            pieces.append(stripped[j])
             if _block_length(length):
-                yield head + "".join(stripped[i + 1 : j + 1])
+                yield "".join(pieces)
 
 
 def _line_end_token(line: str) -> str | None:
@@ -315,16 +391,24 @@ def _word_shaped(token: str) -> bool:
 
 # --- existing rows (read-only) ----------------------------------------------------
 
-# Stored analyst-typed text: every column a guarded write path fills.
-# ``finding_triage`` is the legacy v1 table (never written since schema v8; its
-# rows were copied into ``finding_triage_event``) and is listed for audit.
+# Stored operator-supplied text: every column a guarded write path fills — the
+# analyst-typed note and rationale, and the actor (a principal name, which can
+# come from a forwarded-user header). ``finding_triage`` is the legacy v1 table
+# (never written since schema v8; its rows were copied into
+# ``finding_triage_event``) and is listed for audit.
 ANALYST_TEXT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("finding_triage_event", "note"),
     ("finding_triage_event", "rationale"),
+    ("finding_triage_event", "actor"),
     ("finding_triage", "note"),
+    ("finding_triage", "actor"),
 )
-# Analyst-typed fields inside ``events`` payloads, by event type.
-ANALYST_TEXT_EVENT_FIELDS: tuple[tuple[str, str], ...] = (("audit.narrate", "question"),)
+# Operator-supplied fields inside ``events`` payloads, by event type (``*``:
+# every event type; the principal name is in every audit event).
+ANALYST_TEXT_EVENT_FIELDS: tuple[tuple[str, str], ...] = (
+    ("audit.narrate", "question"),
+    ("*", "principal"),
+)
 
 
 @dataclass(frozen=True)
@@ -355,9 +439,16 @@ def refusable_rows(conn: sqlite3.Connection) -> list[RefusableRow]:
                 found.append(RefusableRow(table, column, int(row_id), kind))
     if "events" in tables:
         for event_type, field in ANALYST_TEXT_EVENT_FIELDS:
-            rows = conn.execute(
-                "SELECT id, payload FROM events WHERE event_type = ? ORDER BY id", (event_type,)
-            )
+            if event_type == "*":
+                rows = conn.execute(
+                    "SELECT id, payload FROM events WHERE instr(payload, ?) > 0 ORDER BY id",
+                    (f'"{field}"',),
+                )
+            else:
+                rows = conn.execute(
+                    "SELECT id, payload FROM events WHERE event_type = ? ORDER BY id",
+                    (event_type,),
+                )
             for row_id, payload in rows:
                 try:
                     obj = json.loads(payload)
@@ -378,9 +469,13 @@ def _stored_kind(value: object) -> Kind | None:
 __all__ = [
     "ANALYST_TEXT_COLUMNS",
     "ANALYST_TEXT_EVENT_FIELDS",
+    "MAX_PRINCIPAL_LENGTH",
+    "STRADDLE_MARGIN",
     "CpasswordInAnalystTextError",
     "RefusableRow",
     "check_analyst_text",
+    "checked_slice",
     "cpassword_material",
     "refusable_rows",
+    "valid_principal_name",
 ]

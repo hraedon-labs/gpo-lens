@@ -43,7 +43,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from gpo_lens.analyst_text import check_analyst_text
+from gpo_lens.analyst_text import check_analyst_text, checked_slice
 from gpo_lens.finding_model import (
     FINGERPRINT_VERSION,
     ClaimLevel,
@@ -178,7 +178,8 @@ def triage_finding(
     if status not in ("open", "acknowledged", "accepted_risk"):
         raise ValueError(f"invalid triage status: {status!r}")
     # Refused before anything is read or written; the error never echoes it.
-    check_analyst_text(note, "note")
+    check_analyst_text(checked_slice(note, 2000), "note")
+    check_analyst_text(checked_slice(actor, 256), "actor")
     note = (note or "")[:2000]
     actor = (actor or "unknown")[:256]
 
@@ -753,14 +754,16 @@ def append_triage_event(
     requires actor, rationale, timestamp, and optional expiry").
     *expires_at* is the optional expiry for risk acceptance.
 
-    *note* and *rationale* are analyst-typed: text carrying GPP cpassword
-    material is refused with
-    :class:`~gpo_lens.analyst_text.CpasswordInAnalystTextError` (a
+    *note* and *rationale* are analyst-typed and *actor* can come from a
+    forwarded-user header: text carrying GPP cpassword material is refused
+    with :class:`~gpo_lens.analyst_text.CpasswordInAnalystTextError` (a
     ``ValueError``) before anything is written, because this log is
-    append-only.
+    append-only. What is checked is what is stored plus
+    ``analyst_text.STRADDLE_MARGIN`` characters past the truncation.
     """
-    check_analyst_text(note, "note")
-    check_analyst_text(rationale, "rationale")
+    check_analyst_text(checked_slice(note, 2000), "note")
+    check_analyst_text(checked_slice(rationale, 2000), "rationale")
+    check_analyst_text(checked_slice(actor, 256), "actor")
     if action not in _VALID_TRIAGE_ACTIONS:
         raise ValueError(f"invalid triage action: {action!r}")
     if action == "accepted_risk" and not rationale.strip():
@@ -788,10 +791,11 @@ def append_triage_event(
 
     note = (note or "")[:2000]
     rationale = (rationale or "")[:2000]
+    actor = (actor or "unknown")[:256]
     # Truncation can cut a token into a different shape: check what is stored.
     check_analyst_text(note, "note")
     check_analyst_text(rationale, "rationale")
-    actor = (actor or "unknown")[:256]
+    check_analyst_text(actor, "actor")
     expires_iso = expires_at.isoformat() if expires_at else None
 
     cursor = conn.execute(
