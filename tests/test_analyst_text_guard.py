@@ -32,6 +32,7 @@ import sqlite3
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -595,6 +596,21 @@ def _seed_legacy_rows(db: Path) -> dict[str, int]:
             (json.dumps({"principal": "old", "question": f"is {CT3} bad?", "outcome": "error"}),),
         )
         ids["question"] = int(cursor.lastrowid or 0)
+        # Sol r3 B2: the legacy v1 table's rationale (unlabelled, so the v11
+        # scrub leaves it) must be listed too.
+        cursor = conn.execute(
+            "INSERT INTO finding_triage (finding_id, status, note, rationale, actor, timestamp) "
+            "VALUES (?, 'accepted_risk', 'clean', ?, 'old', '2025-01-01')",
+            (finding_id, CT3),
+        )
+        ids["legacy_rationale"] = int(cursor.lastrowid or 0)
+        # Sol r3 B1: a BLOB in a TEXT column, as UTF-16, is read every way.
+        cursor = conn.execute(
+            "INSERT INTO finding_triage_event (occurrence_id, action, actor, occurred_at, note) "
+            "VALUES (?, 'commented', 'old', '2025-01-02T00:00:00+00:00', ?)",
+            (finding_id, f"pw {CT2}".encode("utf-16-le")),
+        )
+        ids["blob_note"] = int(cursor.lastrowid or 0)
         conn.commit()
         return ids
     finally:
@@ -612,6 +628,8 @@ def test_refusable_rows_lists_ids_and_kinds_only(web_db: Path) -> None:
         ("finding_triage_event", "note", ids["note"], "ciphertext"),
         ("finding_triage_event", "rationale", ids["rationale"], "labelled"),
         ("events", "payload.question", ids["question"], "ciphertext"),
+        ("finding_triage", "rationale", ids["legacy_rationale"], "ciphertext"),
+        ("finding_triage_event", "note", ids["blob_note"], "ciphertext"),
     }
 
 
@@ -632,8 +650,19 @@ def test_analyst_text_check_cli_is_read_only_and_never_prints_values(
             assert secret not in output
     assert "Nothing was changed" in text
     data = json.loads(raw)["data"]
-    assert data["count"] == 3
-    assert {row["id"] for row in data["rows"]} == {ids["note"], ids["rationale"], ids["question"]}
+    assert data["count"] == 5
+    assert {(row["table"], row["id"]) for row in data["rows"]} == {
+        ("finding_triage_event", ids["note"]),
+        ("finding_triage_event", ids["rationale"]),
+        ("events", ids["question"]),
+        ("finding_triage", ids["legacy_rationale"]),
+        ("finding_triage_event", ids["blob_note"]),
+    }
+    assert any(
+        line.split()[:3] == ["finding_triage", "rationale", str(ids["legacy_rationale"])]
+        for line in text.splitlines()
+        if line.strip()
+    )
 
 
 def test_analyst_text_check_cli_clean_database_exits_zero(
@@ -1428,6 +1457,175 @@ def test_xml_entity_declarations_stay_uninspectable_with_a_hint() -> None:
     assert cpassword_material("<!DOCTYPE x><x>&amp;</x>") is None
 
 
+# --- review round 3 regressions ---------------------------------------------------------------
+
+
+def _v7_db_with_raw_triage(tmp_path: Path, rows: list[tuple[Any, ...]]) -> tuple[Path, int]:
+    """Sol r3's probe setup: a v7-marked database with raw legacy rows
+    (status, note, rationale, actor, timestamp), values of any storage class."""
+    db, finding_id = _legacy_db(tmp_path)
+    conn = sqlite3.connect(db)
+    try:
+        for status, note, rationale, actor, ts in rows:
+            conn.execute(
+                "INSERT INTO finding_triage (finding_id, status, note, rationale, actor, "
+                "timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+                (finding_id, status, note, rationale, actor, ts),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return db, finding_id
+
+
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-16-le", "utf-16-be"])
+def test_v8_migration_never_copies_a_refused_blob(tmp_path: Path, encoding: str) -> None:
+    """Sol r3 B1: a BLOB actor/note was copied verbatim, with no warning."""
+    from gpo_lens.analyst_text import REFUSED_PRINCIPAL_MARKER, REFUSED_TEXT_MARKER
+
+    blob = _LEGACY_ACTOR.encode(encoding)
+    db, _ = _v7_db_with_raw_triage(tmp_path, [("acknowledged", blob, "", blob, "2025-01-03")])
+    with pytest.warns(UserWarning, match=r"2 legacy field"):
+        _reopen(db)
+    conn = sqlite3.connect(db)
+    try:
+        active = conn.execute(
+            "SELECT typeof(actor), actor, typeof(note), note FROM finding_triage_event"
+        ).fetchall()
+        record = conn.execute(
+            "SELECT payload FROM events WHERE event_type = 'maintenance.analyst_text_substituted'"
+        ).fetchone()[0]
+        listed = {(r.table, r.column) for r in refusable_rows(conn)}
+    finally:
+        conn.close()
+    assert active == [("text", REFUSED_PRINCIPAL_MARKER, "text", REFUSED_TEXT_MARKER)]
+    assert _LEGACY_ACTOR not in record
+    assert listed == {("finding_triage", "actor"), ("finding_triage", "note")}
+    assert _all_bytes(db).count(blob) == 2  # the two untouched legacy cells only
+
+
+def test_v8_migration_storage_class_rule(tmp_path: Path) -> None:
+    """Clean BLOBs are copied unchanged; INTEGER/REAL/NULL are copied; an
+    undecodable-but-clean BLOB is copied (every reading passed)."""
+    from gpo_lens.analyst_text import migrated_value
+
+    assert migrated_value(b"clean note", "note") == (b"clean note", None)
+    assert migrated_value(b"\xff\xfe\xfd", "note") == (b"\xff\xfe\xfd", None)
+    assert migrated_value(42, "note") == (42, None)
+    assert migrated_value(1.5, "note") == (1.5, None)
+    assert migrated_value(None, "note") == (None, None)
+    assert migrated_value(object(), "note")[1] == "uninspectable"
+    db, _ = _v7_db_with_raw_triage(
+        tmp_path, [("acknowledged", b"clean note", "", "alice", "2025-01-05")]
+    )
+    _reopen(db)
+    conn = sqlite3.connect(db)
+    try:
+        assert conn.execute("SELECT typeof(note), note FROM finding_triage_event").fetchall() == [
+            ("blob", b"clean note")
+        ]
+    finally:
+        conn.close()
+
+
+def test_checker_covers_every_operator_column_the_migration_reads() -> None:
+    """Sol r3 B2: the checker and the migration must not drift. Every column
+    the v7->v8 copy reads from finding_triage is either a system column or in
+    ANALYST_TEXT_COLUMNS, and every operator column it reads is listed."""
+    node = INVENTORY["gpo_lens.store"].functions["_migrate_legacy_triage"]
+    sql = next(
+        c.value
+        for c in ast.walk(node)
+        if isinstance(c, ast.Constant)
+        and isinstance(c.value, str)
+        and "FROM finding_triage t" in c.value
+    )
+    read = set(re.findall(r"\bt\.(\w+)", sql))
+    system = {"id", "finding_id", "status", "timestamp", "expires_at"}
+    operator = {column for table, column in ANALYST_TEXT_COLUMNS if table == "finding_triage"}
+    assert read - system == operator == {"actor", "note", "rationale"}
+    assert GUARDED_FIELDS[("gpo_lens.store", "_migrate_legacy_triage")] == operator
+
+
+def test_v8_migration_marker_event_does_not_swallow_a_clean_row(tmp_path: Path) -> None:
+    """Sol r3 N1: a marker event used to satisfy the match for a clean row."""
+    from gpo_lens.analyst_text import REFUSED_PRINCIPAL_MARKER, REFUSED_TEXT_MARKER
+
+    db, finding_id = _v7_db_with_raw_triage(
+        tmp_path, [("acknowledged", "clean legacy note", "", "alice", "2025-01-04")]
+    )
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "INSERT INTO finding_triage_event (occurrence_id, action, actor, occurred_at, "
+            "note, rationale) VALUES (?, 'acknowledged', ?, '2025-01-04', ?, ?)",
+            (finding_id, REFUSED_PRINCIPAL_MARKER, REFUSED_TEXT_MARKER, REFUSED_TEXT_MARKER),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    _reopen(db)
+    conn = sqlite3.connect(db)
+    try:
+        rows = conn.execute("SELECT actor, note FROM finding_triage_event ORDER BY id").fetchall()
+    finally:
+        conn.close()
+    assert rows == [
+        (REFUSED_PRINCIPAL_MARKER, REFUSED_TEXT_MARKER),
+        ("alice", "clean legacy note"),
+    ]
+
+
+def test_v8_migration_keeps_multiplicity(tmp_path: Path) -> None:
+    """One existing copy stands for one legacy row: of three identical legacy
+    rows with one already copied, exactly two are added."""
+    row = ("acknowledged", "same", "", "alice", "2025-01-06")
+    db, finding_id = _v7_db_with_raw_triage(tmp_path, [row, row, row])
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "INSERT INTO finding_triage_event (occurrence_id, action, actor, occurred_at, "
+            "note, rationale) VALUES (?, 'acknowledged', 'alice', '2025-01-06', 'same', '')",
+            (finding_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    _reopen(db)
+    conn = sqlite3.connect(db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM finding_triage_event").fetchone()[0] == 3
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        " ",
+        "a b\\ ",
+        "a@b\\user",
+        "a@b@c",
+        "NT AUTHORITY SYSTEM",
+        "NT AUTHORITY\x85SYSTEM",
+        "DOM\\ali‮ce",
+        "DOM\\ali​ce",
+        "DOM\\a b",
+        "DOM\\ali\rce",
+        "DOM\\ali\tce",
+        "DOM\\ali\x7fce",
+        " DOM\\alice",
+        "DOM \\alice",
+        "DOM\\alice ",
+    ],
+)
+def test_names_with_control_format_or_stray_space_are_refused(name: str) -> None:
+    """Sol r3 N2 / DeepSeek r3 NB-2/NB-3: the code does what the docs say."""
+    from gpo_lens.analyst_text import valid_principal_name
+
+    assert not valid_principal_name(name)
+
+
 # --- inventory: every write path goes through the guard -------------------------------------
 #
 # Each sink and each request source below is either GUARDED or classified with
@@ -1524,19 +1722,23 @@ EVENT_WRITERS: dict[tuple[str, str], frozenset[str] | str] = {
     ),
 }
 # Payload keys that are not operator text: fixed strings, counts and ids.
-EVENT_SYSTEM_KEYS = frozenset(
-    {
-        "outcome",
-        "snapshot_id",
-        "source_table",
-        "substitutions",
-        "changed",
-        "discovered_value_count",
-        "rewritten_event_ids",
-        "rehashed_event_ids",
-        "pre_existing_broken_event_ids",
-    }
-)
+# Per event type (DeepSeek r3 NB-5): a key is only "system" for the type that
+# writes it, so reusing one of these names for operator text elsewhere fails.
+EVENT_SYSTEM_KEYS: dict[str, frozenset[str]] = {
+    "audit.narrate": frozenset({"outcome"}),
+    "audit.ingest": frozenset(),
+    "audit.snapshot_delete": frozenset({"snapshot_id"}),
+    "maintenance.analyst_text_substituted": frozenset({"source_table", "substitutions"}),
+    "maintenance.cpassword_scrub": frozenset(
+        {
+            "changed",
+            "discovered_value_count",
+            "rewritten_event_ids",
+            "rehashed_event_ids",
+            "pre_existing_broken_event_ids",
+        }
+    ),
+}
 LLM_CALLERS = {
     ("gpo_lens.cli._narration", "cmd_ask"): "GUARDED",
     ("gpo_lens.cli._narration", "cmd_explain_setting"): "GUARDED",
@@ -1866,7 +2068,8 @@ def test_every_event_write_and_payload_key_is_inventoried() -> None:
                 for kind, field in ANALYST_TEXT_EVENT_FIELDS
                 if kind in ("*", event_type.value)
             }
-            assert literal <= guarded | EVENT_SYSTEM_KEYS, (key, event_type.value, literal)
+            system = EVENT_SYSTEM_KEYS.get(event_type.value, frozenset())
+            assert literal <= guarded | system, (key, event_type.value, literal)
             keys |= literal
         assert keys == expected, key
 

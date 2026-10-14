@@ -61,6 +61,7 @@ import binascii
 import json
 import re
 import sqlite3
+import unicodedata
 from base64 import b64decode
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -176,9 +177,22 @@ _UPN_DOMAIN = re.compile(r"[\w-]+(?:\.[\w-]+)*")
 MAX_PRINCIPAL_LENGTH = 256
 
 
+# Unicode categories never allowed in a name: control (C0, DEL, C1), format
+# (bidi overrides, zero-width), line/paragraph separators, surrogates and
+# private use.
+_NAME_FORBIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp", "Cs", "Co"})
+
+
 def _account_part(part: str) -> bool:
-    return bool(part) and not any(
-        ch in _ACCOUNT_FORBIDDEN or ord(ch) < 32 or ord(ch) == 127 for ch in part
+    """A non-empty part with no outer spaces, no whitespace but the plain
+    space, and none of the forbidden characters or categories."""
+    if not part or part != part.strip() or not part.strip():
+        return False
+    return not any(
+        ch in _ACCOUNT_FORBIDDEN
+        or (ch.isspace() and ch != " ")
+        or unicodedata.category(ch) in _NAME_FORBIDDEN_CATEGORIES
+        for ch in part
     )
 
 
@@ -186,9 +200,13 @@ def valid_principal_name(name: str) -> bool:
     """Is *name* an account name (and free of cpassword material)?
 
     Shapes: ``user``, ``user@domain`` (DNS-style domain) or ``DOMAIN\\user``
-    (the domain may contain spaces: ``NT AUTHORITY``, ``IIS APPPOOL``). Each
-    part may hold any character an AD account name may, i.e. none of
-    ``"/\\[]:;|=,+*?<>`` and no control character; at most 256 characters.
+    (the domain may contain inner spaces: ``NT AUTHORITY``, ``IIS APPPOOL``),
+    at most 256 characters. Each part is non-empty, has no leading or trailing
+    space, and contains none of ``"/\\[]:;|=,+*?<>`` (the characters AD
+    forbids in an account name), no whitespace other than the plain space, and
+    no character of Unicode category Cc (C0, DEL, C1 controls), Cf (bidi and
+    zero-width format characters), Zl/Zp (line and paragraph separators), Cs
+    or Co. ``@`` appears only once, as the UPN separator, never with ``\\``.
     Used for names that arrive from outside (a forwarded-user header); the
     built-in principals already match.
     """
@@ -196,11 +214,11 @@ def valid_principal_name(name: str) -> bool:
         return False
     domain, backslash, user = name.partition("\\")
     if backslash:
-        if not (_account_part(domain) and _account_part(user)) or "@" in user:
+        if not (_account_part(domain) and _account_part(user)) or "@" in name:
             return False
     else:
         user, at, upn_domain = name.partition("@")
-        if not _account_part(user):
+        if not _account_part(user) or "@" in upn_domain:
             return False
         if at and not _UPN_DOMAIN.fullmatch(upn_domain):
             return False
@@ -210,14 +228,23 @@ def valid_principal_name(name: str) -> bool:
 def migrated_value(value: object, field: str) -> tuple[object, Kind | None]:
     """The value a migration may copy for a legacy *field*, and why it was
     replaced: the value itself, or (when the guard would refuse it) a marker
-    with the refusal kind. Never raises; never returns the refused value."""
-    if not isinstance(value, str):
+    with the refusal kind. Never raises; never returns the refused value.
+
+    The rule by SQLite storage class (a TEXT column can hold any of them):
+    TEXT is checked; a BLOB is checked under every reading of it
+    (:func:`stored_kind`) and copied unchanged only when every reading passes;
+    INTEGER, REAL and NULL are copied (their text has no letters but ``e``,
+    ``inf`` and ``nan``, so it can carry neither a label nor a base64 token
+    of mixed case). Anything else is replaced by the marker as
+    ``uninspectable``.
+    """
+    if value is None or isinstance(value, int | float):
         return value, None
-    kind = cpassword_material(value)
-    if kind is None:
+    kind = stored_kind(value)
+    if kind is None and isinstance(value, str | bytes):
         return value, None
     marker = REFUSED_PRINCIPAL_MARKER if field == "actor" else REFUSED_TEXT_MARKER
-    return marker, kind
+    return marker, kind or "uninspectable"
 
 
 def cpassword_material(text: str) -> Kind | None:
@@ -442,6 +469,7 @@ ANALYST_TEXT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("finding_triage_event", "rationale"),
     ("finding_triage_event", "actor"),
     ("finding_triage", "note"),
+    ("finding_triage", "rationale"),
     ("finding_triage", "actor"),
 )
 # Operator-supplied fields inside ``events`` payloads, by event type (``*``:
@@ -475,7 +503,7 @@ def refusable_rows(conn: sqlite3.Connection) -> list[RefusableRow]:
             continue
         query = f'SELECT id, "{column}" FROM "{table}" ORDER BY id'  # noqa: S608 - fixed names
         for row_id, value in conn.execute(query):
-            kind = _stored_kind(value)
+            kind = stored_kind(value)
             if kind is not None:
                 found.append(RefusableRow(table, column, int(row_id), kind))
     if "events" in tables:
@@ -495,16 +523,40 @@ def refusable_rows(conn: sqlite3.Connection) -> list[RefusableRow]:
                     obj = json.loads(payload)
                 except (TypeError, ValueError, RecursionError):
                     continue
-                kind = _stored_kind(obj.get(field)) if isinstance(obj, dict) else None
+                kind = stored_kind(obj.get(field)) if isinstance(obj, dict) else None
                 if kind is not None:
                     found.append(RefusableRow("events", f"payload.{field}", int(row_id), kind))
     return found
 
 
-def _stored_kind(value: object) -> Kind | None:
+def stored_kind(value: object) -> Kind | None:
+    """:func:`cpassword_material` of a stored value of any storage class.
+
+    A BLOB is read every way the v11 scrub reads one — UTF-8, Latin-1, and
+    UTF-16 little- and big-endian when its length is even — and refused if any
+    reading is (a UTF-16 BLOB of an ASCII token reads as UTF-8 with a NUL
+    between characters, which hides the token). INTEGER, REAL and NULL carry
+    no material. Never raises.
+    """
+    if isinstance(value, bytearray | memoryview):
+        value = bytes(value)
     if isinstance(value, bytes):
-        value = value.decode("utf-8", "replace")
+        for text in _blob_readings(value):
+            kind = cpassword_material(text)
+            if kind is not None:
+                return kind
+        return None
     return cpassword_material(value) if isinstance(value, str) else None
+
+
+def _blob_readings(blob: bytes) -> Iterator[str]:
+    yield blob.decode("latin-1")
+    encodings = ["utf-8"] + (["utf-16-le", "utf-16-be"] if len(blob) % 2 == 0 else [])
+    for encoding in encodings:
+        try:
+            yield blob.decode(encoding)
+        except UnicodeDecodeError:
+            continue
 
 
 __all__ = [
@@ -521,5 +573,6 @@ __all__ = [
     "cpassword_material",
     "migrated_value",
     "refusable_rows",
+    "stored_kind",
     "valid_principal_name",
 ]

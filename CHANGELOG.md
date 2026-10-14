@@ -81,8 +81,12 @@ one-way schema migration); the date is set when it is cut.
   marker (`[refused principal name]` / `[refused analyst text]`); the legacy
   row is unchanged and still listed by `analyst-text-check`, and the
   substitutions are recorded by row id and field only
-  (`maintenance.analyst_text_substituted` event and a warning). The upgrade is
-  not refused (see `SECURITY.md`).
+  (`maintenance.analyst_text_substituted` event and a warning). BLOB values are
+  checked under every text reading; INTEGER, REAL and NULL are copied. Each
+  existing event matches one legacy row at most, so a re-run neither duplicates
+  nor drops rows. The upgrade is not refused (see `SECURITY.md`). A verbatim
+  copy an earlier release already made is left as it is and listed by
+  `analyst-text-check`.
 - `finding_triage.rationale` is now a descriptive column for the v11 cpassword
   scrub (like `finding_triage.note` and `finding_triage_event.rationale`); a
   labelled cpassword in a legacy rationale used to refuse the upgrade with
@@ -91,11 +95,14 @@ one-way schema migration); the date is set when it is cut.
   `GPO_LENS_FORWARDED_USER_HEADER` set, the header names the principal, which
   is stored as the triage actor and in audit events and logged to
   `audit.log`. It must now be an account name — `user`, `user@domain` or
-  `DOMAIN\user` (the domain may contain spaces, as in `NT AUTHORITY`), at most
-  256 characters, with none of the characters AD forbids in an account name
-  (`"/\[]:;|=,+*?<>`) and no control character — and carry no cpassword
-  material; anything else is refused with `401` (previously control
-  characters were stripped and the value cut at 256 characters). `audit.log` writes a name
+  `DOMAIN\user` (the domain may contain inner spaces, as in `NT AUTHORITY`),
+  at most 256 characters, each part with no leading or trailing space, none of
+  the characters AD forbids in an account name (`"/\[]:;|=,+*?<>`), no
+  whitespace but the plain space, and no control, format or line-separator
+  character (Unicode Cc/Cf/Zl/Zp/Cs/Co) — and carry no cpassword material;
+  anything else is refused with `401`. Previously control characters were
+  silently stripped and the value cut at 256 characters; now only outer spaces
+  and tabs are trimmed. `audit.log` writes a name
   that carries cpassword material as `[refused principal name]`.
 
 ### Added

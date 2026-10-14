@@ -1097,6 +1097,20 @@ def _coverage_gap_pk_has_kind(conn: sqlite3.Connection) -> bool:
     return "kind" in pk_cols
 
 
+def _copy_forms(value: Any, copied: Any, kind: str | None, marker: str) -> tuple[Any, ...]:
+    """Stored forms an earlier copy of a legacy *value* may have."""
+    forms: tuple[Any, ...] = (value, copied)
+    text = value.decode("latin-1") if isinstance(value, bytes) else value
+    if kind is not None or (isinstance(text, str) and CPASSWORD_MARKER in text):
+        forms += (marker,)
+    return forms
+
+
+def _in_forms(stored: Any, forms: tuple[Any, ...]) -> bool:
+    # Same storage class and value, as SQLite's ``=`` compares them.
+    return any(type(stored) is type(form) and stored == form for form in forms)
+
+
 def _migrate_legacy_triage(conn: sqlite3.Connection) -> None:
     """v7 -> v8 (WI-092): copy legacy ``finding_triage`` rows into the Plan 024
     ``finding_triage_event`` log so triage state lives in one store.
@@ -1126,11 +1140,12 @@ def _migrate_legacy_triage(conn: sqlite3.Connection) -> None:
 
     A row already present — after an interrupted run, or copied verbatim by a
     release before this check — matches on every stored field in its legacy or
-    its copied form; a refusal marker already copied matches any legacy value
-    of that field (the v11 scrub may since have redacted the legacy row in
-    place). So a re-run inserts nothing twice. Existence is
-    decided for all rows before any insert, as the original single
-    ``INSERT ... SELECT`` did, so identical legacy rows are both kept.
+    its copied form; a refusal marker matches only for a field refused now or
+    redacted in place by the v11 scrub since (``[redacted cpassword]`` in the
+    legacy value). Each existing event stands for one legacy row at most, so a
+    re-run inserts nothing twice and identical legacy rows are all kept. A
+    verbatim copy made by an earlier release is recognised and left as it is
+    (the triage log is not rewritten); ``analyst-text-check`` lists it.
     """
     rows = conn.execute(
         """
@@ -1148,35 +1163,37 @@ def _migrate_legacy_triage(conn: sqlite3.Connection) -> None:
     ).fetchall()
     pending: list[tuple[Any, ...]] = []
     substitutions: list[dict[str, Any]] = []
+    consumed: set[int] = set()
     for legacy_id, occurrence_id, action, actor, occurred_at, note, rationale, expires in rows:
         copied_actor, actor_kind = migrated_value(actor, "actor")
         copied_note, note_kind = migrated_value(note, "note")
         copied_rationale, rationale_kind = migrated_value(rationale, "rationale")
-        exists = conn.execute(
-            """
-            SELECT 1 FROM finding_triage_event e
-            WHERE e.occurrence_id = ? AND e.action = ? AND e.occurred_at = ?
-              AND e.actor IN (?, ?, ?) AND e.note IN (?, ?, ?)
-              AND e.rationale IN (?, ?, ?) AND e.expires_at IS ?
-            LIMIT 1
-            """,
+        # An existing event stands for this row when every stored field
+        # matches the legacy or the copied form. A refusal marker matches only
+        # for a field that is refused now or was redacted in place by the v11
+        # scrub since an earlier run copied it. Each event stands for one
+        # legacy row at most (``consumed``), so multiplicity is kept.
+        accepted = (
+            _copy_forms(actor, copied_actor, actor_kind, REFUSED_PRINCIPAL_MARKER),
+            _copy_forms(note, copied_note, note_kind, REFUSED_TEXT_MARKER),
+            _copy_forms(rationale, copied_rationale, rationale_kind, REFUSED_TEXT_MARKER),
+        )
+        match = next(
             (
-                occurrence_id,
-                action,
-                occurred_at,
-                actor,
-                copied_actor,
-                REFUSED_PRINCIPAL_MARKER,
-                note,
-                copied_note,
-                REFUSED_TEXT_MARKER,
-                rationale,
-                copied_rationale,
-                REFUSED_TEXT_MARKER,
-                expires,
+                event_id
+                for event_id, *fields in conn.execute(
+                    "SELECT id, actor, note, rationale FROM finding_triage_event "
+                    "WHERE occurrence_id = ? AND action = ? AND occurred_at = ? "
+                    "AND expires_at IS ? ORDER BY id",
+                    (occurrence_id, action, occurred_at, expires),
+                )
+                if event_id not in consumed
+                and all(_in_forms(f, forms) for f, forms in zip(fields, accepted, strict=True))
             ),
-        ).fetchone()
-        if exists:
+            None,
+        )
+        if match is not None:
+            consumed.add(match)
             continue
         pending.append(
             (
@@ -1214,7 +1231,8 @@ def _migrate_legacy_triage(conn: sqlite3.Connection) -> None:
         )
         warnings.warn(
             f"triage migration: {len(substitutions)} legacy field(s) carried GPP "
-            "cpassword material and were copied as a marker; the legacy rows are "
+            "cpassword material (or could not be inspected) and were copied as a "
+            "marker; the legacy rows are "
             "unchanged (gpo-lens analyst-text-check lists them; the "
             "maintenance.analyst_text_substituted event names row ids and fields).",
             stacklevel=3,

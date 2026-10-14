@@ -88,7 +88,8 @@ def _forwarded_user(request: Request) -> str | None:
 
     The name is stored (``finding_triage_event.actor``, audit events) and
     logged, so it must be an account name — ``user``, ``user@domain`` or
-    ``DOMAIN\\user``, at most 256 characters, with no GPP cpassword material
+    ``DOMAIN\\user``, at most 256 characters, with no control or format
+    character and no GPP cpassword material
     (:func:`gpo_lens.analyst_text.valid_principal_name`). Anything else is
     refused with 401 (fail closed: a proxy sending something else is
     misconfigured), and the value is never echoed.
@@ -97,7 +98,9 @@ def _forwarded_user(request: Request) -> str | None:
     if not header_name:
         return None
     raw = request.headers.get(header_name, "")
-    cleaned = "".join(ch for ch in raw if ord(ch) >= 32).strip()
+    # Only outer blanks are trimmed; a control character anywhere is refused
+    # by the validation below, never silently stripped.
+    cleaned = raw.strip(" \t")
     if not cleaned:
         return None
     if not valid_principal_name(cleaned):

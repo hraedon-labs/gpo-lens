@@ -286,10 +286,25 @@ class TestForwardedUser:
         req = FakeRequest("127.0.0.1", {"X-Forwarded-User": "   "})
         assert get_principal(req) == LOOPBACK_PRINCIPAL
 
-    def test_forwarded_name_control_characters_are_stripped(self, monkeypatch):
+    @pytest.mark.parametrize(
+        "name",
+        ["CONTOSO\\al\x00ice", "CONTOSO\\alice\r\n", "ali\x01ce", "ali\u0085ce", "ali\u202ece"],
+    )
+    def test_forwarded_name_with_a_control_character_is_refused_not_stripped(
+        self, monkeypatch, name
+    ):
+        # Round 3: control/format characters used to be stripped silently;
+        # the name is now refused like any other invalid name.
         monkeypatch.delenv("GPO_LENS_AUTH_TOKEN", raising=False)
         monkeypatch.setenv("GPO_LENS_FORWARDED_USER_HEADER", "X-Forwarded-User")
-        req = FakeRequest("127.0.0.1", {"X-Forwarded-User": "CONTOSO\\al\x00ice\r\n"})
+        with pytest.raises(HTTPException) as exc:
+            get_principal(FakeRequest("127.0.0.1", {"X-Forwarded-User": name}))
+        assert exc.value.status_code == 401
+
+    def test_forwarded_name_outer_blanks_are_trimmed(self, monkeypatch):
+        monkeypatch.delenv("GPO_LENS_AUTH_TOKEN", raising=False)
+        monkeypatch.setenv("GPO_LENS_FORWARDED_USER_HEADER", "X-Forwarded-User")
+        req = FakeRequest("127.0.0.1", {"X-Forwarded-User": "  CONTOSO\\alice\t"})
         assert get_principal(req).name == "CONTOSO\\alice"
 
     @pytest.mark.parametrize(

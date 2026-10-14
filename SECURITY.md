@@ -102,7 +102,7 @@ the text:
 | Web Ask (`POST /ask`) | the `audit.narrate` event, and the model provider | `400` page with the reason and an empty question box; the model is not called; the event records `"question": ""`, outcome `refused` |
 | CLI `ask` | the model provider | exit 1, reason on stderr, model not called |
 | CLI `explain-setting` (model fallback) | the model provider | exit 1, reason on stderr, model not called |
-| Forwarded-user header (`GPO_LENS_FORWARDED_USER_HEADER`) | becomes the principal name: triage `actor`, the `principal` of audit events, `audit.log` | the name must be an account name (`user`, `user@domain` or `DOMAIN\user`, the domain may contain spaces such as `NT AUTHORITY`; at most 256 characters; none of the characters AD forbids in an account name, `"/\[]:;|=,+*?<>`, and no control character) with no cpassword material, or the request is refused with `401`; the value is never echoed |
+| Forwarded-user header (`GPO_LENS_FORWARDED_USER_HEADER`) | becomes the principal name: triage `actor`, the `principal` of audit events, `audit.log` | the name must be an account name (`user`, `user@domain` or `DOMAIN\user`; the domain may contain inner spaces such as `NT AUTHORITY`; at most 256 characters; each part non-empty with no leading or trailing space; none of the characters AD forbids in an account name, `"/\[]:;|=,+*?<>`; no whitespace but the plain space; no control, format, line- or paragraph-separator character, Unicode categories Cc/Cf/Zl/Zp/Cs/Co) with no cpassword material, or the request is refused with `401`. Only outer spaces and tabs are trimmed; nothing else is stripped. The value is never echoed |
 | Event log (`events.append_event` / `append_events`) | `payload.question` of `audit.narrate`, `payload.principal` of every event | `CpasswordInAnalystTextError`; nothing written (defence in depth behind the rows above) |
 | `audit.log` | the principal name | a name carrying cpassword material is written as `[refused principal name]` (defence in depth) |
 
@@ -213,9 +213,20 @@ it).
 rationale passes the guard: a value it would refuse is copied as a marker
 (`[refused principal name]` for the actor, `[refused analyst text]` for a note
 or rationale) instead of the value; the legacy row is left exactly as it was,
-so `analyst-text-check` still lists it; and the substitutions are recorded by
-legacy row id and field only, in a `maintenance.analyst_text_substituted` event
-and a warning. This does not break "refuse, never rewrite": that contract is
+so `analyst-text-check` (which covers the legacy note, rationale and actor
+columns) still lists it; and the substitutions are recorded by legacy row id
+and field only, in a `maintenance.analyst_text_substituted` event and a warning.
+Every SQLite storage class is handled: TEXT is checked; a BLOB is checked under
+every reading of it (UTF-8, Latin-1, UTF-16 little- and big-endian) and copied
+unchanged only when every reading passes, otherwise as the marker; INTEGER,
+REAL and NULL are copied, since their text cannot hold a label or a mixed-case
+base64 token. Each existing event stands for one legacy row at most, so a
+re-run neither duplicates nor drops rows.
+
+A database that an earlier release already migrated (schema v8 to v10) may hold
+a verbatim copy of a legacy value in `finding_triage_event`. The upgrade to
+this release recognises that copy and leaves it, because the triage log is not
+rewritten; `analyst-text-check` lists it for the operator. This does not break "refuse, never rewrite": that contract is
 about what an analyst submits — refusing gives the analyst the chance to remove
 the value and resubmit. A migration has no submitter to refuse to, and copying
 the value verbatim would put it into the active, append-only history. Refusing

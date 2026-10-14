@@ -349,8 +349,8 @@ the loopback analyst and is ignored entirely when the request does not arrive
 from the same-host proxy. Because it is stored, it must be an account name —
 `DOMAIN\user` (what `{LOGON_USER}` gives; the domain may contain spaces),
 `user@domain` or `user`, at most 256 characters, with none of the characters
-AD forbids in an account name (`"/\[]:;|=,+*?<>`); any other value is refused
-with `401`. Without Windows Auth, `{LOGON_USER}` is empty and the app
+AD forbids in an account name (`"/\[]:;|=,+*?<>`) and no control or format
+character; any other value is refused with `401`. Without Windows Auth, `{LOGON_USER}` is empty and the app
 falls back to `local-analyst` — so enable `-WindowsAuth` first.
 
 ## Why a shared Python install
