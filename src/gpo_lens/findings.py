@@ -62,7 +62,7 @@ from gpo_lens.finding_model import (
     compute_fingerprint,
     series_key,
 )
-from gpo_lens.normalize import parse_dt as _parse_dt
+from gpo_lens.normalize import parse_triage_dt
 
 if TYPE_CHECKING:
     from gpo_lens.danger import DangerFinding, DangerRule
@@ -826,8 +826,8 @@ def _triage_utc(value: datetime) -> datetime:
 
 
 def _parse_triage_dt(value: str | None) -> datetime | None:
-    parsed = _parse_dt(value)
-    return _triage_utc(parsed) if parsed is not None else None
+    # The shared parser: legacy triage times are validated with the same one.
+    return parse_triage_dt(value)
 
 
 def _triage_order(event: TriageEvent) -> tuple[datetime, bool, int]:

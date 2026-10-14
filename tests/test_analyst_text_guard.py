@@ -2050,6 +2050,21 @@ def test_unknown_legacy_status_becomes_a_commented_event(tmp_path: Path) -> None
     assert ("finding_triage", "status", "uninspectable") in listed
 
 
+# Sol r6 B1: shape-valid but impossible times (the fold cannot read them; an
+# unreadable expiry used to fold to a permanent risk acceptance).
+_IMPOSSIBLE_TIMES = [
+    "2025-99-99T99:99:99Z",
+    "2025-13-01T00:00:00+00:00",  # month
+    "2025-01-32T00:00:00+00:00",  # day
+    "2025-02-30T00:00:00Z",  # day in month
+    "2025-02-29T00:00:00+00:00",  # not a leap year
+    "2025-01-01T25:00:00+00:00",  # hour
+    "2025-01-01T10:60:00+00:00",  # minute
+    "2025-01-01T10:00:60+00:00",  # second
+    "0001-01-01T00:00:00+05:00",  # UTC conversion overflows
+]
+
+
 @pytest.mark.parametrize(
     ("field", "timestamp", "expires"),
     [
@@ -2057,7 +2072,10 @@ def test_unknown_legacy_status_becomes_a_commented_event(tmp_path: Path) -> None
         ("timestamp", "yesterday", None),
         ("timestamp", b"2025-01-03", None),
         ("expires_at", "2025-01-03", _SMUGGLED),
-        ("expires_at", "2025-01-03", 20250103),
+        ("expires_at", "2025-01-03", 20251399),  # stored as TEXT; month 13
+        ("expires_at", "2025-01-03", ""),
+        *(("timestamp", bad, None) for bad in _IMPOSSIBLE_TIMES),
+        *(("expires_at", "2025-01-03", bad) for bad in _IMPOSSIBLE_TIMES),
     ],
 )
 def test_malformed_legacy_time_withholds_the_row(
@@ -2125,6 +2143,50 @@ def test_deepseek_r5_labelled_value_in_a_structural_column_never_reaches_the_log
         conn.close()
     assert all(_LABELLED_SMUGGLED not in row[0] for row in log)
     assert ("finding_triage", column) in listed
+
+
+def test_legacy_time_is_accepted_exactly_when_the_fold_can_read_it() -> None:
+    """Sol r6 B1, property: for any string, the legacy validation accepts a
+    timestamp/expiry exactly when the triage fold's parser returns a datetime.
+    Mutations of valid timestamps, with random characters, explore the edges."""
+    from gpo_lens.analyst_text import legacy_triage_field_ok
+    from gpo_lens.findings import _parse_triage_dt
+
+    rng = random.Random(6)  # noqa: S311 - reproducible test data
+    seeds = [
+        "2026-10-06T00:08:24.632435+00:00",
+        "2025-01-03",
+        "2024-02-29T23:59:59Z",
+        "2025-W01-1T10:00",
+        "20250103T101010Z",
+        "9999-12-31T23:59:59-05:00",
+        "0001-01-01T00:00:00+00:00",
+        *_IMPOSSIBLE_TIMES,
+    ]
+    alphabet = "0123456789-:.+,TWZtz xX\u0660\uff10" + "cpasword="
+    accepted = 0
+    for _ in range(30_000):
+        text = list(rng.choice(seeds))
+        for _ in range(rng.randrange(0, 3)):
+            at = rng.randrange(len(text) + 1)
+            roll = rng.random()
+            if roll < 0.4 and text:
+                text[min(at, len(text) - 1)] = rng.choice(alphabet)
+            elif roll < 0.7:
+                text.insert(at, rng.choice(alphabet))
+            elif text:
+                text.pop(min(at, len(text) - 1))
+        value = "".join(text)
+        readable = _parse_triage_dt(value) is not None
+        accepted += readable
+        for field in ("timestamp", "expires_at"):
+            assert legacy_triage_field_ok(field, value) is readable, (field, value)
+        if readable:
+            assert cpassword_material(value) is None
+    assert 1_000 < accepted < 29_000  # both sides of the boundary were explored
+    for value in _IMPOSSIBLE_TIMES:
+        assert _parse_triage_dt(value) is None
+        assert not legacy_triage_field_ok("expires_at", value)
 
 
 def test_provenance_ddl_rolls_back_with_a_failed_copy(tmp_path: Path) -> None:

@@ -84,8 +84,9 @@ one-way schema migration); the date is set when it is cut.
   (`maintenance.analyst_text_substituted` event and a warning). A BLOB is
   never copied (always the marker, as uninspectable); INTEGER, REAL and NULL
   are copied. The structural columns are validated: an unknown legacy status
-  is copied as a `commented` event, and a row whose timestamp or expiry is not
-  an ISO-8601 timestamp is withheld (both reported, and listed by
+  is copied as a `commented` event, and a row whose timestamp or expiry the
+  triage fold cannot read (checked with the fold's own parser, so impossible
+  dates are caught) is withheld (both reported, and listed by
   `analyst-text-check`). The new `finding_triage_legacy_copy` table records
   which event each legacy row became (or that it was withheld), so a re-run
   (any upgrade from v8–v10, or any open before the v11 scrub is stamped)

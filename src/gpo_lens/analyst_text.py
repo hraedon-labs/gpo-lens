@@ -70,6 +70,7 @@ from xml.etree.ElementTree import ParseError
 
 import defusedxml.ElementTree as SafeET
 
+from gpo_lens.normalize import parse_triage_dt
 from gpo_lens.redaction import (
     canonical,
     ciphertext_shaped,
@@ -485,21 +486,24 @@ LEGACY_TRIAGE_ACTIONS: dict[str, str] = {
     "accepted_risk": "accepted_risk",
 }
 LEGACY_TRIAGE_STRUCTURAL: tuple[str, ...] = ("status", "timestamp", "expires_at")
-_TRIAGE_TIME = re.compile(
-    r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})?)?"
-)
 
 
 def legacy_triage_field_ok(field: str, value: object) -> bool:
     """Does a legacy ``finding_triage`` structural *field* hold what v1 wrote:
-    a known status, an ISO-8601 timestamp, or (``expires_at`` only) NULL?
-    Only digits, ``-``, ``:``, ``.``, ``T``/``Z``/space and ``+`` can pass, so
-    no free text and no cpassword material."""
+    a known status, a timestamp, or (``expires_at`` only) NULL?
+
+    A timestamp is accepted exactly when the triage fold can read it
+    (:func:`gpo_lens.normalize.parse_triage_dt`, the parser the fold uses), so
+    an impossible date, a non-leap 29 February or an expiry whose UTC
+    conversion overflows is rejected rather than read as "no expiry". Such a
+    string is ISO-8601 digits and separators; the parser allows one
+    arbitrary character between date and time, which cannot carry a cpassword
+    label or token."""
     if field == "status":
         return isinstance(value, str) and value in LEGACY_TRIAGE_ACTIONS
     if field == "expires_at" and value is None:
         return True
-    return isinstance(value, str) and _TRIAGE_TIME.fullmatch(value) is not None
+    return parse_triage_dt(value) is not None
 
 
 # Operator-supplied fields inside ``events`` payloads, by event type (``*``:

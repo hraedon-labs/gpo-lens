@@ -246,8 +246,11 @@ transaction.
 The legacy structural columns are validated too, because the copy carries them
 into the event log: a status must be one v1 wrote (`open`, `acknowledged`,
 `accepted_risk`) — any other value is copied as a `commented` event, which
-changes no status — and a timestamp or expiry must be an ISO-8601 timestamp
-(or NULL for the expiry). A row whose timestamp or expiry is anything else is
+changes no status — and a timestamp or expiry must be one the triage fold can
+read, checked with the fold's own parser (`normalize.parse_triage_dt`), so an
+impossible date such as 30 February, a non-leap 29 February or an expiry whose
+UTC conversion overflows is rejected rather than read as "no expiry" (NULL is
+allowed for the expiry). A row whose timestamp or expiry is anything else is
 not copied, because neither has a neutral replacement (an invented time would
 misorder the history; a dropped expiry would make a risk acceptance permanent);
 it is recorded as withheld so a re-run does not report it again. Both cases are
