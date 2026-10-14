@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## v1.5.0 — 2026-10-14
 
-Draft **v1.5.0** — the release number is confirmed by the owner (it carries a
-one-way schema migration); the date is set when it is cut.
+**Back up the database and `audit.log` before upgrading.** v1.5.0 migrates the
+database to schema 11 (it scrubs stored `cpassword` values), and v1.4.0 and
+earlier refuse a migrated database. To roll back, restore that backup.
 
 ### Security
 
