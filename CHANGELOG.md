@@ -83,13 +83,17 @@ one-way schema migration); the date is set when it is cut.
   substitutions are recorded by row id and field only
   (`maintenance.analyst_text_substituted` event and a warning). A BLOB is
   never copied (always the marker, as uninspectable); INTEGER, REAL and NULL
-  are copied. The new `finding_triage_legacy_copy` table records which event
-  each legacy row became, so a re-run (any upgrade from v8–v10, or any open
-  before the v11 scrub is stamped) copies exactly the rows not yet recorded. A
-  verbatim copy an earlier release already made is recognised by exact
-  equality of every field, one event per row, recorded, left as it is and
-  listed by `analyst-text-check`. The upgrade is not refused (see
-  `SECURITY.md`).
+  are copied. The structural columns are validated: an unknown legacy status
+  is copied as a `commented` event, and a row whose timestamp or expiry is not
+  an ISO-8601 timestamp is withheld (both reported, and listed by
+  `analyst-text-check`). The new `finding_triage_legacy_copy` table records
+  which event each legacy row became (or that it was withheld), so a re-run
+  (any upgrade from v8–v10, or any open before the v11 scrub is stamped)
+  copies exactly the rows not yet recorded. A verbatim copy an earlier release
+  already made is recognised by exact equality of every column (SQLite's
+  comparison; `supersedes_event_id` NULL), one event per row, recorded and
+  left as it is; `analyst-text-check` lists it when its value would be
+  refused. The upgrade is not refused (see `SECURITY.md`).
 - `finding_triage.rationale` is now a descriptive column for the v11 cpassword
   scrub (like `finding_triage.note` and `finding_triage_event.rationale`); a
   labelled cpassword in a legacy rationale used to refuse the upgrade with
@@ -117,10 +121,12 @@ one-way schema migration); the date is set when it is cut.
   of match, never the value; any BLOB in those columns, and any BLOB event
   payload, is listed as uninspectable. Exits 1 when it lists any row.
 - Table `finding_triage_legacy_copy` (legacy `finding_triage` id → copied
-  `finding_triage_event` id): provenance of the v7→v8 copy. Created only when a
-  database has legacy triage rows to copy (so an upgrade whose v11 scrub is
-  refused still changes nothing on a database without them); additive, no
-  schema-version change.
+  `finding_triage_event` id, NULL when withheld): provenance of the v7→v8 copy,
+  internal migration state (do not edit it by hand). Unlike the other tables it
+  is not created by `init_db` up front but by the copy, inside the copy's
+  transaction, and only when a database has legacy triage rows (so an upgrade
+  whose v11 scrub is refused still changes nothing on a database without
+  them); additive, no schema-version change.
 - `scripts/measure_analyst_text_guard.py`: reproducible measurement of the
   guard's miss rate on random GPP-shaped ciphertext (the figures in
   `SECURITY.md`).

@@ -1562,11 +1562,17 @@ def test_checker_covers_every_operator_column_the_migration_reads() -> None:
         and isinstance(c.value, str)
         and "FROM finding_triage t" in c.value
     )
+    from gpo_lens.analyst_text import LEGACY_TRIAGE_STRUCTURAL
+
     read = set(re.findall(r"\bt\.(\w+)", sql))
-    system = {"id", "finding_id", "status", "timestamp", "expires_at"}
+    keys = {"id", "finding_id"}  # the row id and the joined, FK-checked finding id
     operator = {column for table, column in ANALYST_TEXT_COLUMNS if table == "finding_triage"}
-    assert read - system == operator == {"actor", "note", "rationale"}
-    assert GUARDED_FIELDS[("gpo_lens.store", "_migrate_legacy_triage")] == operator
+    structural = set(LEGACY_TRIAGE_STRUCTURAL)  # validated, and listed by the checker
+    assert operator == {"actor", "note", "rationale"}
+    assert structural == {"status", "timestamp", "expires_at"}
+    assert read - keys == operator | structural
+    guarded = GUARDED_FIELDS[("gpo_lens.store", "_copy_legacy_triage_row")]
+    assert {re.sub(r"^row\['(\w+)'\]$", r"\1", f) for f in guarded} == operator
 
 
 def test_v8_migration_marker_event_does_not_swallow_a_clean_row(tmp_path: Path) -> None:
@@ -1794,20 +1800,46 @@ def test_legacy_matching_is_a_maximum_one_to_one_matching_under_sqlite_equality(
     from gpo_lens.store import legacy_triage_matches
 
     rng = random.Random(4)  # noqa: S311 - reproducible test data
-    pool: list[Any] = ["a", "b", "1", 1, 1.0, 2, b"a", None, "", "[refused analyst text]"]
+    pool: list[Any] = [
+        "a",
+        "b",
+        "1",
+        1,
+        1.0,
+        2,
+        b"a",
+        bytearray(b"a"),
+        None,
+        "",
+        "[refused analyst text]",
+        # Sol r5 B1: 53- and 64-bit boundaries, signed zero, infinities, NaN
+        # (which SQLite stores as NULL).
+        2**53,
+        2**53 + 1,
+        float(2**53),
+        -(2**53) - 1,
+        2**63 - 1,
+        -(2**63),
+        float(2**63),
+        -0.0,
+        0,
+        float("inf"),
+        float("-inf"),
+        float("nan"),
+    ]
     conn = sqlite3.connect(":memory:")
     try:
         for _ in range(400):
 
             def fields() -> tuple[Any, ...]:
                 return (
-                    rng.choice([1, 2]),
+                    rng.choice([1, 2, 2**53, 2**53 + 1, float(2**53)]),
                     "acknowledged",
                     "t",
                     rng.choice(pool),
                     rng.choice(pool),
                     rng.choice(pool[:3]),
-                    rng.choice([None, "x"]),
+                    rng.choice([None, "x", 2**53, 2**53 + 1, float("nan")]),
                 )
 
             legacy = [(i + 1, fields()) for i in range(rng.randrange(0, 6))]
@@ -1838,6 +1870,287 @@ def test_checker_reports_a_blob_event_payload(web_db: Path) -> None:
     finally:
         conn.close()
     assert rows == {("events", "payload", event_id, "uninspectable")}
+
+
+# --- review round 5 regressions ---------------------------------------------------------------
+
+
+def test_match_keys_agree_with_sqlite_on_numeric_edges() -> None:
+    """Sol r5 B1 / DeepSeek r5 NB-2/NB-6: keys are lossless and hashable."""
+    from gpo_lens.store import _is_key, _match_key
+
+    values: list[Any] = [
+        2**53,
+        2**53 + 1,
+        float(2**53),
+        -(2**53),
+        -(2**53) - 1,
+        2**63 - 1,
+        -(2**63),
+        float(2**63),
+        -0.0,
+        0,
+        0.0,
+        1,
+        1.0,
+        True,
+        float("inf"),
+        float("-inf"),
+        "1",
+        b"1",
+        bytearray(b"1"),
+        memoryview(b"1"),
+    ]
+    conn = sqlite3.connect(":memory:")
+    try:
+        for a in values:
+            for b in values:
+                bind_a = bytes(a) if isinstance(a, bytearray | memoryview) else a
+                bind_b = bytes(b) if isinstance(b, bytearray | memoryview) else b
+                same = conn.execute("SELECT ? = ?", (bind_a, bind_b)).fetchone()[0]
+                assert (_match_key(a) == _match_key(b)) == bool(same), (a, b)
+                if same:
+                    assert hash(_match_key(a)) == hash(_match_key(b)), (a, b)
+        assert _match_key(None) != _match_key(None)  # NULL = NULL is not true
+        assert _is_key(None) == _is_key(float("nan"))  # NaN is stored as NULL
+    finally:
+        conn.close()
+
+
+def _add_finding(conn: sqlite3.Connection, finding_id: int) -> None:
+    conn.execute(
+        "INSERT INTO finding (id, finding_key, rule_id, subject_identity, severity, summary, "
+        "first_seen_snapshot, last_seen_snapshot) "
+        "VALUES (?, ?, 'rule', 'subject', 'medium', 'summary', 1, 1)",
+        (finding_id, f"key-{finding_id}"),
+    )
+
+
+def test_sol_r5_large_integer_probe(tmp_path: Path) -> None:
+    """Sol r5 B1: finding ids 2**53 and 2**53+1 collapsed through float."""
+    from gpo_lens.store import legacy_triage_matches
+
+    lower, upper = 2**53, 2**53 + 1
+    assert (
+        legacy_triage_matches(
+            [(1, (lower, "acknowledged", "t", "alice", "same", "", None))],
+            [(10, (upper, "acknowledged", "t", "alice", "same", "", None))],
+        )
+        == {}
+    )
+    db, _ = _legacy_db(tmp_path)
+    conn = sqlite3.connect(db)
+    try:
+        for finding_id in (lower, upper):
+            _add_finding(conn, finding_id)
+            conn.execute(
+                "INSERT INTO finding_triage (finding_id, status, note, rationale, actor, "
+                "timestamp) VALUES (?, 'acknowledged', 'same', '', 'alice', '2025-01-03')",
+                (finding_id,),
+            )
+        upper_event = conn.execute(
+            "INSERT INTO finding_triage_event (occurrence_id, action, actor, occurred_at, "
+            "note, rationale) VALUES (?, 'acknowledged', 'alice', '2025-01-03', 'same', '')",
+            (upper,),
+        ).lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+    _reopen(db)
+    conn = sqlite3.connect(db)
+    try:
+        events = conn.execute(
+            "SELECT id, occurrence_id FROM finding_triage_event ORDER BY id"
+        ).fetchall()
+        provenance = dict(
+            conn.execute(
+                "SELECT t.finding_id, p.event_id FROM finding_triage_legacy_copy p "
+                "JOIN finding_triage t ON t.id = p.legacy_id"
+            ).fetchall()
+        )
+    finally:
+        conn.close()
+    assert sorted(occ for _, occ in events) == [lower, upper]
+    assert provenance[upper] == upper_event
+    assert dict(events)[provenance[lower]] == lower
+
+
+def test_legacy_copy_columns_cover_every_event_column() -> None:
+    """Sol r5 B2: every finding_triage_event column is compared or pinned to
+    the value a legacy copy writes, so a new column cannot be omitted."""
+    from gpo_lens.store import LEGACY_COPY_COMPARED, LEGACY_COPY_NULL, init_db
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        init_db(conn)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(finding_triage_event)")}
+    finally:
+        conn.close()
+    assert columns == {"id", *LEGACY_COPY_COMPARED, *LEGACY_COPY_NULL}
+    assert not set(LEGACY_COPY_COMPARED) & set(LEGACY_COPY_NULL)
+
+
+def test_sol_r5_supersedes_probe(tmp_path: Path) -> None:
+    """Sol r5 B2: an event with a supersedes link is not a verbatim copy."""
+    db, finding_id = _v7_db_with_raw_triage(
+        tmp_path, [("acknowledged", "same", "", "alice", "2025-01-03")]
+    )
+    conn = sqlite3.connect(db)
+    try:
+        first = conn.execute(
+            "INSERT INTO finding_triage_event (occurrence_id, action, actor, occurred_at, note, "
+            "rationale) VALUES (?, 'commented', 'bob', '2025-01-02', 'other', '')",
+            (finding_id,),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO finding_triage_event (occurrence_id, action, actor, occurred_at, note, "
+            "rationale, supersedes_event_id) "
+            "VALUES (?, 'acknowledged', 'alice', '2025-01-03', 'same', '', ?)",
+            (finding_id, first),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    _reopen(db)
+    conn = sqlite3.connect(db)
+    try:
+        rows = conn.execute(
+            "SELECT id, supersedes_event_id FROM finding_triage_event ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [(1, None), (2, 1), (3, None)]
+    assert _provenance(db) == [(1, 3)]
+
+
+# An unlabelled cpassword-shaped token: the v11 scrub (same upgrade) does not
+# discover it, so these tests see the copy's own behaviour.
+_SMUGGLED = _LEGACY_ACTOR
+_LABELLED_SMUGGLED = "cpassword=AAECAwQFBgcICQoLDA0ODw=="  # DeepSeek r5's exact probe
+
+
+def test_unknown_legacy_status_becomes_a_commented_event(tmp_path: Path) -> None:
+    """DeepSeek r5 NB-1: free text in finding_triage.status reached the
+    action column. An unknown status now copies as 'commented' (no status
+    effect), the substitution is recorded, and the checker lists the row."""
+    db, _ = _v7_db_with_raw_triage(tmp_path, [(_SMUGGLED, "kept note", "", "alice", "2025-01-03")])
+    with pytest.warns(UserWarning, match=r"1 legacy field"):
+        _reopen(db)
+    conn = sqlite3.connect(db)
+    try:
+        events = conn.execute("SELECT action, note, rationale FROM finding_triage_event").fetchall()
+        record = conn.execute(
+            "SELECT payload FROM events WHERE event_type = 'maintenance.analyst_text_substituted'"
+        ).fetchone()[0]
+        listed = {(r.table, r.column, r.kind) for r in refusable_rows(conn)}
+    finally:
+        conn.close()
+    assert events == [("commented", "kept note", "")]
+    assert _SMUGGLED not in record and '"field": "status"' in record
+    assert ("finding_triage", "status", "uninspectable") in listed
+
+
+@pytest.mark.parametrize(
+    ("field", "timestamp", "expires"),
+    [
+        ("timestamp", _SMUGGLED, None),
+        ("timestamp", "yesterday", None),
+        ("timestamp", b"2025-01-03", None),
+        ("expires_at", "2025-01-03", _SMUGGLED),
+        ("expires_at", "2025-01-03", 20250103),
+    ],
+)
+def test_malformed_legacy_time_withholds_the_row(
+    tmp_path: Path, field: str, timestamp: Any, expires: Any
+) -> None:
+    """DeepSeek r5 NB-1: a timestamp or expiry that is not a timestamp is not
+    copied (no neutral replacement exists); the row is recorded as withheld so
+    a re-run does not report it again, and the checker lists it."""
+    db, finding_id = _legacy_db(tmp_path)
+    conn = sqlite3.connect(db)
+    try:
+        legacy_id = conn.execute(
+            "INSERT INTO finding_triage (finding_id, status, note, rationale, actor, timestamp, "
+            "expires_at) VALUES (?, 'accepted_risk', 'n', 'r', 'alice', ?, ?)",
+            (finding_id, timestamp, expires),
+        ).lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+    with pytest.warns(UserWarning, match=r"1 row\(s\) with a malformed timestamp"):
+        _reopen(db)
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("PRAGMA user_version = 7")
+        conn.commit()
+    finally:
+        conn.close()
+    _reopen(db)  # replay: nothing new, no second report
+    conn = sqlite3.connect(db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM finding_triage_event").fetchone()[0] == 0
+        records = conn.execute(
+            "SELECT payload FROM events WHERE event_type = 'maintenance.analyst_text_substituted'"
+        ).fetchall()
+        listed = {(r.table, r.column, r.row_id) for r in refusable_rows(conn)}
+    finally:
+        conn.close()
+    assert _provenance(db) == [(legacy_id, None)]
+    assert len(records) == 1 and _SMUGGLED not in records[0][0]
+    assert ("finding_triage", field, legacy_id) in listed
+
+
+@pytest.mark.parametrize("column", ["status", "timestamp"])
+def test_deepseek_r5_labelled_value_in_a_structural_column_never_reaches_the_log(
+    tmp_path: Path, column: str
+) -> None:
+    """DeepSeek r5 NB-1, exact probe: the labelled value made the v11 scrub
+    refuse (correctly: a structural column) after the copy had already put it
+    into the event log. The copy no longer carries it; the scrub still refuses
+    and the checker lists the legacy row."""
+    from gpo_lens.redaction import CredentialInIdentityError
+
+    status = _LABELLED_SMUGGLED if column == "status" else "acknowledged"
+    timestamp = _LABELLED_SMUGGLED if column == "timestamp" else "2025-01-03"
+    db, _ = _v7_db_with_raw_triage(tmp_path, [(status, "n", "", "alice", timestamp)])
+    with pytest.warns(UserWarning), pytest.raises(CredentialInIdentityError):
+        _reopen(db)
+    conn = sqlite3.connect(db)
+    try:
+        log = conn.execute(
+            "SELECT action || occurred_at || note FROM finding_triage_event"
+        ).fetchall()
+        listed = {(r.table, r.column) for r in refusable_rows(conn)}
+    finally:
+        conn.close()
+    assert all(_LABELLED_SMUGGLED not in row[0] for row in log)
+    assert ("finding_triage", column) in listed
+
+
+def test_provenance_ddl_rolls_back_with_a_failed_copy(tmp_path: Path) -> None:
+    """Sol r5 N2: the lazy CREATE TABLE is inside the copy's transaction, so
+    a copy that fails leaves no table behind."""
+    db, _ = _v7_db_with_raw_triage(tmp_path, [("acknowledged", "n", "", "alice", "2025-01-03")])
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "CREATE TRIGGER fail_copy BEFORE INSERT ON finding_triage_event "
+            "BEGIN SELECT RAISE(ABORT, 'injected'); END"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    from gpo_lens.store import init_db
+
+    conn = sqlite3.connect(db)
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="injected"):
+            init_db(conn)
+        conn.rollback()
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
+    finally:
+        conn.close()
+    assert "finding_triage_legacy_copy" not in tables
 
 
 # --- inventory: every write path goes through the guard -------------------------------------
@@ -1886,7 +2199,9 @@ GUARDED_FIELDS: dict[tuple[str, str], frozenset[str]] = {
     ("gpo_lens.cli._narration", "cmd_ask"): frozenset({"args.question"}),
     ("gpo_lens.cli._narration", "cmd_explain_setting"): frozenset({"identity"}),
     ("gpo_lens.web.auth", "_forwarded_user"): frozenset({"cleaned"}),
-    ("gpo_lens.store", "_migrate_legacy_triage"): frozenset({"actor", "note", "rationale"}),
+    ("gpo_lens.store", "_copy_legacy_triage_row"): frozenset(
+        {"row['actor']", "row['note']", "rationale"}
+    ),
 }
 
 SQL_WRITERS = {
@@ -1897,7 +2212,7 @@ SQL_WRITERS = {
     ),
     # v7->v8 copy: a refused legacy value is copied as a marker; the legacy
     # row is left as it was and analyst-text-check reports it.
-    ("gpo_lens.store", "_migrate_legacy_triage"): "GUARDED",
+    ("gpo_lens.store", "_copy_legacy_triage_row"): "GUARDED",
     # The event log: every payload passes _guard_payload first.
     ("gpo_lens.events", "append_event"): "GUARDED",
     ("gpo_lens.events", "append_events"): "GUARDED",

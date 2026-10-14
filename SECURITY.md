@@ -230,15 +230,34 @@ when upgrading from any older release (v8–v10 databases included, whose
 release already copied the legacy rows verbatim), and on every open while the
 v11 scrub has not been stamped (the additive migrations commit first). Which
 event each legacy row became is recorded in `finding_triage_legacy_copy`
-(legacy row id → event id, ids only) in the copy's own transaction, so a re-run
-copies exactly the rows not yet recorded. A legacy row with no record can only
-have been copied by a release before this table existed; those releases copied
-verbatim, so such a row is recognised by exact equality of every stored field,
-one event per row (a maximum one-to-one matching), recorded, and left as it is
-— the triage log is not rewritten, and `analyst-text-check` lists a refused
-value there. A marker event without provenance is never taken for a copy: older
-releases never wrote markers, and this release writes the marker and its
-provenance in one transaction. This does not break "refuse, never rewrite": that contract is
+(legacy row id → event id, ids only; created, filled and committed in the copy's
+own transaction), so a re-run copies exactly the rows not yet recorded. A legacy
+row with no record can only have been copied by a release before this table
+existed; those releases copied verbatim, so such a row is recognised by exact
+equality of every column a copy writes (by SQLite's own comparison: storage
+class, INTEGER and REAL as exact numbers, `IS` for the expiry) and by the column
+a copy always leaves NULL (`supersedes_event_id`), one event per row (a maximum
+one-to-one matching), recorded, and left as it is — the triage log is not
+rewritten, and `analyst-text-check` lists it when its value would be refused. A
+marker event without provenance is never taken for a copy: older releases never
+wrote markers, and this release writes the marker and its provenance in one
+transaction.
+
+The legacy structural columns are validated too, because the copy carries them
+into the event log: a status must be one v1 wrote (`open`, `acknowledged`,
+`accepted_risk`) — any other value is copied as a `commented` event, which
+changes no status — and a timestamp or expiry must be an ISO-8601 timestamp
+(or NULL for the expiry). A row whose timestamp or expiry is anything else is
+not copied, because neither has a neutral replacement (an invented time would
+misorder the history; a dropped expiry would make a risk acceptance permanent);
+it is recorded as withheld so a re-run does not report it again. Both cases are
+reported by row id and field, and `analyst-text-check` lists such legacy rows.
+
+The provenance table is internal migration state and the trust boundary for
+re-runs: it is only ever written by the copy. Editing it by hand — deleting a
+row, or pointing a legacy row at an unrelated event — makes a later re-run copy
+a row twice or skip it, and foreign-key checks cannot tell. Repair a database
+by restoring a backup, not by editing this table on its own. This does not break "refuse, never rewrite": that contract is
 about what an analyst submits — refusing gives the analyst the chance to remove
 the value and resubmit. A migration has no submitter to refuse to, and copying
 the value verbatim would put it into the active, append-only history. Refusing

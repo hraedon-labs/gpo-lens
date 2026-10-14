@@ -474,6 +474,34 @@ ANALYST_TEXT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("finding_triage", "rationale"),
     ("finding_triage", "actor"),
 )
+# Structural columns of the legacy table that the v7->v8 copy carries into
+# ``finding_triage_event`` (status -> action, timestamp -> occurred_at,
+# expires_at). They must hold a v1 status or a timestamp, never free text: the
+# copy validates them (``store._migrate_legacy_triage``) and the read-only
+# check lists a legacy row whose value is anything else.
+LEGACY_TRIAGE_ACTIONS: dict[str, str] = {
+    "open": "reopened",
+    "acknowledged": "acknowledged",
+    "accepted_risk": "accepted_risk",
+}
+LEGACY_TRIAGE_STRUCTURAL: tuple[str, ...] = ("status", "timestamp", "expires_at")
+_TRIAGE_TIME = re.compile(
+    r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:?\d{2})?)?"
+)
+
+
+def legacy_triage_field_ok(field: str, value: object) -> bool:
+    """Does a legacy ``finding_triage`` structural *field* hold what v1 wrote:
+    a known status, an ISO-8601 timestamp, or (``expires_at`` only) NULL?
+    Only digits, ``-``, ``:``, ``.``, ``T``/``Z``/space and ``+`` can pass, so
+    no free text and no cpassword material."""
+    if field == "status":
+        return isinstance(value, str) and value in LEGACY_TRIAGE_ACTIONS
+    if field == "expires_at" and value is None:
+        return True
+    return isinstance(value, str) and _TRIAGE_TIME.fullmatch(value) is not None
+
+
 # Operator-supplied fields inside ``events`` payloads, by event type (``*``:
 # every event type; the principal name is in every audit event).
 ANALYST_TEXT_EVENT_FIELDS: tuple[tuple[str, str], ...] = (
@@ -499,9 +527,23 @@ def refusable_rows(conn: sqlite3.Connection) -> list[RefusableRow]:
     operator decides). Returns ids and the kind of match, never a value.
     """
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
+    def columns(table: str) -> set[str]:
+        # An old database may predate columns added by later migrations.
+        return {row[1] for row in conn.execute(f'PRAGMA table_info("{table}")')}
+
     found: list[RefusableRow] = []
+    if "finding_triage" in tables:
+        present = [c for c in LEGACY_TRIAGE_STRUCTURAL if c in columns("finding_triage")]
+        query = f"SELECT id, {', '.join(present)} FROM finding_triage ORDER BY id"  # noqa: S608
+        for row_id, *values in conn.execute(query):
+            for field, value in zip(present, values, strict=True):
+                if not legacy_triage_field_ok(field, value):
+                    found.append(
+                        RefusableRow("finding_triage", field, int(row_id), "uninspectable")
+                    )
     for table, column in ANALYST_TEXT_COLUMNS:
-        if table not in tables:
+        if table not in tables or column not in columns(table):
             continue
         query = f'SELECT id, "{column}" FROM "{table}" ORDER BY id'  # noqa: S608 - fixed names
         for row_id, value in conn.execute(query):
@@ -558,6 +600,8 @@ def stored_kind(value: object) -> Kind | None:
 __all__ = [
     "ANALYST_TEXT_COLUMNS",
     "ANALYST_TEXT_EVENT_FIELDS",
+    "LEGACY_TRIAGE_ACTIONS",
+    "LEGACY_TRIAGE_STRUCTURAL",
     "MAX_PRINCIPAL_LENGTH",
     "REFUSED_PRINCIPAL_MARKER",
     "REFUSED_TEXT_MARKER",
@@ -567,6 +611,7 @@ __all__ = [
     "check_analyst_text",
     "checked_slice",
     "cpassword_material",
+    "legacy_triage_field_ok",
     "migrated_value",
     "refusable_rows",
     "stored_kind",
