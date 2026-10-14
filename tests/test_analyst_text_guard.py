@@ -629,7 +629,7 @@ def test_refusable_rows_lists_ids_and_kinds_only(web_db: Path) -> None:
         ("finding_triage_event", "rationale", ids["rationale"], "labelled"),
         ("events", "payload.question", ids["question"], "ciphertext"),
         ("finding_triage", "rationale", ids["legacy_rationale"], "ciphertext"),
-        ("finding_triage_event", "note", ids["blob_note"], "ciphertext"),
+        ("finding_triage_event", "note", ids["blob_note"], "uninspectable"),
     }
 
 
@@ -1413,6 +1413,8 @@ def test_v8_migration_does_not_duplicate_a_row_an_older_release_copied_verbatim(
         "用户",
         "Ανδρέας@example.gr",
         "jean-luc.picard",
+        "DOMAIN\\user@x",
+        "CONTOSO\\user@dept",  # Sol r4 N1: "@" is legal in a SAM account name
     ],
 )
 def test_legal_account_names_are_accepted(name: str) -> None:
@@ -1430,7 +1432,6 @@ def test_legal_account_names_are_accepted(name: str) -> None:
         "a\\b\\c",
         "\\user",
         "DOMAIN\\",
-        "DOMAIN\\user@x",
         "@example.com",
         "user@",
         "user@exa mple.com",
@@ -1478,12 +1479,28 @@ def _v7_db_with_raw_triage(tmp_path: Path, rows: list[tuple[Any, ...]]) -> tuple
     return db, finding_id
 
 
-@pytest.mark.parametrize("encoding", ["utf-8", "utf-16-le", "utf-16-be"])
-def test_v8_migration_never_copies_a_refused_blob(tmp_path: Path, encoding: str) -> None:
-    """Sol r3 B1: a BLOB actor/note was copied verbatim, with no warning."""
+_BLOB_FORMS = {
+    "utf-8": _LEGACY_ACTOR.encode(),
+    "utf-16-le": _LEGACY_ACTOR.encode("utf-16-le"),
+    "utf-16-be": _LEGACY_ACTOR.encode("utf-16-be"),
+    # Sol r4 B1 / DeepSeek r4 BLOCKING-1: readings the old guard did not try.
+    "utf-32": _LEGACY_ACTOR.encode("utf-32"),
+    "utf-32-le": _LEGACY_ACTOR.encode("utf-32-le"),
+    "cp500 (EBCDIC)": _LEGACY_ACTOR.encode("cp500"),
+    "utf-16-le + trailing byte": _LEGACY_ACTOR.encode("utf-16-le") + b"X",
+    "leading byte + utf-16-le": b"X" + _LEGACY_ACTOR.encode("utf-16-le"),
+    "utf-16-le misaligned even": b"X" + _LEGACY_ACTOR.encode("utf-16-le") + b"Y",
+}
+
+
+@pytest.mark.parametrize("form", list(_BLOB_FORMS))
+def test_v8_migration_never_copies_a_refused_blob(tmp_path: Path, form: str) -> None:
+    """Sol r3 B1, r4 B1 / DeepSeek r4 BLOCKING-1: a BLOB actor/note was
+    copied verbatim whenever no reading tried showed the token. Now no BLOB
+    is copied, whatever its encoding."""
     from gpo_lens.analyst_text import REFUSED_PRINCIPAL_MARKER, REFUSED_TEXT_MARKER
 
-    blob = _LEGACY_ACTOR.encode(encoding)
+    blob = _BLOB_FORMS[form]
     db, _ = _v7_db_with_raw_triage(tmp_path, [("acknowledged", blob, "", blob, "2025-01-03")])
     with pytest.warns(UserWarning, match=r"2 legacy field"):
         _reopen(db)
@@ -1502,15 +1519,19 @@ def test_v8_migration_never_copies_a_refused_blob(tmp_path: Path, encoding: str)
     assert _LEGACY_ACTOR not in record
     assert listed == {("finding_triage", "actor"), ("finding_triage", "note")}
     assert _all_bytes(db).count(blob) == 2  # the two untouched legacy cells only
+    payload = json.loads(record)
+    assert {x["kind"] for x in payload["substitutions"]} == {"uninspectable"}
 
 
 def test_v8_migration_storage_class_rule(tmp_path: Path) -> None:
-    """Clean BLOBs are copied unchanged; INTEGER/REAL/NULL are copied; an
-    undecodable-but-clean BLOB is copied (every reading passed)."""
-    from gpo_lens.analyst_text import migrated_value
+    """Round 4 rule: TEXT checked; NULL/INTEGER/REAL copied; a BLOB is never
+    copied — every BLOB becomes the marker as uninspectable (it has no
+    declared encoding, so no reading can show it is clean)."""
+    from gpo_lens.analyst_text import REFUSED_TEXT_MARKER, migrated_value, stored_kind
 
-    assert migrated_value(b"clean note", "note") == (b"clean note", None)
-    assert migrated_value(b"\xff\xfe\xfd", "note") == (b"\xff\xfe\xfd", None)
+    for blob in (b"clean note", b"\xff\xfe\xfd", b""):
+        assert migrated_value(blob, "note") == (REFUSED_TEXT_MARKER, "uninspectable")
+        assert stored_kind(blob) == "uninspectable"
     assert migrated_value(42, "note") == (42, None)
     assert migrated_value(1.5, "note") == (1.5, None)
     assert migrated_value(None, "note") == (None, None)
@@ -1518,11 +1539,12 @@ def test_v8_migration_storage_class_rule(tmp_path: Path) -> None:
     db, _ = _v7_db_with_raw_triage(
         tmp_path, [("acknowledged", b"clean note", "", "alice", "2025-01-05")]
     )
-    _reopen(db)
+    with pytest.warns(UserWarning, match=r"1 legacy field"):
+        _reopen(db)
     conn = sqlite3.connect(db)
     try:
         assert conn.execute("SELECT typeof(note), note FROM finding_triage_event").fetchall() == [
-            ("blob", b"clean note")
+            ("text", REFUSED_TEXT_MARKER)
         ]
     finally:
         conn.close()
@@ -1624,6 +1646,198 @@ def test_names_with_control_format_or_stray_space_are_refused(name: str) -> None
     from gpo_lens.analyst_text import valid_principal_name
 
     assert not valid_principal_name(name)
+
+
+# --- review round 4 regressions ---------------------------------------------------------------
+
+
+def _provenance(db: Path) -> list[tuple[int, int]]:
+    conn = sqlite3.connect(db)
+    try:
+        return conn.execute(
+            "SELECT legacy_id, event_id FROM finding_triage_legacy_copy ORDER BY legacy_id"
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+def test_v8_migration_records_provenance_and_replays_exactly(tmp_path: Path) -> None:
+    """Sol r4 B2: re-runs copy exactly the legacy rows not yet recorded. The
+    copy re-runs on every open below the current schema (an upgrade from v8-v10,
+    or after a refused v11 scrub / pending purge, which leave the schema at 10
+    with the copy already committed); this replays that by re-marking v7."""
+    db, finding_id = _legacy_db(tmp_path)
+    ids = _seed_legacy_triage(db, finding_id)
+    with pytest.warns(UserWarning):
+        _reopen(db)
+    first = _provenance(db)
+    assert [legacy for legacy, _ in first] == sorted(ids.values())
+    conn = sqlite3.connect(db)
+    try:
+        # A new legacy row appears (as if written by an old release) and the
+        # earlier rows' text was since redacted in place.
+        new_id = conn.execute(
+            "INSERT INTO finding_triage (finding_id, status, note, rationale, actor, timestamp) "
+            "VALUES (?, 'acknowledged', 'late row', '', 'carol', '2025-02-01')",
+            (finding_id,),
+        ).lastrowid
+        conn.execute("UPDATE finding_triage SET note = '[redacted cpassword]'")
+        conn.execute("PRAGMA user_version = 7")
+        conn.commit()
+    finally:
+        conn.close()
+    _reopen(db)
+    second = _provenance(db)
+    assert second[: len(first)] == first
+    assert [legacy for legacy, _ in second] == [*sorted(ids.values()), new_id]
+    conn = sqlite3.connect(db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM finding_triage_event").fetchone()[0] == 5
+    finally:
+        conn.close()
+
+
+def _sol_r4_db(tmp_path: Path, legacy_notes: list[str], event_notes: list[str]) -> Path:
+    db, finding_id = _legacy_db(tmp_path)
+    conn = sqlite3.connect(db)
+    try:
+        for note in legacy_notes:
+            conn.execute(
+                "INSERT INTO finding_triage (finding_id, status, note, rationale, actor, "
+                "timestamp) VALUES (?, 'acknowledged', ?, '', 'alice', '2025-01-03')",
+                (finding_id, note),
+            )
+        for note in event_notes:
+            conn.execute(
+                "INSERT INTO finding_triage_event (occurrence_id, action, actor, occurred_at, "
+                "note, rationale) VALUES (?, 'acknowledged', 'alice', '2025-01-03', ?, '')",
+                (finding_id, note),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return db
+
+
+_CLEAN_REDACTED = "reviewed [redacted cpassword] in source"
+
+
+def test_sol_r4_greedy_probe_neither_duplicates_nor_misassigns(tmp_path: Path) -> None:
+    """Sol r4 B2 (greedy): legacy [clean, refused]; existing events [a marker,
+    the exact clean note]. Without provenance only an exact verbatim copy (what
+    pre-fix releases wrote) stands for a legacy row: the clean row gets the
+    exact event; the marker is not a copy of anything (pre-fix releases never
+    wrote markers, and this release's own copies carry provenance), so the
+    refused row is copied once as a marker."""
+    from gpo_lens.analyst_text import REFUSED_TEXT_MARKER
+
+    db = _sol_r4_db(
+        tmp_path, [_CLEAN_REDACTED, _LEGACY_ACTOR], [REFUSED_TEXT_MARKER, _CLEAN_REDACTED]
+    )
+    with pytest.warns(UserWarning, match=r"1 legacy field"):
+        _reopen(db)
+    conn = sqlite3.connect(db)
+    try:
+        notes = conn.execute("SELECT id, note FROM finding_triage_event ORDER BY id").fetchall()
+    finally:
+        conn.close()
+    assert notes == [(1, REFUSED_TEXT_MARKER), (2, _CLEAN_REDACTED), (3, REFUSED_TEXT_MARKER)]
+    assert _provenance(db) == [(1, 2), (2, 3)]
+
+
+def test_sol_r4_skip_probe_copies_the_clean_row(tmp_path: Path) -> None:
+    """Sol r4 B2 (skip): a lone marker event no longer swallows a clean row."""
+    from gpo_lens.analyst_text import REFUSED_TEXT_MARKER
+
+    db = _sol_r4_db(tmp_path, [_CLEAN_REDACTED], [REFUSED_TEXT_MARKER])
+    _reopen(db)
+    conn = sqlite3.connect(db)
+    try:
+        notes = conn.execute("SELECT id, note FROM finding_triage_event ORDER BY id").fetchall()
+    finally:
+        conn.close()
+    assert notes == [(1, REFUSED_TEXT_MARKER), (2, _CLEAN_REDACTED)]
+    assert _provenance(db) == [(1, 2)]
+
+
+def _sqlite_compatible(conn: sqlite3.Connection, a: tuple[Any, ...], b: tuple[Any, ...]) -> bool:
+    """SQLite's own verdict: ``=`` on every field, ``IS`` on expires_at."""
+    *fa, ea = a
+    *fb, eb = b
+    clauses = " AND ".join(["? = ?"] * len(fa) + ["? IS ?"])
+    params: list[Any] = [x for pair in zip(fa, fb, strict=True) for x in pair] + [ea, eb]
+    return bool(conn.execute(f"SELECT coalesce({clauses}, 0)", params).fetchone()[0])  # noqa: S608
+
+
+def _brute_force_max(n_legacy: int, n_events: int, ok: list[list[bool]]) -> int:
+    best = 0
+
+    def walk(i: int, used: frozenset[int], size: int) -> None:
+        nonlocal best
+        if size + (n_legacy - i) <= best:
+            return
+        if i == n_legacy:
+            best = max(best, size)
+            return
+        for j in range(n_events):
+            if j not in used and ok[i][j]:
+                walk(i + 1, used | {j}, size + 1)
+        walk(i + 1, used, size)
+
+    walk(0, frozenset(), 0)
+    return best
+
+
+def test_legacy_matching_is_a_maximum_one_to_one_matching_under_sqlite_equality() -> None:
+    """Random differential against a brute-force maximum matching, with
+    compatibility decided by SQLite itself (storage classes included)."""
+    from gpo_lens.store import legacy_triage_matches
+
+    rng = random.Random(4)  # noqa: S311 - reproducible test data
+    pool: list[Any] = ["a", "b", "1", 1, 1.0, 2, b"a", None, "", "[refused analyst text]"]
+    conn = sqlite3.connect(":memory:")
+    try:
+        for _ in range(400):
+
+            def fields() -> tuple[Any, ...]:
+                return (
+                    rng.choice([1, 2]),
+                    "acknowledged",
+                    "t",
+                    rng.choice(pool),
+                    rng.choice(pool),
+                    rng.choice(pool[:3]),
+                    rng.choice([None, "x"]),
+                )
+
+            legacy = [(i + 1, fields()) for i in range(rng.randrange(0, 6))]
+            events = [(j + 10, fields()) for j in range(rng.randrange(0, 6))]
+            ok = [[_sqlite_compatible(conn, lf, ef) for _, ef in events] for _, lf in legacy]
+            got = legacy_triage_matches(legacy, events)
+            assert len(set(got.values())) == len(got)  # one event per legacy row
+            index_l = {lid: i for i, (lid, _) in enumerate(legacy)}
+            index_e = {eid: j for j, (eid, _) in enumerate(events)}
+            for lid, eid in got.items():
+                assert ok[index_l[lid]][index_e[eid]], (legacy, events, got)
+            assert len(got) == _brute_force_max(len(legacy), len(events), ok)
+    finally:
+        conn.close()
+
+
+def test_checker_reports_a_blob_event_payload(web_db: Path) -> None:
+    """Sol r4 N2: a UTF-32 JSON payload naming a principal was invisible."""
+    conn = sqlite3.connect(web_db)
+    try:
+        event_id = conn.execute(
+            "INSERT INTO events (timestamp, event_type, schema_version, payload) "
+            "VALUES ('2025-01-01T00:00:00+00:00', 'audit.ingest', 1, ?)",
+            (json.dumps({"principal": _LEGACY_ACTOR}).encode("utf-32"),),
+        ).lastrowid
+        conn.commit()
+        rows = {(r.table, r.column, r.row_id, r.kind) for r in refusable_rows(conn)}
+    finally:
+        conn.close()
+    assert rows == {("events", "payload", event_id, "uninspectable")}
 
 
 # --- inventory: every write path goes through the guard -------------------------------------

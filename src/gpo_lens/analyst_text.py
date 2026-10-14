@@ -206,7 +206,9 @@ def valid_principal_name(name: str) -> bool:
     forbids in an account name), no whitespace other than the plain space, and
     no character of Unicode category Cc (C0, DEL, C1 controls), Cf (bidi and
     zero-width format characters), Zl/Zp (line and paragraph separators), Cs
-    or Co. ``@`` appears only once, as the UPN separator, never with ``\\``.
+    or Co. In the ``user@domain`` form ``@`` appears once, as the separator; in
+    the ``DOMAIN\\user`` form the user (SAM account name) may contain ``@``
+    (``CONTOSO\\user@dept``) and the domain may not.
     Used for names that arrive from outside (a forwarded-user header); the
     built-in principals already match.
     """
@@ -214,7 +216,9 @@ def valid_principal_name(name: str) -> bool:
         return False
     domain, backslash, user = name.partition("\\")
     if backslash:
-        if not (_account_part(domain) and _account_part(user)) or "@" in name:
+        # The SAM account name may contain "@" (AD does not forbid it); the
+        # NetBIOS domain may not, and only one backslash is allowed.
+        if not (_account_part(domain) and _account_part(user)) or "@" in domain:
             return False
     else:
         user, at, upn_domain = name.partition("@")
@@ -231,20 +235,18 @@ def migrated_value(value: object, field: str) -> tuple[object, Kind | None]:
     with the refusal kind. Never raises; never returns the refused value.
 
     The rule by SQLite storage class (a TEXT column can hold any of them):
-    TEXT is checked; a BLOB is checked under every reading of it
-    (:func:`stored_kind`) and copied unchanged only when every reading passes;
-    INTEGER, REAL and NULL are copied (their text has no letters but ``e``,
-    ``inf`` and ``nan``, so it can carry neither a label nor a base64 token
-    of mixed case). Anything else is replaced by the marker as
-    ``uninspectable``.
+    TEXT is checked; INTEGER, REAL and NULL are copied (their text has no
+    letters but ``e``, ``inf`` and ``nan``, so it can carry neither a label nor
+    a base64 token of mixed case); a BLOB is never copied — gpo-lens never
+    writes one into these columns, and a BLOB has no declared encoding, so no
+    reading of it can show it is clean — and is replaced by the marker as
+    ``uninspectable``, as is anything else (:func:`stored_kind`).
     """
-    if value is None or isinstance(value, int | float):
-        return value, None
     kind = stored_kind(value)
-    if kind is None and isinstance(value, str | bytes):
+    if kind is None:
         return value, None
     marker = REFUSED_PRINCIPAL_MARKER if field == "actor" else REFUSED_TEXT_MARKER
-    return marker, kind or "uninspectable"
+    return marker, kind
 
 
 def cpassword_material(text: str) -> Kind | None:
@@ -507,15 +509,24 @@ def refusable_rows(conn: sqlite3.Connection) -> list[RefusableRow]:
             if kind is not None:
                 found.append(RefusableRow(table, column, int(row_id), kind))
     if "events" in tables:
+        # A BLOB payload (gpo-lens writes JSON text) is reported once as
+        # uninspectable; a TEXT prefilter would never select it. INTEGER/REAL
+        # payloads carry no material.
+        for (row_id,) in conn.execute(
+            "SELECT id FROM events WHERE typeof(payload) = 'blob' ORDER BY id"
+        ):
+            found.append(RefusableRow("events", "payload", int(row_id), "uninspectable"))
         for event_type, field in ANALYST_TEXT_EVENT_FIELDS:
             if event_type == "*":
                 rows = conn.execute(
-                    "SELECT id, payload FROM events WHERE instr(payload, ?) > 0 ORDER BY id",
+                    "SELECT id, payload FROM events WHERE typeof(payload) = 'text' "
+                    "AND instr(payload, ?) > 0 ORDER BY id",
                     (f'"{field}"',),
                 )
             else:
                 rows = conn.execute(
-                    "SELECT id, payload FROM events WHERE event_type = ? ORDER BY id",
+                    "SELECT id, payload FROM events WHERE event_type = ? "
+                    "AND typeof(payload) = 'text' ORDER BY id",
                     (event_type,),
                 )
             for row_id, payload in rows:
@@ -532,31 +543,16 @@ def refusable_rows(conn: sqlite3.Connection) -> list[RefusableRow]:
 def stored_kind(value: object) -> Kind | None:
     """:func:`cpassword_material` of a stored value of any storage class.
 
-    A BLOB is read every way the v11 scrub reads one — UTF-8, Latin-1, and
-    UTF-16 little- and big-endian when its length is even — and refused if any
-    reading is (a UTF-16 BLOB of an ASCII token reads as UTF-8 with a NUL
-    between characters, which hides the token). INTEGER, REAL and NULL carry
-    no material. Never raises.
+    TEXT is checked. INTEGER, REAL and NULL carry no material. Anything else —
+    a BLOB in particular — is ``uninspectable``: gpo-lens never writes a BLOB
+    into an operator-text column, and a BLOB has no declared encoding, so it
+    is never treated as clean. Never raises.
     """
-    if isinstance(value, bytearray | memoryview):
-        value = bytes(value)
-    if isinstance(value, bytes):
-        for text in _blob_readings(value):
-            kind = cpassword_material(text)
-            if kind is not None:
-                return kind
+    if value is None or isinstance(value, bool | int | float):
         return None
-    return cpassword_material(value) if isinstance(value, str) else None
-
-
-def _blob_readings(blob: bytes) -> Iterator[str]:
-    yield blob.decode("latin-1")
-    encodings = ["utf-8"] + (["utf-16-le", "utf-16-be"] if len(blob) % 2 == 0 else [])
-    for encoding in encodings:
-        try:
-            yield blob.decode(encoding)
-        except UnicodeDecodeError:
-            continue
+    if isinstance(value, str):
+        return cpassword_material(value)
+    return "uninspectable"
 
 
 __all__ = [

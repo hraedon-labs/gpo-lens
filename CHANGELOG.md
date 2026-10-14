@@ -81,12 +81,15 @@ one-way schema migration); the date is set when it is cut.
   marker (`[refused principal name]` / `[refused analyst text]`); the legacy
   row is unchanged and still listed by `analyst-text-check`, and the
   substitutions are recorded by row id and field only
-  (`maintenance.analyst_text_substituted` event and a warning). BLOB values are
-  checked under every text reading; INTEGER, REAL and NULL are copied. Each
-  existing event matches one legacy row at most, so a re-run neither duplicates
-  nor drops rows. The upgrade is not refused (see `SECURITY.md`). A verbatim
-  copy an earlier release already made is left as it is and listed by
-  `analyst-text-check`.
+  (`maintenance.analyst_text_substituted` event and a warning). A BLOB is
+  never copied (always the marker, as uninspectable); INTEGER, REAL and NULL
+  are copied. The new `finding_triage_legacy_copy` table records which event
+  each legacy row became, so a re-run (any upgrade from v8–v10, or any open
+  before the v11 scrub is stamped) copies exactly the rows not yet recorded. A
+  verbatim copy an earlier release already made is recognised by exact
+  equality of every field, one event per row, recorded, left as it is and
+  listed by `analyst-text-check`. The upgrade is not refused (see
+  `SECURITY.md`).
 - `finding_triage.rationale` is now a descriptive column for the v11 cpassword
   scrub (like `finding_triage.note` and `finding_triage_event.rationale`); a
   labelled cpassword in a legacy rationale used to refuse the upgrade with
@@ -95,7 +98,8 @@ one-way schema migration); the date is set when it is cut.
   `GPO_LENS_FORWARDED_USER_HEADER` set, the header names the principal, which
   is stored as the triage actor and in audit events and logged to
   `audit.log`. It must now be an account name — `user`, `user@domain` or
-  `DOMAIN\user` (the domain may contain inner spaces, as in `NT AUTHORITY`),
+  `DOMAIN\user` (the domain may contain inner spaces, as in `NT AUTHORITY`;
+  the user part may contain `@`, as a SAM account name can),
   at most 256 characters, each part with no leading or trailing space, none of
   the characters AD forbids in an account name (`"/\[]:;|=,+*?<>`), no
   whitespace but the plain space, and no control, format or line-separator
@@ -110,7 +114,13 @@ one-way schema migration); the date is set when it is cut.
 - `gpo-lens analyst-text-check [--json]`: read-only (`mode=ro`) list of the
   ids of stored triage notes, rationales and actors, Ask questions and event
   principals that the guard would now refuse — table, column, row id and kind
-  of match, never the value. Exits 1 when it lists any row.
+  of match, never the value; any BLOB in those columns, and any BLOB event
+  payload, is listed as uninspectable. Exits 1 when it lists any row.
+- Table `finding_triage_legacy_copy` (legacy `finding_triage` id → copied
+  `finding_triage_event` id): provenance of the v7→v8 copy. Created only when a
+  database has legacy triage rows to copy (so an upgrade whose v11 scrub is
+  refused still changes nothing on a database without them); additive, no
+  schema-version change.
 - `scripts/measure_analyst_text_guard.py`: reproducible measurement of the
   guard's miss rate on random GPP-shaped ciphertext (the figures in
   `SECURITY.md`).
