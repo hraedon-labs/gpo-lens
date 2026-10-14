@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-Draft **v1.5.0** — release target and date TBD by the owner (it carries a
-one-way schema migration, so a patch number was not assumed).
+Draft **v1.5.0** — the release number is confirmed by the owner (it carries a
+one-way schema migration); the date is set when it is cut.
 
 ### Security
 
@@ -44,6 +44,102 @@ one-way schema migration, so a patch number was not assumed).
   count hits and the finding lifecycle tracks presence per GPO, and any
   cpassword is already compromised, so rotation is not a remediation and is
   not shown as a change.
+- **Operator-supplied text carrying a GPP cpassword is refused, not stored.**
+  Ingest redaction cannot know a value supplied after it, so a triage note or
+  risk-acceptance rationale, the triage actor, an Ask question (stored in the
+  `audit.narrate` event and sent to the model), the `principal` of every audit
+  event and the `explain-setting` identity sent to the model now pass one
+  guard, `gpo_lens.analyst_text.check_analyst_text`, before they are stored or
+  sent. It refuses — never rewrites — text holding a labelled cpassword in any
+  form the ingest redactor recognises (inline, escaped, JSON, XML element,
+  split across XML nodes, character references), an unlabelled token with the
+  shape the estate-wide copy chaser uses (base64 of whole AES blocks, at least
+  22 characters, compared canonically; also wrapped across lines with prose
+  before and after it), minus shapes Windows-written ciphertext cannot have
+  (pure hex, one letter case, non-canonical base64, base64 of text, word-built
+  identifiers and paths), and structure it cannot inspect (nesting beyond the
+  redactor's recursion limit, XML entity declarations). The guard is total, so
+  crafted input gets a refusal, never an HTTP 500. The web triage form and Ask
+  answer `400` with the reason ("looks like a Group Policy Preferences
+  cpassword; remove it — the value is a recoverable credential"); the triage
+  form keeps the draft in place (a small script submits it without leaving the
+  page), and the CLI exits 1. Nothing echoes the value: the HTTP body,
+  `audit.log` (a `triage` `refused` entry), the `audit.narrate` event (question
+  stored empty, outcome `refused`) and exception text name the field only.
+  Callers check what they store plus a 1,024-character margin past the
+  truncation, so the work per request is bounded. Measured miss and
+  false-positive rates, and the known false positives (base64 of any whole
+  number of AES blocks, including base64 digests and PEM certificate lines;
+  prose such as `cpassword: removed`), are in `SECURITY.md`. A static test
+  inventories write paths and request sources (SQL and event writes with their
+  payload keys, web inputs including headers, raw header/cookie/query reads,
+  model calls) and fails until a new one is guarded field by field (both
+  before and after truncation where a writer truncates) or classified; it is
+  a heuristic, and its blind spots are listed in the test.
+- **The v7→v8 triage migration checks what it copies.** A legacy actor, note or
+  rationale the guard would refuse is copied into `finding_triage_event` as a
+  marker (`[refused principal name]` / `[refused analyst text]`); the legacy
+  row is unchanged and still listed by `analyst-text-check`, and the
+  substitutions are recorded by row id and field only
+  (`maintenance.analyst_text_substituted` event and a warning). A BLOB is
+  never copied (always the marker, as uninspectable); INTEGER, REAL and NULL
+  are copied. The structural columns are validated: an unknown legacy status
+  is copied as a `commented` event, and a row whose timestamp or expiry the
+  triage fold cannot read (checked with the fold's own parser, so impossible
+  dates are caught) is withheld (both reported, and listed by
+  `analyst-text-check`). The new `finding_triage_legacy_copy` table records
+  which event each legacy row became (or that it was withheld), so a re-run
+  (any upgrade from v8–v10, or any open before the v11 scrub is stamped)
+  copies exactly the rows not yet recorded. A verbatim copy an earlier release
+  already made is recognised by exact equality of every column (SQLite's
+  comparison; `supersedes_event_id` NULL), one event per row, recorded and
+  left as it is; `analyst-text-check` lists it when its value would be
+  refused. The upgrade is not refused (see `SECURITY.md`).
+- **Triage readers fail closed on unreadable times.** Every stored triage
+  event is read by one strict reader. An `accepted_risk` event whose non-NULL
+  expiry cannot be read is treated as expired (never permanent) by both the
+  triage fold and the accepted-risk register; any event whose time cannot be
+  read makes that finding's history fail closed (`open`, no active
+  acceptance) instead of being ordered by a placeholder time. Both carry an
+  integrity note (`TriageStatus.integrity`, `RiskAcceptance.integrity`) naming
+  the occurrence and event id, and `analyst-text-check` lists such events.
+  This covers copies an earlier release made as well as new ones.
+- `finding_triage.rationale` is now a descriptive column for the v11 cpassword
+  scrub (like `finding_triage.note` and `finding_triage_event.rationale`); a
+  labelled cpassword in a legacy rationale used to refuse the upgrade with
+  `CredentialInIdentityError`.
+- **Forwarded user names are validated.** With
+  `GPO_LENS_FORWARDED_USER_HEADER` set, the header names the principal, which
+  is stored as the triage actor and in audit events and logged to
+  `audit.log`. It must now be an account name — `user`, `user@domain` or
+  `DOMAIN\user` (the domain may contain inner spaces, as in `NT AUTHORITY`;
+  the user part may contain `@`, as a SAM account name can),
+  at most 256 characters, each part with no leading or trailing space, none of
+  the characters AD forbids in an account name (`"/\[]:;|=,+*?<>`), no
+  whitespace but the plain space, and no control, format or line-separator
+  character (Unicode Cc/Cf/Zl/Zp/Cs/Co) — and carry no cpassword material;
+  anything else is refused with `401`. Previously control characters were
+  silently stripped and the value cut at 256 characters; now only outer spaces
+  and tabs are trimmed. `audit.log` writes a name
+  that carries cpassword material as `[refused principal name]`.
+
+### Added
+
+- `gpo-lens analyst-text-check [--json]`: read-only (`mode=ro`) list of the
+  ids of stored triage notes, rationales and actors, Ask questions and event
+  principals that the guard would now refuse — table, column, row id and kind
+  of match, never the value; any BLOB in those columns, and any BLOB event
+  payload, is listed as uninspectable. Exits 1 when it lists any row.
+- Table `finding_triage_legacy_copy` (legacy `finding_triage` id → copied
+  `finding_triage_event` id, NULL when withheld): provenance of the v7→v8 copy,
+  internal migration state (do not edit it by hand). Unlike the other tables it
+  is not created by `init_db` up front but by the copy, inside the copy's
+  transaction, and only when a database has legacy triage rows (so an upgrade
+  whose v11 scrub is refused still changes nothing on a database without
+  them); additive, no schema-version change.
+- `scripts/measure_analyst_text_guard.py`: reproducible measurement of the
+  guard's miss rate on random GPP-shaped ciphertext (the figures in
+  `SECURITY.md`).
 
 ### Changed
 
@@ -75,6 +171,15 @@ one-way schema migration, so a patch number was not assumed).
   occurrences continue rather than restart. Allow free disk space about the
   size of the database. Read-only commands do not migrate.
 - Backups and original exports made before upgrading still contain the values.
+- Triage history and audit events written before this release are not
+  rewritten: the triage log is append-only history. Run
+  `gpo-lens analyst-text-check` to list the ids of rows that would now be
+  refused and decide per row (back up the database before editing it).
+- Deployments using `GPO_LENS_FORWARDED_USER_HEADER`: a forwarded name that is
+  not an account name (for example over 256 characters, or with `+`, `/`, `=`,
+  `,` or `<`) now gets `401` instead of being cut or passed through. IIS
+  `{LOGON_USER}` (`DOMAIN\user`, including `NT AUTHORITY\…` and
+  `IIS APPPOOL\…`) is accepted.
 - A schema-v11 database cannot be opened by v1.4.0 or earlier.
 
 ## v1.4.0 — 2026-10-06

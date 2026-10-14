@@ -16,6 +16,11 @@ from fastapi.templating import Jinja2Templates
 
 from gpo_lens import events as _events
 from gpo_lens import queries
+from gpo_lens.analyst_text import (
+    CpasswordInAnalystTextError,
+    check_analyst_text,
+    checked_slice,
+)
 from gpo_lens.display import serialize_result
 from gpo_lens.query_dispatch import (
     QUERY_OPTIONAL_PARAMS,
@@ -34,6 +39,34 @@ def _narration_available() -> bool:
 
 
 def register(app: FastAPI, templates: Jinja2Templates) -> None:
+
+    def _refuse(
+        request: Request,
+        principal: Principal,
+        exc: CpasswordInAnalystTextError,
+        narration_available: bool,
+    ) -> HTMLResponse:
+        """400 with the reason; the question is neither stored, sent nor echoed."""
+        rw_conn = get_rw_conn(app.state.db_path)
+        try:
+            _events.append_event(
+                rw_conn,
+                "audit.narrate",
+                {"principal": principal.name, "question": "", "outcome": "refused"},
+            )
+        finally:
+            rw_conn.close()
+        return templates.TemplateResponse(
+            request,
+            "ask.html",
+            {
+                "request": request,
+                "narration_available": narration_available,
+                "question": "",
+                "error": str(exc),
+            },
+            status_code=400,
+        )
 
     @app.get("/ask", response_class=HTMLResponse, name="ask_get")
     def ask_get(
@@ -61,6 +94,14 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
 
         narration_available = _narration_available()
         sanitized = sanitize_question(question)
+        try:
+            # The question is stored (audit.narrate) and sent to the model:
+            # refuse cpassword material in what was typed and in what would
+            # be kept (sanitizing joins lines, which can form a token).
+            check_analyst_text(checked_slice(question, len(sanitized)), "question")
+            check_analyst_text(sanitized, "question")
+        except CpasswordInAnalystTextError as exc:
+            return _refuse(request, principal, exc, narration_available)
         narration_payload: str | None = None
         facts: object = None
         error: str | None = None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import warnings
@@ -11,6 +12,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from gpo_lens.analyst_text import (
+    LEGACY_TRIAGE_ACTIONS,
+    legacy_triage_field_ok,
+    migrated_value,
+)
 from gpo_lens.events import (
     append_event,
     init_events_table,
@@ -508,7 +514,9 @@ REWRITABLE_COLUMNS: dict[str, frozenset[str]] = {
     "group_member": frozenset({"name"}),
     "finding": frozenset({"summary", "detail", "remediation", "gpo_name"}),
     "finding_observation": frozenset({"summary", "evidence_json", "remediation", "gpo_name"}),
-    "finding_triage": frozenset({"note"}),
+    # rationale (added in v6) is analyst text like note; it was missing here, so a
+    # labelled cpassword in a legacy rationale refused the v11 upgrade.
+    "finding_triage": frozenset({"note", "rationale"}),
     "finding_triage_event": frozenset({"note", "rationale"}),
     "evaluation_run": frozenset({"error_summary"}),
     "analysis_input": frozenset({"metadata_json"}),
@@ -1090,6 +1098,301 @@ def _coverage_gap_pk_has_kind(conn: sqlite3.Connection) -> bool:
     return "kind" in pk_cols
 
 
+def _value_key(value: Any) -> tuple[str, Any]:
+    """A hashable form of a stored non-NULL value that is equal for two values
+    exactly when SQLite's ``=`` says they are (no affinity, as between two
+    TEXT-affinity columns): equal storage class, INTEGER and REAL compared as
+    numbers. Python's own ``int``/``float`` equality and hashing are exact
+    (``1 == 1.0``, ``2**53 + 1 != float(2**53)``), as SQLite's comparison is."""
+    if isinstance(value, bytearray | memoryview):
+        value = bytes(value)
+    if isinstance(value, bool | int | float):
+        return ("num", value)
+    if isinstance(value, bytes):
+        return ("blob", value)
+    if isinstance(value, str):
+        return ("text", value)
+    return ("other", object())  # never stored by SQLite: equal to nothing
+
+
+def _is_null(value: Any) -> bool:
+    # SQLite stores a NaN REAL as NULL.
+    return value is None or (isinstance(value, float) and math.isnan(value))
+
+
+def _match_key(value: Any) -> tuple[str, Any]:
+    """``=`` semantics: NULL equals nothing, so it gets a key no other value
+    shares."""
+    return ("null", object()) if _is_null(value) else _value_key(value)
+
+
+def _is_key(value: Any) -> tuple[str, Any]:
+    """``IS`` semantics: NULL equals NULL."""
+    return ("null", None) if _is_null(value) else _value_key(value)
+
+
+# The columns of ``finding_triage_event`` a legacy copy writes, in the order
+# legacy_triage_matches compares them (expires_at last, with IS), and the ones
+# a legacy copy always leaves NULL. With ``id`` they are every column of the
+# table (a test enumerates the schema), so a pre-fix copy is recognised by all
+# of them.
+LEGACY_COPY_COMPARED: tuple[str, ...] = (
+    "occurrence_id",
+    "action",
+    "occurred_at",
+    "actor",
+    "note",
+    "rationale",
+    "expires_at",
+)
+LEGACY_COPY_NULL: tuple[str, ...] = ("supersedes_event_id",)
+
+
+def legacy_triage_matches(
+    legacy: list[tuple[int, tuple[Any, ...]]], events: list[tuple[int, tuple[Any, ...]]]
+) -> dict[int, int]:
+    """One-to-one assignment of legacy rows to existing events with exactly
+    the same stored fields (``(id, fields)`` pairs in
+    :data:`LEGACY_COPY_COMPARED` order; ``expires_at`` last, compared with
+    ``IS``). Exact equality is an equivalence relation, so the compatibility
+    graph is a disjoint union of complete bipartite groups and pairing rows and
+    events in id order within each group is a maximum matching. Returns
+    ``{legacy_id: event_id}``."""
+
+    def key(fields: tuple[Any, ...]) -> tuple[Any, ...]:
+        *compared, expires = fields
+        return (*map(_match_key, compared), _is_key(expires))
+
+    free: dict[tuple[Any, ...], list[int]] = {}
+    for event_id, fields in sorted(events):
+        free.setdefault(key(fields), []).append(event_id)
+    matched: dict[int, int] = {}
+    for legacy_id, fields in sorted(legacy):
+        group = free.get(key(fields))
+        if group:
+            matched[legacy_id] = group.pop(0)
+    return matched
+
+
+def _migrate_legacy_triage(conn: sqlite3.Connection) -> None:
+    """v7 -> v8 (WI-092): copy legacy ``finding_triage`` rows into the Plan 024
+    ``finding_triage_event`` log so triage state lives in one store.
+
+    Status mapping: ``open`` -> ``reopened`` (the v2 action that folds to
+    open); ``acknowledged``/``accepted_risk`` carry over. For accepted-risk
+    rows, fall back to the note as the rationale when the v1 row recorded none
+    (v1 had no rationale concept) — nothing is fabricated beyond the
+    operator's own text. Orphaned legacy rows are skipped defensively: old
+    databases may have been modified while foreign-key enforcement was
+    disabled. Released v1.1/v1.2 exposed both APIs. Existing event IDs
+    (including supersedes references) remain immutable; converted rows get
+    stable IDs in legacy chronological order. Readers normalize timestamps to
+    UTC and prefer reopen/revoke/expiry at equal instants before the ID
+    tie-breaker, so migrated approvals cannot reinstate a reopened risk.
+
+    **When this runs.** On every open while the schema is below the current
+    version: an upgrade from any older release, including v8-v10 databases
+    whose release already copied these rows verbatim, and every open while the
+    v11 cpassword scrub has not been stamped (the additive migrations commit
+    first, so the copy is already committed when a scrub is refused or its
+    purge is retried).
+
+    **Provenance.** Each copied or recognised legacy row is recorded in
+    ``finding_triage_legacy_copy`` (legacy row id -> event id) in the same
+    transaction as the copy, so a re-run copies exactly the legacy rows not
+    yet recorded and never guesses. Legacy rows with no record can only have
+    been copied by a release before this table existed, which copied them
+    verbatim: those are recognised by exact equality of every stored field
+    (one event per legacy row, :func:`legacy_triage_matches`), recorded, and
+    left as they are — the triage log is not rewritten; ``analyst-text-check``
+    lists a refused value there.
+
+    **What is copied.** Operator text passes ``analyst_text.migrated_value``:
+    TEXT the guard would refuse, and any BLOB (gpo-lens never writes one there,
+    and a BLOB has no declared encoding to check), is copied as a marker
+    (``[refused principal name]`` / ``[refused analyst text]``); NULL, INTEGER
+    and REAL are copied. The legacy row is left exactly as it was, so
+    ``gpo-lens analyst-text-check`` still lists it, and substitutions are
+    recorded by legacy row id and field only (a
+    ``maintenance.analyst_text_substituted`` event and a warning). The upgrade
+    is not refused: nobody can edit the legacy table from the app, and a
+    database stuck below v8 would never reach the v11 cpassword scrub.
+    """
+    if not conn.execute("SELECT 1 FROM finding_triage LIMIT 1").fetchone():
+        return  # nothing to copy: create nothing (an up-to-date open writes nothing)
+    # Provenance of this copy: which event a legacy row became (NULL: withheld,
+    # see below), so a re-run handles exactly the rows not yet recorded. Ids
+    # only. The DDL runs inside the copy's own transaction (Python's sqlite3
+    # would otherwise run it outside one), so a crash leaves no trace.
+    if not conn.in_transaction:
+        conn.execute("BEGIN")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS finding_triage_legacy_copy (
+            legacy_id INTEGER PRIMARY KEY
+                REFERENCES finding_triage(id) ON DELETE CASCADE,
+            event_id INTEGER UNIQUE
+                REFERENCES finding_triage_event(id) ON DELETE CASCADE
+        )
+        """
+    )
+    legacy = conn.execute(
+        """
+        SELECT t.id, t.finding_id, t.status, t.actor, t.timestamp, t.note,
+               t.rationale, t.expires_at
+        FROM finding_triage t
+        JOIN finding f ON f.id = t.finding_id
+        WHERE t.id NOT IN (SELECT legacy_id FROM finding_triage_legacy_copy)
+        ORDER BY t.timestamp, t.id
+        """
+    ).fetchall()
+    if not legacy:
+        return
+    # Rows copied before provenance existed: recognise them exactly, by what a
+    # pre-fix release wrote (status mapped by its CASE, rationale falling back
+    # to the note, supersedes NULL).
+    compared = ", ".join(LEGACY_COPY_COMPARED)
+    unset = " AND ".join(f"{column} IS NULL" for column in LEGACY_COPY_NULL)
+    events = conn.execute(
+        f"SELECT id, {compared} FROM finding_triage_event WHERE {unset} "  # noqa: S608
+        "AND id NOT IN (SELECT event_id FROM finding_triage_legacy_copy "
+        "WHERE event_id IS NOT NULL)"
+    ).fetchall()
+    rows = [_legacy_triage_view(*row) for row in legacy]
+    recognised = legacy_triage_matches(
+        [(row["legacy_id"], row["prefix_fields"]) for row in rows],
+        [(event[0], tuple(event[1:])) for event in events],
+    )
+    substitutions: list[dict[str, Any]] = []
+    withheld = 0
+    for row in rows:
+        legacy_id = row["legacy_id"]
+        event_id = recognised.get(legacy_id)
+        if event_id is None:
+            event_id = _copy_legacy_triage_row(conn, row, substitutions)
+            withheld += event_id is None
+        conn.execute(
+            "INSERT INTO finding_triage_legacy_copy (legacy_id, event_id) VALUES (?, ?)",
+            (legacy_id, event_id),
+        )
+    if substitutions:
+        append_event(
+            conn,
+            "maintenance.analyst_text_substituted",
+            {"source_table": "finding_triage", "substitutions": substitutions},
+            commit=False,
+        )
+        warnings.warn(
+            f"triage migration: {len(substitutions)} legacy field(s) carried GPP "
+            "cpassword material, could not be inspected, or were not a v1 status or "
+            "timestamp; they were copied as a marker (an unknown status as a "
+            f"'commented' event), and {withheld} row(s) with a malformed timestamp "
+            "were not copied. The legacy rows are unchanged (gpo-lens "
+            "analyst-text-check lists them; the maintenance.analyst_text_substituted "
+            "event names row ids and fields).",
+            stacklevel=3,
+        )
+
+
+def _legacy_triage_view(
+    legacy_id: int,
+    finding_id: Any,
+    status: Any,
+    actor: Any,
+    timestamp: Any,
+    note: Any,
+    rationale: Any,
+    expires: Any,
+) -> dict[str, Any]:
+    """One legacy row, plus the fields a pre-fix release wrote for it (its
+    ``CASE`` status mapping, and ``COALESCE(NULLIF(rationale, ''), note, '')``
+    for accepted risk), in :data:`LEGACY_COPY_COMPARED` order."""
+    accepted = isinstance(status, str) and status == "accepted_risk"
+    prefix_action = "reopened" if isinstance(status, str) and status == "open" else status
+    if accepted:
+        kept = None if isinstance(rationale, str) and rationale == "" else rationale
+        prefix_rationale = kept if not _is_null(kept) else (note if not _is_null(note) else "")
+    else:
+        prefix_rationale = ""
+    return {
+        "legacy_id": legacy_id,
+        "finding_id": finding_id,
+        "status": status,
+        "actor": actor,
+        "timestamp": timestamp,
+        "note": note,
+        "rationale": prefix_rationale,
+        "expires": expires,
+        "prefix_fields": (
+            finding_id,
+            prefix_action,
+            timestamp,
+            actor,
+            note,
+            prefix_rationale,
+            expires,
+        ),
+    }
+
+
+def _copy_legacy_triage_row(
+    conn: sqlite3.Connection, row: dict[str, Any], substitutions: list[dict[str, Any]]
+) -> int | None:
+    """Copy one legacy row the safe way, or withhold it. Returns the new event
+    id, or None when the row is withheld.
+
+    Structural fields must hold what v1 wrote (``legacy_triage_field_ok``): an
+    unknown status becomes a ``commented`` event (no status effect; its
+    decision is not carried over); a malformed timestamp or expiry withholds
+    the row, since neither has a neutral replacement (an invented time would
+    misorder history; a dropped expiry would make a risk acceptance permanent).
+    Operator text passes ``migrated_value``. Every substitution is recorded by
+    legacy row id and field only."""
+    legacy_id = row["legacy_id"]
+
+    def note(field: str, kind: str) -> None:
+        substitutions.append({"row_id": legacy_id, "field": field, "kind": kind})
+
+    bad_times = [
+        field
+        for field, value in (("timestamp", row["timestamp"]), ("expires_at", row["expires"]))
+        if not legacy_triage_field_ok(field, value)
+    ]
+    if bad_times:
+        for field in bad_times:
+            note(field, "uninspectable")
+        return None
+    if legacy_triage_field_ok("status", row["status"]):
+        action = LEGACY_TRIAGE_ACTIONS[row["status"]]
+        rationale = row["rationale"]
+    else:
+        note("status", "uninspectable")
+        action, rationale = "commented", ""
+    copied_actor, actor_kind = migrated_value(row["actor"], "actor")
+    copied_note, note_kind = migrated_value(row["note"], "note")
+    copied_rationale, rationale_kind = migrated_value(rationale, "rationale")
+    for field, kind in (("actor", actor_kind), ("note", note_kind), ("rationale", rationale_kind)):
+        if kind is not None:
+            note(field, kind)
+    return conn.execute(
+        """
+        INSERT INTO finding_triage_event
+            (occurrence_id, action, actor, occurred_at, note, rationale,
+             expires_at, supersedes_event_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+        """,
+        (
+            row["finding_id"],
+            action,
+            copied_actor,
+            row["timestamp"],
+            copied_note,
+            copied_rationale,
+            row["expires"],
+        ),
+    ).lastrowid
+
+
 def _migrate_schema(conn: sqlite3.Connection, *, fresh: bool = False) -> _ScrubResult | None:
     """Additive column migrations for DBs created by older gpo-lens versions.
 
@@ -1102,6 +1405,11 @@ def _migrate_schema(conn: sqlite3.Connection, *, fresh: bool = False) -> _ScrubR
     each additive column needs an ``ALTER TABLE`` here guarded by a column
     check. Only additive (NULLable) columns — never renames or drops. The one
     data rewrite is the v11 cpassword scrub, which is idempotent.
+
+    One table is not created by ``init_db``: ``finding_triage_legacy_copy``,
+    the provenance of the v7 -> v8 triage copy, is created by
+    :func:`_migrate_legacy_triage` inside the copy's transaction and only when
+    there are legacy rows, so an open that has nothing to copy writes nothing.
 
     Returns the scrub result when the caller must purge free pages
     (``_purge_free_pages``) after committing; the version is then stamped one
@@ -1176,53 +1484,8 @@ def _migrate_schema(conn: sqlite3.Connection, *, fresh: bool = False) -> _ScrubR
             conn.execute("ALTER TABLE coverage_gap_new RENAME TO coverage_gap")
 
         # v7 -> v8 (WI-092): migrate legacy ``finding_triage`` rows into the
-        # Plan 024 ``finding_triage_event`` log so triage state lives in one
-        # store. Status mapping: ``open`` -> ``reopened`` (the v2 action that
-        # folds to open); ``acknowledged``/``accepted_risk`` carry over. For
-        # accepted-risk rows, fall back to the note as the rationale when the
-        # v1 row recorded none (v1 had no rationale concept) — nothing is
-        # fabricated beyond the operator's own text. The NOT EXISTS guard
-        # keeps a re-run after an interrupted migration a no-op. Match every
-        # stored payload field so distinct same-timestamp events are preserved.
-        # Orphaned legacy rows are skipped defensively: old databases may have
-        # been modified while foreign-key enforcement was disabled.
-        # Released v1.1/v1.2 exposed both APIs. Existing event IDs (including
-        # supersedes references) remain immutable; converted rows get stable IDs
-        # in legacy chronological order. Readers normalize timestamps to UTC
-        # and prefer reopen/revoke/expiry at equal instants before the ID
-        # tie-breaker, so migrated approvals cannot reinstate a reopened risk.
-        conn.execute(
-            """
-            INSERT INTO finding_triage_event
-                (occurrence_id, action, actor, occurred_at, note, rationale,
-                 expires_at, supersedes_event_id)
-            SELECT t.finding_id,
-                   CASE t.status WHEN 'open' THEN 'reopened' ELSE t.status END,
-                   t.actor, t.timestamp, t.note,
-                   CASE WHEN t.status = 'accepted_risk'
-                        THEN COALESCE(NULLIF(t.rationale, ''), t.note, '')
-                        ELSE '' END,
-                   t.expires_at, NULL
-            FROM finding_triage t
-            JOIN finding f ON f.id = t.finding_id
-            WHERE NOT EXISTS (
-                SELECT 1 FROM finding_triage_event e
-                WHERE e.occurrence_id = t.finding_id
-                  AND e.action = CASE t.status
-                                     WHEN 'open' THEN 'reopened'
-                                     ELSE t.status END
-                  AND e.occurred_at = t.timestamp
-                  AND e.actor = t.actor
-                  AND e.note = t.note
-                  AND e.rationale = CASE
-                      WHEN t.status = 'accepted_risk'
-                      THEN COALESCE(NULLIF(t.rationale, ''), t.note, '')
-                      ELSE '' END
-                  AND e.expires_at IS t.expires_at
-            )
-            ORDER BY t.timestamp, t.id
-            """
-        )
+        # Plan 024 ``finding_triage_event`` log; see _migrate_legacy_triage.
+        _migrate_legacy_triage(conn)
 
         # v8 -> v9 (Plan 024 §4): record whether an occurrence's subject can be
         # identified stably across snapshots. A detector that emits no GPO and

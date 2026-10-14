@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from xml.etree.ElementTree import Element
@@ -64,6 +64,29 @@ def parse_dt(text: str | None) -> datetime | None:
     try:
         return datetime.fromisoformat(text)
     except ValueError:
+        return None
+
+
+def parse_triage_dt(value: object) -> datetime | None:
+    """A triage timestamp as the triage fold reads it: ISO-8601
+    (``datetime.fromisoformat``), naive values taken as UTC, converted to UTC.
+    None for anything that is not such a string, including values whose UTC
+    conversion overflows (``0001-01-01T00:00:00+05:00``).
+
+    The one parser for triage times: the fold (``findings``) and the v7->v8
+    legacy validation (``analyst_text.legacy_triage_field_ok``) both use it,
+    so a legacy time is copied exactly when the fold can read it.
+    """
+    if not isinstance(value, str):
+        return None
+    parsed = parse_dt(value)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    try:
+        return parsed.astimezone(UTC)
+    except (OverflowError, ValueError):
         return None
 
 

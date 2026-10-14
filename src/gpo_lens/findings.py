@@ -43,6 +43,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from gpo_lens.analyst_text import check_analyst_text, checked_slice
 from gpo_lens.finding_model import (
     FINGERPRINT_VERSION,
     ClaimLevel,
@@ -61,7 +62,7 @@ from gpo_lens.finding_model import (
     compute_fingerprint,
     series_key,
 )
-from gpo_lens.normalize import parse_dt as _parse_dt
+from gpo_lens.normalize import parse_triage_dt
 
 if TYPE_CHECKING:
     from gpo_lens.danger import DangerFinding, DangerRule
@@ -176,6 +177,9 @@ def triage_finding(
     """
     if status not in ("open", "acknowledged", "accepted_risk"):
         raise ValueError(f"invalid triage status: {status!r}")
+    # Refused before anything is read or written; the error never echoes it.
+    check_analyst_text(checked_slice(note, 2000), "note")
+    check_analyst_text(checked_slice(actor, 256), "actor")
     note = (note or "")[:2000]
     actor = (actor or "unknown")[:256]
 
@@ -749,7 +753,17 @@ def append_triage_event(
     *rationale* is required for ``accepted_risk`` (Plan 024 §8: "Accepted risk
     requires actor, rationale, timestamp, and optional expiry").
     *expires_at* is the optional expiry for risk acceptance.
+
+    *note* and *rationale* are analyst-typed and *actor* can come from a
+    forwarded-user header: text carrying GPP cpassword material is refused
+    with :class:`~gpo_lens.analyst_text.CpasswordInAnalystTextError` (a
+    ``ValueError``) before anything is written, because this log is
+    append-only. What is checked is what is stored plus
+    ``analyst_text.STRADDLE_MARGIN`` characters past the truncation.
     """
+    check_analyst_text(checked_slice(note, 2000), "note")
+    check_analyst_text(checked_slice(rationale, 2000), "rationale")
+    check_analyst_text(checked_slice(actor, 256), "actor")
     if action not in _VALID_TRIAGE_ACTIONS:
         raise ValueError(f"invalid triage action: {action!r}")
     if action == "accepted_risk" and not rationale.strip():
@@ -778,6 +792,10 @@ def append_triage_event(
     note = (note or "")[:2000]
     rationale = (rationale or "")[:2000]
     actor = (actor or "unknown")[:256]
+    # Truncation can cut a token into a different shape: check what is stored.
+    check_analyst_text(note, "note")
+    check_analyst_text(rationale, "rationale")
+    check_analyst_text(actor, "actor")
     expires_iso = expires_at.isoformat() if expires_at else None
 
     cursor = conn.execute(
@@ -808,8 +826,54 @@ def _triage_utc(value: datetime) -> datetime:
 
 
 def _parse_triage_dt(value: str | None) -> datetime | None:
-    parsed = _parse_dt(value)
-    return _triage_utc(parsed) if parsed is not None else None
+    # The shared parser: legacy triage times are validated with the same one.
+    return parse_triage_dt(value)
+
+
+# Placeholder for an event time that could not be read. Never used to order:
+# a history holding one fails the fold closed (see fold_triage).
+_UNREADABLE_TIME = datetime.min.replace(tzinfo=UTC)
+
+
+def _triage_event_from_row(row: Sequence[Any]) -> TriageEvent:
+    """The one reader of a stored triage event (id, occurrence_id, action,
+    actor, occurred_at, note, rationale, expires_at, supersedes_event_id).
+
+    Times go through the shared strict parser; a time or a non-NULL expiry it
+    cannot read is flagged (``time_readable`` / ``expiry_readable``) rather
+    than turned into an ordinary value, however the event was written (an
+    app write, a migration copy, a copy an earlier release made).
+    """
+    occurred = _parse_triage_dt(row[4])
+    expires = _parse_triage_dt(row[7])
+    return TriageEvent(
+        id=row[0],
+        occurrence_id=row[1],
+        action=row[2],
+        actor=row[3],
+        occurred_at=occurred or _UNREADABLE_TIME,
+        note=row[5],
+        rationale=row[6],
+        expires_at=expires,
+        supersedes_event_id=row[8],
+        time_readable=occurred is not None,
+        expiry_readable=row[7] is None or expires is not None,
+    )
+
+
+def _unreadable_time_note(event: TriageEvent) -> str:
+    return (
+        f"occurrence {event.occurrence_id}: triage event {event.id} has an unreadable "
+        "timestamp, so the order of its decisions cannot be established; no "
+        "triage decision is applied"
+    )
+
+
+def _unreadable_expiry_note(event: TriageEvent) -> str:
+    return (
+        f"occurrence {event.occurrence_id}: triage event {event.id} accepts the risk "
+        "with an unreadable expiry; the acceptance is treated as expired"
+    )
 
 
 def _triage_order(event: TriageEvent) -> tuple[datetime, bool, int]:
@@ -835,13 +899,35 @@ def fold_triage(events: list[TriageEvent]) -> TriageStatus:
     - ``reopened`` → ``open``
     - ``risk_acceptance_expired`` → ``open`` (if current was ``accepted_risk``)
     - ``risk_acceptance_revoked`` → ``open`` (if current was ``accepted_risk``)
+
+    Stored data the strict reader could not parse never weakens the result:
+
+    - any event with an unreadable time: the history cannot be ordered, so
+      the fold fails closed — ``open``, no acceptance — with an integrity
+      note naming the occurrence and event id;
+    - an ``accepted_risk`` event with an unreadable expiry is treated as an
+      expired acceptance (``open``), never as a permanent one, with a note.
     """
+    unordered = [ev for ev in events if not ev.time_readable]
+    if unordered:
+        readable = [_triage_utc(ev.occurred_at) for ev in events if ev.time_readable]
+        return TriageStatus(
+            status="open",
+            actor="",
+            note="",
+            updated_at=max(readable, default=_UNREADABLE_TIME),
+            expires_at=None,
+            rationale="",
+            integrity=tuple(_unreadable_time_note(ev) for ev in sorted(unordered, key=_by_id)),
+        )
+
     status = "open"
     actor = ""
     note = ""
     updated_at = datetime.min.replace(tzinfo=UTC)
     expires_at: datetime | None = None
     rationale = ""
+    integrity: list[str] = []
 
     for ev in sorted(events, key=_triage_order):
         updated_at = _triage_utc(ev.occurred_at)
@@ -854,6 +940,12 @@ def fold_triage(events: list[TriageEvent]) -> TriageStatus:
             note = ev.note
             expires_at = None
             rationale = ""
+        elif ev.action == "accepted_risk" and not ev.expiry_readable:
+            status = "open"
+            note = ev.note
+            expires_at = None
+            rationale = ""
+            integrity.append(_unreadable_expiry_note(ev))
         elif ev.action == "accepted_risk":
             status = "accepted_risk"
             note = ev.note
@@ -878,7 +970,12 @@ def fold_triage(events: list[TriageEvent]) -> TriageStatus:
         updated_at=updated_at,
         expires_at=expires_at,
         rationale=rationale,
+        integrity=tuple(integrity),
     )
+
+
+def _by_id(event: TriageEvent) -> int:
+    return event.id
 
 
 def load_triage_events(
@@ -893,23 +990,10 @@ def load_triage_events(
         "ORDER BY occurred_at, id ASC",
         (occurrence_id,),
     ).fetchall()
-    return sorted(
-        [
-            TriageEvent(
-                id=r[0],
-                occurrence_id=r[1],
-                action=r[2],
-                actor=r[3],
-                occurred_at=_parse_triage_dt(r[4]) or datetime.min.replace(tzinfo=UTC),
-                note=r[5],
-                rationale=r[6],
-                expires_at=_parse_triage_dt(r[7]),
-                supersedes_event_id=r[8],
-            )
-            for r in rows
-        ],
-        key=_triage_order,
-    )
+    events = [_triage_event_from_row(r) for r in rows]
+    if any(not ev.time_readable for ev in events):
+        return sorted(events, key=_by_id)  # no order can be established
+    return sorted(events, key=_triage_order)
 
 
 def get_triage_status(
@@ -938,19 +1022,7 @@ def load_triage_status_map(
     ).fetchall()
     events_by_occ: dict[int, list[TriageEvent]] = {}
     for r in rows:
-        events_by_occ.setdefault(r[1], []).append(
-            TriageEvent(
-                id=r[0],
-                occurrence_id=r[1],
-                action=r[2],
-                actor=r[3],
-                occurred_at=_parse_triage_dt(r[4]) or datetime.min.replace(tzinfo=UTC),
-                note=r[5],
-                rationale=r[6],
-                expires_at=_parse_triage_dt(r[7]),
-                supersedes_event_id=r[8],
-            )
-        )
+        events_by_occ.setdefault(r[1], []).append(_triage_event_from_row(r))
     return {occ_id: fold_triage(events) for occ_id, events in events_by_occ.items()}
 
 
@@ -1587,22 +1659,31 @@ def accepted_risk_register(
     ).fetchall()
     events_by_occurrence: dict[int, list[tuple[TriageEvent, tuple[Any, ...]]]] = {}
     for row in rows:
-        event = TriageEvent(
-            id=row[0],
-            occurrence_id=row[1],
-            action=row[2],
-            actor=row[3],
-            occurred_at=_parse_triage_dt(row[4]) or datetime.min.replace(tzinfo=UTC),
-            note=row[5],
-            rationale=row[6],
-            expires_at=_parse_triage_dt(row[7]),
-            supersedes_event_id=row[8],
-        )
-        if event.occurred_at <= as_of:
+        event = _triage_event_from_row(row)
+        # An event whose time cannot be read cannot be placed before or after
+        # as_of; it is kept so its history fails closed below.
+        if not event.time_readable or event.occurred_at <= as_of:
             events_by_occurrence.setdefault(event.occurrence_id, []).append((event, row[9:13]))
 
     result: list[RiskAcceptance] = []
     for occ_id, event_rows in events_by_occurrence.items():
+        unordered = [ev for ev, _ in event_rows if not ev.time_readable]
+        if unordered:
+            # No order: report the acceptance(s) as expired, never active.
+            accepted = [(ev, d) for ev, d in event_rows if ev.action == "accepted_risk"]
+            if accepted:
+                ev, details = max(accepted, key=lambda pair: pair[0].id)
+                result.append(
+                    _risk_acceptance(
+                        ev,
+                        details,
+                        is_expired=True,
+                        integrity=tuple(
+                            _unreadable_time_note(u) for u in sorted(unordered, key=_by_id)
+                        ),
+                    )
+                )
+            continue
         accepted_ev: TriageEvent | None = None
         revoked_ev: TriageEvent | None = None
         explicitly_expired = False
@@ -1628,28 +1709,49 @@ def accepted_risk_register(
         if accepted_ev is None or finding_row is None:
             continue
 
-        is_expired = explicitly_expired or (
-            accepted_ev.expires_at is not None and accepted_ev.expires_at <= as_of
+        unreadable_expiry = not accepted_ev.expiry_readable
+        is_expired = (
+            explicitly_expired
+            or unreadable_expiry
+            or (accepted_ev.expires_at is not None and accepted_ev.expires_at <= as_of)
         )
 
         result.append(
-            RiskAcceptance(
-                occurrence_id=occ_id,
-                fingerprint=finding_row[0],
-                category=finding_row[1],
-                severity=finding_row[2],
-                summary=finding_row[3] or finding_row[2],
-                actor=accepted_ev.actor,
-                rationale=accepted_ev.rationale,
-                accepted_at=accepted_ev.occurred_at,
-                expires_at=accepted_ev.expires_at,
+            _risk_acceptance(
+                accepted_ev,
+                finding_row,
                 is_expired=is_expired,
-                revoked_at=revoked_ev.occurred_at if revoked_ev else None,
-                revoked_by=revoked_ev.actor if revoked_ev else "",
+                revoked=revoked_ev,
+                integrity=(_unreadable_expiry_note(accepted_ev),) if unreadable_expiry else (),
             )
         )
 
     return result
+
+
+def _risk_acceptance(
+    accepted: TriageEvent,
+    finding_row: tuple[Any, ...],
+    *,
+    is_expired: bool,
+    revoked: TriageEvent | None = None,
+    integrity: tuple[str, ...] = (),
+) -> RiskAcceptance:
+    return RiskAcceptance(
+        occurrence_id=accepted.occurrence_id,
+        fingerprint=finding_row[0],
+        category=finding_row[1],
+        severity=finding_row[2],
+        summary=finding_row[3] or finding_row[2],
+        actor=accepted.actor,
+        rationale=accepted.rationale,
+        accepted_at=accepted.occurred_at,
+        expires_at=accepted.expires_at,
+        is_expired=is_expired,
+        revoked_at=revoked.occurred_at if revoked else None,
+        revoked_by=revoked.actor if revoked else "",
+        integrity=integrity,
+    )
 
 
 def evaluation_runs(

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import sys
+from pathlib import Path
 
 from gpo_lens import queries
+from gpo_lens.analyst_text import refusable_rows
 from gpo_lens.cli._helpers import (
     _add_secret_source,
     _get_admx,
@@ -281,3 +284,52 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         if explain and narration_text is None:
             print()
             print("Set GPO_LENS_API_KEY to enable AI-powered explanations.")
+
+
+# Exhaustive over analyst_text.Kind (a test pins that the two agree).
+_KIND_LABEL: dict[str, str] = {
+    "labelled": "labelled cpassword assignment",
+    "ciphertext": "ciphertext-shaped token",
+    "uninspectable": "structure the guard cannot inspect",
+}
+
+
+def cmd_analyst_text_check(args: argparse.Namespace) -> int:
+    """List stored analyst-text rows the cpassword guard would now refuse.
+
+    Read-only (the database is opened ``mode=ro``) and ids only: values are
+    never printed. Returns 1 when any row is listed, so it can gate a script.
+    """
+    path = Path(args.db).resolve()
+    if not path.is_file():
+        raise FileNotFoundError("Database not found (check --db)")
+    conn = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+    try:
+        rows = refusable_rows(conn)
+    finally:
+        conn.close()
+    if args.json:
+        _render_json(
+            {
+                "rows": [
+                    {"table": r.table, "column": r.column, "id": r.row_id, "kind": r.kind}
+                    for r in rows
+                ],
+                "count": len(rows),
+            }
+        )
+        return 1 if rows else 0
+    if not rows:
+        print("No stored analyst text carries cpassword material.")
+        return 0
+    print("Stored analyst text the cpassword guard would now refuse (ids only):")
+    _print_table(
+        ["table", "column", "id", "match"],
+        [[r.table, r.column, str(r.row_id), _KIND_LABEL[r.kind]] for r in rows],
+    )
+    print(
+        f"\n{len(rows)} row(s). Nothing was changed: gpo-lens does not rewrite triage "
+        "history or audit events. Review each row and decide whether to remove the "
+        "value (back up the database first)."
+    )
+    return 1

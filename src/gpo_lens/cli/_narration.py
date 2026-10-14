@@ -9,6 +9,7 @@ import os
 import sys
 
 from gpo_lens import queries
+from gpo_lens.analyst_text import CpasswordInAnalystTextError, check_analyst_text, checked_slice
 from gpo_lens.cli._helpers import _get_admx, _get_estate, _render_json
 from gpo_lens.cli._helpers import _safe_print as print
 from gpo_lens.detection import mask_cpassword
@@ -20,6 +21,16 @@ from gpo_lens.query_dispatch import (
 from gpo_lens.safe_output import safe_data, secret_values
 
 
+def _refused(text: str, field: str) -> bool:
+    """Print the refusal (never the text) when *text* carries a cpassword."""
+    try:
+        check_analyst_text(text, field)
+    except CpasswordInAnalystTextError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return True
+    return False
+
+
 def cmd_ask(args: argparse.Namespace) -> int:
     from gpo_lens.narration import (
         NarrationUnavailable,
@@ -27,6 +38,10 @@ def cmd_ask(args: argparse.Namespace) -> int:
         route_question,
     )
 
+    # The question is sent to the model provider: refuse cpassword material
+    # before anything else runs.
+    if _refused(args.question, "question"):
+        return 1
     question: str = f"--- USER QUESTION START ---\n{args.question}\n--- USER QUESTION END ---"
     raw_json: bool = args.no_narrate or getattr(args, "json", False)
 
@@ -137,6 +152,10 @@ def cmd_explain_setting(args: argparse.Namespace) -> int:
         "authoritative ADMX context. Begin your answer with "
         "'NARRATED/UNVERIFIED:' and keep the explanation brief and factual."
     )
+    if _refused(checked_slice(identity, 500), "setting identity") or _refused(
+        identity[:500], "setting identity"
+    ):
+        return 1
     try:
         answer = call_llm(system, identity[:500])
     except NarrationUnavailable as exc:

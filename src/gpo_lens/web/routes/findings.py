@@ -403,7 +403,9 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
         return_page: str = Form(""),
         principal: Principal = Depends(requires(Permission.TRIAGE)),
     ) -> HTMLResponse | RedirectResponse:
+        from gpo_lens.analyst_text import CpasswordInAnalystTextError
         from gpo_lens.findings import triage_finding
+        from gpo_lens.web.app import _audit
 
         if status not in _VALID_TRIAGE:
             return HTMLResponse("Invalid triage status", status_code=400)
@@ -413,6 +415,10 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             triage_finding(conn, finding_id, status, note, principal.name)
         except sqlite3.IntegrityError:
             return HTMLResponse("Finding not found", status_code=404)
+        except CpasswordInAnalystTextError as exc:
+            # The message names the field and the reason, never the value.
+            _audit("triage", principal, "refused", f"{exc.field}: cpassword {exc.kind}", request)
+            return HTMLResponse(str(exc), status_code=400)
         except ValueError as exc:
             return HTMLResponse(str(exc), status_code=400)
         finally:
