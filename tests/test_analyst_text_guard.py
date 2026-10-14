@@ -31,6 +31,7 @@ import re
 import sqlite3
 import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -2213,6 +2214,251 @@ def test_provenance_ddl_rolls_back_with_a_failed_copy(tmp_path: Path) -> None:
     finally:
         conn.close()
     assert "finding_triage_legacy_copy" not in tables
+
+
+# --- review round 7 regressions ---------------------------------------------------------------
+
+
+def _event_db(tmp_path: Path) -> tuple[sqlite3.Connection, int]:
+    from gpo_lens.store import init_db
+
+    conn = sqlite3.connect(tmp_path / "events.sqlite3")
+    init_db(conn)
+    conn.execute("INSERT INTO snapshot (id, domain, taken_at) VALUES (1, 'test', '2025-01-01')")
+    finding_id = conn.execute(
+        "INSERT INTO finding (finding_key, rule_id, subject_identity, severity, summary, "
+        "first_seen_snapshot, last_seen_snapshot) "
+        "VALUES ('key', 'rule', 'subject', 'medium', 'summary', 1, 1)"
+    ).lastrowid
+    return conn, int(finding_id or 0)
+
+
+def _event(conn: sqlite3.Connection, finding_id: int, action: str, at: str, expires: Any) -> int:
+    return int(
+        conn.execute(
+            "INSERT INTO finding_triage_event (occurrence_id, action, actor, occurred_at, note, "
+            "rationale, expires_at) VALUES (?, ?, 'alice', ?, 'n', 'r', ?)",
+            (finding_id, action, at, expires),
+        ).lastrowid
+        or 0
+    )
+
+
+def _both_folds(conn: sqlite3.Connection, finding_id: int, as_of: datetime) -> tuple[Any, Any]:
+    from gpo_lens.findings import accepted_risk_register, get_triage_status, load_triage_status_map
+
+    status = get_triage_status(conn, finding_id)
+    assert load_triage_status_map(conn)[finding_id] == status
+    register = [
+        r for r in accepted_risk_register(conn, as_of=as_of) if r.occurrence_id == finding_id
+    ]
+    return status, register
+
+
+_IMPOSSIBLE_EXPIRY = "2025-02-30T00:00:00Z"
+
+
+def test_sol_r7_already_copied_bad_expiry_is_never_permanent(tmp_path: Path) -> None:
+    """Sol r7 B1, probe 1: an event with an unreadable expiry, already copied
+    (provenance recorded), folded to a permanent acceptance in both views."""
+    conn, finding_id = _event_db(tmp_path)
+    try:
+        legacy_id = conn.execute(
+            "INSERT INTO finding_triage (finding_id, status, note, rationale, actor, timestamp, "
+            "expires_at) VALUES (?, 'accepted_risk', 'n', 'r', 'alice', "
+            "'2025-01-01T00:00:00Z', ?)",
+            (finding_id, _IMPOSSIBLE_EXPIRY),
+        ).lastrowid
+        event_id = _event(
+            conn, finding_id, "accepted_risk", "2025-01-01T00:00:00Z", _IMPOSSIBLE_EXPIRY
+        )
+        conn.execute(
+            "CREATE TABLE finding_triage_legacy_copy "
+            "(legacy_id INTEGER PRIMARY KEY, event_id INTEGER UNIQUE)"
+        )
+        conn.execute("INSERT INTO finding_triage_legacy_copy VALUES (?, ?)", (legacy_id, event_id))
+        conn.commit()
+        from gpo_lens.store import init_db
+
+        init_db(conn)  # the migration needs no special case: the readers are strict
+        status, register = _both_folds(conn, finding_id, datetime(2030, 1, 1, tzinfo=UTC))
+        listed = {(r.table, r.column, r.row_id) for r in refusable_rows(conn)}
+    finally:
+        conn.close()
+    assert status.status == "open" and status.expires_at is None
+    assert status.integrity and f"event {event_id}" in status.integrity[0]
+    assert _IMPOSSIBLE_EXPIRY not in " ".join(status.integrity)
+    assert len(register) == 1 and register[0].is_expired and register[0].integrity
+    assert ("finding_triage_event", "expires_at", event_id) in listed
+    assert ("finding_triage", "expires_at", legacy_id) in listed
+
+
+def test_sol_r7_v10_recognised_bad_copy_is_never_permanent(tmp_path: Path) -> None:
+    """Sol r7 B1, probe 2: a pre-provenance exact copy with an unreadable
+    expiry is recognised (provenance recorded, nothing rewritten) and the
+    strict readers then treat the acceptance as expired."""
+    db, finding_id = _legacy_db(tmp_path)
+    conn = sqlite3.connect(db)
+    try:
+        legacy_id = conn.execute(
+            "INSERT INTO finding_triage (finding_id, status, note, rationale, actor, timestamp, "
+            "expires_at) VALUES (?, 'accepted_risk', 'n', 'r', 'alice', "
+            "'2025-01-01T00:00:00Z', ?)",
+            (finding_id, _IMPOSSIBLE_EXPIRY),
+        ).lastrowid
+        event_id = _event(
+            conn, finding_id, "accepted_risk", "2025-01-01T00:00:00Z", _IMPOSSIBLE_EXPIRY
+        )
+        conn.execute("PRAGMA user_version = 10")
+        conn.commit()
+    finally:
+        conn.close()
+    _reopen(db)
+    assert _provenance(db) == [(legacy_id, event_id)]
+    conn = sqlite3.connect(db)
+    try:
+        status, register = _both_folds(conn, finding_id, datetime(2030, 1, 1, tzinfo=UTC))
+    finally:
+        conn.close()
+    assert status.status == "open" and status.integrity
+    assert register[0].is_expired and register[0].integrity
+
+
+@pytest.mark.parametrize("unreadable_first", [False, True])
+def test_unreadable_event_time_fails_both_folds_closed(
+    tmp_path: Path, unreadable_first: bool
+) -> None:
+    """Sol r7 B1: a year-9999 reopen whose UTC conversion overflows sorted
+    before a 2025 acceptance (datetime.min placeholder). Any unreadable time
+    now fails the history closed: open, no active acceptance, a note."""
+    conn, finding_id = _event_db(tmp_path)
+    try:
+        overflow = "9999-12-31T23:59:59-05:00"
+        if unreadable_first:
+            bad = _event(conn, finding_id, "accepted_risk", overflow, None)
+            _event(conn, finding_id, "acknowledged", "2025-01-01T00:00:00Z", None)
+        else:
+            _event(conn, finding_id, "accepted_risk", "2025-01-01T00:00:00Z", None)
+            bad = _event(conn, finding_id, "reopened", overflow, None)
+        conn.commit()
+        status, register = _both_folds(conn, finding_id, datetime(2030, 1, 1, tzinfo=UTC))
+        listed = {(r.table, r.column, r.row_id) for r in refusable_rows(conn)}
+    finally:
+        conn.close()
+    assert status.status == "open" and status.expires_at is None and status.rationale == ""
+    assert status.integrity == (
+        f"occurrence {finding_id}: triage event {bad} has an unreadable timestamp, so the "
+        "order of its decisions cannot be established; no triage decision is applied",
+    )
+    assert len(register) == 1 and register[0].is_expired and register[0].integrity
+    assert ("finding_triage_event", "occurred_at", bad) in listed
+
+
+def test_expiry_sweep_ignores_a_history_that_failed_closed(tmp_path: Path) -> None:
+    from gpo_lens.findings import expire_risk_acceptances
+
+    conn, finding_id = _event_db(tmp_path)
+    try:
+        _event(conn, finding_id, "accepted_risk", "2025-01-01T00:00:00Z", _IMPOSSIBLE_EXPIRY)
+        conn.commit()
+        assert expire_risk_acceptances(conn, now=datetime(2030, 1, 1, tzinfo=UTC)) == 0
+    finally:
+        conn.close()
+
+
+def test_readable_expiry_still_folds_as_before(tmp_path: Path) -> None:
+    conn, finding_id = _event_db(tmp_path)
+    try:
+        _event(conn, finding_id, "accepted_risk", "2025-01-01T00:00:00Z", "2026-01-01T00:00:00Z")
+        conn.commit()
+        status, register = _both_folds(conn, finding_id, datetime(2025, 6, 1, tzinfo=UTC))
+    finally:
+        conn.close()
+    assert status.status == "accepted_risk" and status.integrity == ()
+    assert register[0].is_expired is False and register[0].integrity == ()
+
+
+def test_every_triage_event_reader_goes_through_the_strict_row_reader() -> None:
+    """Sol r7: TriageEvent is built only by findings._triage_event_from_row;
+    the strict parser is called only there and by the legacy validation and
+    checker; every SQL that reads finding_triage_event times is in a reader
+    that uses the row reader (or is the migration/checker); and events are
+    ordered (_triage_order) only after unreadable times were ruled out."""
+    built = {
+        (m, w)
+        for m, inv in INVENTORY.items()
+        for w, node in inv.functions.items()
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call)
+        and inv._name(call.func) == "TriageEvent"
+        # nested functions are walked by their parent too: keep the innermost
+        and not any(
+            isinstance(inner, ast.FunctionDef | ast.AsyncFunctionDef)
+            and inner is not node
+            and call in ast.walk(inner)
+            for inner in ast.walk(node)
+        )
+    }
+    assert built == {("gpo_lens.findings", "_triage_event_from_row")}
+
+    parsers = {
+        (m, w)
+        for m, inv in INVENTORY.items()
+        for w, node in inv.functions.items()
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call)
+        and inv._name(call.func) in {"_parse_triage_dt", "parse_triage_dt"}
+    }
+    assert parsers == {
+        ("gpo_lens.findings", "_triage_event_from_row"),
+        ("gpo_lens.findings", "_parse_triage_dt"),
+        ("gpo_lens.analyst_text", "legacy_triage_field_ok"),
+        ("gpo_lens.analyst_text", "refusable_rows"),
+    }
+
+    time_readers = {
+        (m, w)
+        for m, inv in INVENTORY.items()
+        for w, node in inv.functions.items()
+        for c in ast.walk(node)
+        if isinstance(c, ast.Constant)
+        and isinstance(c.value, str)
+        and "FROM finding_triage_event" in c.value
+        and re.search(r"\b(?:occurred_at|expires_at)\b", c.value)
+        and "SELECT" in c.value
+    }
+    row_reader_users = {
+        (m, w)
+        for m, inv in INVENTORY.items()
+        for w, node in inv.functions.items()
+        if any(
+            isinstance(c, ast.Call) and inv._name(c.func) == "_triage_event_from_row"
+            for c in ast.walk(node)
+        )
+    }
+    classified = {
+        ("gpo_lens.analyst_text", "refusable_rows"),  # strict parser, lists bad rows
+    }
+    assert time_readers - row_reader_users == classified
+    assert "FROM finding_triage_event" in "".join(
+        c.value
+        for c in ast.walk(INVENTORY["gpo_lens.findings"].functions["accepted_risk_register"])
+        if isinstance(c, ast.Constant) and isinstance(c.value, str)
+    )
+
+    ordered = {
+        (m, w)
+        for m, inv in INVENTORY.items()
+        for w, node in inv.functions.items()
+        for c in ast.walk(node)
+        if isinstance(c, ast.Name | ast.Attribute)
+        and (c.id if isinstance(c, ast.Name) else c.attr) == "_triage_order"
+    }
+    assert ordered == {
+        ("gpo_lens.findings", "fold_triage"),
+        ("gpo_lens.findings", "load_triage_events"),
+        ("gpo_lens.findings", "accepted_risk_register"),
+    }
 
 
 # --- inventory: every write path goes through the guard -------------------------------------

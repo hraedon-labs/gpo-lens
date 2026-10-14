@@ -256,6 +256,20 @@ misorder the history; a dropped expiry would make a risk acceptance permanent);
 it is recorded as withheld so a re-run does not report it again. Both cases are
 reported by row id and field, and `analyst-text-check` lists such legacy rows.
 
+The triage readers are strict too, for every event however it was written —
+an app write, a migration copy, or a copy an earlier release already made
+(which the migration recognises and leaves as it is). Each stored event is read
+by one function with the shared parser. An `accepted_risk` event whose stored
+expiry is not NULL but cannot be read is never taken as a permanent
+acceptance: the triage fold treats the acceptance as expired (the finding is
+`open`), the accepted-risk register reports it as expired, and both carry an
+integrity note naming the occurrence and event id, never the value. If any
+event in a finding's history has a time that cannot be read, the history
+cannot be ordered, so it fails closed: `open`, no active acceptance, an
+integrity note — instead of ordering the event by a placeholder time.
+`analyst-text-check` lists such events (`finding_triage_event.occurred_at` /
+`.expires_at`, uninspectable).
+
 The provenance table is internal migration state and the trust boundary for
 re-runs: it is only ever written by the copy. Editing it by hand — deleting a
 row, or pointing a legacy row at an unrelated event — makes a later re-run copy

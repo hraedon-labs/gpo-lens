@@ -546,6 +546,23 @@ def refusable_rows(conn: sqlite3.Connection) -> list[RefusableRow]:
                     found.append(
                         RefusableRow("finding_triage", field, int(row_id), "uninspectable")
                     )
+    if "finding_triage_event" in tables:
+        # A time the triage fold cannot read makes it fail closed (an expiry:
+        # the acceptance counts as expired), however the event got there;
+        # list it so the operator can see why.
+        for row_id, occurred_at, expires_at in conn.execute(
+            "SELECT id, occurred_at, expires_at FROM finding_triage_event ORDER BY id"
+        ):
+            if parse_triage_dt(occurred_at) is None:
+                found.append(
+                    RefusableRow(
+                        "finding_triage_event", "occurred_at", int(row_id), "uninspectable"
+                    )
+                )
+            if expires_at is not None and parse_triage_dt(expires_at) is None:
+                found.append(
+                    RefusableRow("finding_triage_event", "expires_at", int(row_id), "uninspectable")
+                )
     for table, column in ANALYST_TEXT_COLUMNS:
         if table not in tables or column not in columns(table):
             continue

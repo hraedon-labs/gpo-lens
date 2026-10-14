@@ -95,6 +95,15 @@ one-way schema migration); the date is set when it is cut.
   comparison; `supersedes_event_id` NULL), one event per row, recorded and
   left as it is; `analyst-text-check` lists it when its value would be
   refused. The upgrade is not refused (see `SECURITY.md`).
+- **Triage readers fail closed on unreadable times.** Every stored triage
+  event is read by one strict reader. An `accepted_risk` event whose non-NULL
+  expiry cannot be read is treated as expired (never permanent) by both the
+  triage fold and the accepted-risk register; any event whose time cannot be
+  read makes that finding's history fail closed (`open`, no active
+  acceptance) instead of being ordered by a placeholder time. Both carry an
+  integrity note (`TriageStatus.integrity`, `RiskAcceptance.integrity`) naming
+  the occurrence and event id, and `analyst-text-check` lists such events.
+  This covers copies an earlier release made as well as new ones.
 - `finding_triage.rationale` is now a descriptive column for the v11 cpassword
   scrub (like `finding_triage.note` and `finding_triage_event.rationale`); a
   labelled cpassword in a legacy rationale used to refuse the upgrade with

@@ -309,6 +309,12 @@ class TriageEvent:
     rationale: str
     expires_at: datetime | None
     supersedes_event_id: int | None
+    # False when the stored time could not be read (``occurred_at`` is then a
+    # placeholder that must never be used to order the event), or when a
+    # non-NULL stored expiry could not be read (``expires_at`` is then None,
+    # which must never be taken as "no expiry"). See findings.fold_triage.
+    time_readable: bool = True
+    expiry_readable: bool = True
 
 
 @dataclass(frozen=True)
@@ -332,6 +338,10 @@ class TriageStatus:
     updated_at: datetime
     expires_at: datetime | None
     rationale: str
+    # Data-integrity problems found while folding (event ids, never values):
+    # an unreadable event time fails the fold closed; an unreadable
+    # risk-acceptance expiry is treated as expired.
+    integrity: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +413,9 @@ class RiskAcceptance:
     is_expired: bool
     revoked_at: datetime | None
     revoked_by: str
+    # Data-integrity problems (event ids, never values); an acceptance with
+    # one is never active.
+    integrity: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
