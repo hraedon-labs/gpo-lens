@@ -73,15 +73,29 @@ one-way schema migration); the date is set when it is cut.
   prose such as `cpassword: removed`), are in `SECURITY.md`. A static test
   inventories write paths and request sources (SQL and event writes with their
   payload keys, web inputs including headers, raw header/cookie/query reads,
-  model calls) and fails until a new one is guarded field by field or
-  classified; it is a heuristic, and its blind spots are listed in the test.
+  model calls) and fails until a new one is guarded field by field (both
+  before and after truncation where a writer truncates) or classified; it is
+  a heuristic, and its blind spots are listed in the test.
+- **The v7→v8 triage migration checks what it copies.** A legacy actor, note or
+  rationale the guard would refuse is copied into `finding_triage_event` as a
+  marker (`[refused principal name]` / `[refused analyst text]`); the legacy
+  row is unchanged and still listed by `analyst-text-check`, and the
+  substitutions are recorded by row id and field only
+  (`maintenance.analyst_text_substituted` event and a warning). The upgrade is
+  not refused (see `SECURITY.md`).
+- `finding_triage.rationale` is now a descriptive column for the v11 cpassword
+  scrub (like `finding_triage.note` and `finding_triage_event.rationale`); a
+  labelled cpassword in a legacy rationale used to refuse the upgrade with
+  `CredentialInIdentityError`.
 - **Forwarded user names are validated.** With
   `GPO_LENS_FORWARDED_USER_HEADER` set, the header names the principal, which
   is stored as the triage actor and in audit events and logged to
   `audit.log`. It must now be an account name — `user`, `user@domain` or
-  `DOMAIN\user`, at most 256 characters — with no cpassword material;
-  anything else is refused with `401` (previously control characters were
-  stripped and the value cut at 256 characters). `audit.log` writes a name
+  `DOMAIN\user` (the domain may contain spaces, as in `NT AUTHORITY`), at most
+  256 characters, with none of the characters AD forbids in an account name
+  (`"/\[]:;|=,+*?<>`) and no control character — and carry no cpassword
+  material; anything else is refused with `401` (previously control
+  characters were stripped and the value cut at 256 characters). `audit.log` writes a name
   that carries cpassword material as `[refused principal name]`.
 
 ### Added
@@ -131,7 +145,8 @@ one-way schema migration); the date is set when it is cut.
 - Deployments using `GPO_LENS_FORWARDED_USER_HEADER`: a forwarded name that is
   not an account name (for example over 256 characters, or with `+`, `/`, `=`,
   `,` or `<`) now gets `401` instead of being cut or passed through. IIS
-  `{LOGON_USER}` (`DOMAIN\user`) is accepted.
+  `{LOGON_USER}` (`DOMAIN\user`, including `NT AUTHORITY\…` and
+  `IIS APPPOOL\…`) is accepted.
 - A schema-v11 database cannot be opened by v1.4.0 or earlier.
 
 ## v1.4.0 — 2026-10-06

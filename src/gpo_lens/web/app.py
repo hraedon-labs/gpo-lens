@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from gpo_lens import store as _store
-from gpo_lens.analyst_text import cpassword_material
+from gpo_lens.analyst_text import REFUSED_PRINCIPAL_MARKER, cpassword_material
 from gpo_lens.collection_zip import MAX_ARCHIVE_BYTES, MAX_UNCOMPRESSED_BYTES
 from gpo_lens.redaction import scrub_diagnostic
 from gpo_lens.web import _helpers as _h
@@ -162,7 +162,7 @@ def _audit(
         if name is not None and cpassword_material(name) is not None:
             # Unreachable through get_principal (forwarded names are validated
             # on entry); kept so a future principal source cannot log one.
-            name = "[refused principal name]"
+            name = REFUSED_PRINCIPAL_MARKER
         entry: dict[str, object] = {
             "ts": datetime.now(UTC).isoformat(),
             "action": action,

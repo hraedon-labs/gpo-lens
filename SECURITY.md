@@ -102,7 +102,7 @@ the text:
 | Web Ask (`POST /ask`) | the `audit.narrate` event, and the model provider | `400` page with the reason and an empty question box; the model is not called; the event records `"question": ""`, outcome `refused` |
 | CLI `ask` | the model provider | exit 1, reason on stderr, model not called |
 | CLI `explain-setting` (model fallback) | the model provider | exit 1, reason on stderr, model not called |
-| Forwarded-user header (`GPO_LENS_FORWARDED_USER_HEADER`) | becomes the principal name: triage `actor`, the `principal` of audit events, `audit.log` | the name must be an account name (`user`, `user@domain` or `DOMAIN\user`, at most 256 characters; letters, digits, `.`, `-`, `_`, `'`, `$` and inner spaces only) with no cpassword material, or the request is refused with `401`; the value is never echoed |
+| Forwarded-user header (`GPO_LENS_FORWARDED_USER_HEADER`) | becomes the principal name: triage `actor`, the `principal` of audit events, `audit.log` | the name must be an account name (`user`, `user@domain` or `DOMAIN\user`, the domain may contain spaces such as `NT AUTHORITY`; at most 256 characters; none of the characters AD forbids in an account name, `"/\[]:;|=,+*?<>`, and no control character) with no cpassword material, or the request is refused with `401`; the value is never echoed |
 | Event log (`events.append_event` / `append_events`) | `payload.question` of `audit.narrate`, `payload.principal` of every event | `CpasswordInAnalystTextError`; nothing written (defence in depth behind the rows above) |
 | `audit.log` | the principal name | a name carrying cpassword material is written as `[refused principal name]` (defence in depth) |
 
@@ -120,7 +120,10 @@ request sources: SQL writes to the triage tables and the event log, dynamic SQL,
 inputs (`Form`/`File`/`Body`/`Header`/`Query`/`Cookie`), POST-route parameters,
 raw `headers`/`cookies`/`query_params` reads and request body reads. Each must
 be guarded field by field before its sink, or classified with a reason, or the
-test fails. It is a heuristic, not dataflow analysis; its blind spots (SQL
+test fails; a writer that truncates must guard each field both before and after
+the truncation. Removing the only guard for a field, or either stage of a
+truncating writer, fails the test; other redundant guards are not individually
+required. It is a heuristic, not dataflow analysis; its blind spots (SQL
 assembled outside string literals, values renamed before a sink, sinks reached
 through helpers, new tables nobody listed, writes outside SQLite/events/
 `audit.log`/model calls) are listed in the test. Search terms and filters are
@@ -146,8 +149,9 @@ e.g. a PowerShell `-EncodedCommand`); or an identifier or path built from words
 (CamelCase, kebab, snake or `/`-separated, word segments averaging at least four
 letters). (c) Text the guard cannot inspect fully is refused as
 *uninspectable*: structure nested beyond the redactor's recursion limit, or XML
-the safe parser rejects for another reason than not being XML (entity
-declarations, external references). The guard is total: it returns or raises
+the safe parser rejects for another reason than not being XML (a declared
+entity, internal or external; a bare external DTD reference parses and is
+inspected, and nothing is fetched). The guard is total: it returns or raises
 `CpasswordInAnalystTextError`, so a crafted input cannot turn a refusal into an
 HTTP 500.
 
@@ -184,8 +188,11 @@ hard-wrapped prose and ordinary prose pass; the tests pin each case.
   200 bytes.
 - Prose that puts a word straight after `cpassword:` or `cpassword=`
   (`cpassword: removed`) is an assignment to the ingest redactor too.
-- Deeply nested JSON or XML that mentions `cpassword`, and XML with entity
-  declarations, are refused as uninspectable.
+- Deeply nested JSON or XML that mentions `cpassword`, and XML that declares
+  an entity (even a harmless one), are refused as uninspectable: an entity can
+  spell the `cpassword` label, and expanding it is what the safe parser
+  forbids. The message says to paste the plain text or drop the `<!DOCTYPE …>`
+  declarations.
 
 The refusal message explains each case.
 
@@ -200,6 +207,26 @@ column and id of every stored note, rationale, triage actor, Ask question and
 event principal the guard would now refuse, never the value, and exits 1 when it
 lists any; the operator decides what to do (back up the database before editing
 it).
+
+**Upgrading a schema v7 database.** The v7→v8 step copies the legacy
+`finding_triage` rows into `finding_triage_event`. Each copied actor, note and
+rationale passes the guard: a value it would refuse is copied as a marker
+(`[refused principal name]` for the actor, `[refused analyst text]` for a note
+or rationale) instead of the value; the legacy row is left exactly as it was,
+so `analyst-text-check` still lists it; and the substitutions are recorded by
+legacy row id and field only, in a `maintenance.analyst_text_substituted` event
+and a warning. This does not break "refuse, never rewrite": that contract is
+about what an analyst submits — refusing gives the analyst the chance to remove
+the value and resubmit. A migration has no submitter to refuse to, and copying
+the value verbatim would put it into the active, append-only history. Refusing
+the upgrade instead was rejected: nothing in the app can edit the legacy table,
+and a database stuck below v8 would never reach the v11 cpassword scrub, which
+removes estate credentials. A labelled value in a legacy note or rationale is
+also redacted in place by that v11 scrub, as every labelled value in a
+descriptive column is.
+
+The CLI `ask` command checks the whole question, not a slice: it sends the whole
+question, and the argument is local and bounded by the operating system.
 
 ## Threat model
 

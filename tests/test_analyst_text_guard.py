@@ -1154,14 +1154,291 @@ def test_pem_certificate_lines_are_refused_with_a_practical_hint() -> None:
     assert line not in str(info.value)
 
 
+# --- review round 2 regressions ---------------------------------------------------------------
+
+
+def test_cli_kind_labels_are_exhaustive_over_kind() -> None:
+    """DeepSeek r2 BLOCKING-1: a Kind without a label crashed the table."""
+    import typing
+
+    from gpo_lens.analyst_text import Kind
+    from gpo_lens.cli._hygiene import _KIND_LABEL
+
+    assert set(_KIND_LABEL) == set(typing.get_args(Kind))
+
+
+def test_analyst_text_check_table_lists_an_uninspectable_row(
+    web_db: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from gpo_lens.cli import main
+
+    deep = '{"a":' * 5000 + '"cpassword"' + "}" * 5000
+    conn = sqlite3.connect(web_db)
+    try:
+        finding_id = conn.execute("SELECT id FROM finding ORDER BY id LIMIT 1").fetchone()[0]
+        row_id = conn.execute(
+            "INSERT INTO finding_triage_event (occurrence_id, action, actor, occurred_at, note) "
+            "VALUES (?, 'commented', 'old', '2025-01-01T00:00:00+00:00', ?)",
+            (finding_id, deep),
+        ).lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+    assert main(["--db", str(web_db), "analyst-text-check"]) == 1
+    out, err = capsys.readouterr()
+    assert err == ""
+    line = next(x for x in out.splitlines() if "finding_triage_event" in x)
+    assert str(row_id) in line and "structure the guard cannot inspect" in line
+    assert deep[:50] not in out
+
+
+def _legacy_db(tmp_path: Path) -> tuple[Path, int]:
+    """A current-schema database marked v7, so the next init_db runs the
+    v7->v8 triage migration again (Sol r2 B1's reproduction)."""
+    from gpo_lens._legacy_findings import update_finding_lifecycle
+    from gpo_lens.store import init_db
+
+    db = tmp_path / "legacy.sqlite3"
+    conn = sqlite3.connect(db)
+    try:
+        init_db(conn)
+        conn.execute("INSERT INTO snapshot (id, domain, taken_at) VALUES (1, 't', '2025-01-01')")
+        finding = MagicMock(
+            category="test_rule",
+            gpo_id="gpo1",
+            gpo_name="GPO-gpo1",
+            severity="medium",
+            summary="test",
+            detail="",
+            subject_key=(),
+        )
+        update_finding_lifecycle(conn, 1, [finding])
+        finding_id = conn.execute("SELECT id FROM finding").fetchone()[0]
+        conn.commit()
+        conn.execute("PRAGMA user_version = 7")
+    finally:
+        conn.close()
+    return db, finding_id
+
+
+_LEGACY_ACTOR = "RXx2nznYZEGZwOW9vPvIWzfOkcveH8Gw6mtE8TBDbdc"
+
+
+def _seed_legacy_triage(db: Path, finding_id: int) -> dict[str, int]:
+    conn = sqlite3.connect(db)
+    try:
+        ids = {}
+        for label, status, note, rationale, actor, ts in (
+            ("clean", "acknowledged", "looked at it", "", "CONTOSO\\alice", "2025-01-01T00:00:00"),
+            ("actor", "acknowledged", "ok", "", _LEGACY_ACTOR, "2025-01-02T00:00:00"),
+            ("note", "accepted_risk", f"pw {CT2}", "", "bob", "2025-01-03T00:00:00"),
+            ("rationale", "accepted_risk", "fine", f'cpassword="{CT1}"', "bob", "2025-01-04"),
+        ):
+            ids[label] = int(
+                conn.execute(
+                    "INSERT INTO finding_triage (finding_id, status, note, rationale, actor, "
+                    "timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+                    (finding_id, status, note, rationale, actor, ts),
+                ).lastrowid
+                or 0
+            )
+        conn.commit()
+        return ids
+    finally:
+        conn.close()
+
+
+def _reopen(db: Path) -> None:
+    from gpo_lens.store import init_db
+
+    conn = sqlite3.connect(db)
+    try:
+        init_db(conn)
+    finally:
+        conn.close()
+
+
+def test_v8_migration_copies_refused_legacy_text_as_markers(tmp_path: Path) -> None:
+    """Sol r2 B1: the v7->v8 copy wrote a legacy cpassword-shaped actor into
+    the active append-only log verbatim. It now copies a marker, leaves the
+    legacy row as it was, and reports the substitution by id and field."""
+    from gpo_lens.analyst_text import REFUSED_PRINCIPAL_MARKER, REFUSED_TEXT_MARKER
+
+    db, finding_id = _legacy_db(tmp_path)
+    ids = _seed_legacy_triage(db, finding_id)
+    with pytest.warns(UserWarning, match=r"4 legacy field\(s\) carried GPP cpassword material"):
+        _reopen(db)
+    conn = sqlite3.connect(db)
+    try:
+        events = conn.execute(
+            "SELECT actor, note, rationale FROM finding_triage_event ORDER BY occurred_at"
+        ).fetchall()
+        legacy = conn.execute(
+            "SELECT actor, note, rationale FROM finding_triage ORDER BY id"
+        ).fetchall()
+        record = conn.execute(
+            "SELECT payload FROM events WHERE event_type = 'maintenance.analyst_text_substituted'"
+        ).fetchall()
+        refusable = {(r.table, r.column, r.row_id) for r in refusable_rows(conn)}
+    finally:
+        conn.close()
+    assert events == [
+        ("CONTOSO\\alice", "looked at it", ""),
+        (REFUSED_PRINCIPAL_MARKER, "ok", ""),
+        ("bob", REFUSED_TEXT_MARKER, REFUSED_TEXT_MARKER),  # rationale falls back to the note
+        ("bob", "fine", REFUSED_TEXT_MARKER),
+    ]
+    # The triage copy leaves the legacy source as it was, so the operator
+    # check still lists the unlabelled values. The labelled one is redacted in
+    # place by the v11 cpassword scrub that runs in the same upgrade (ingest
+    # redaction of a labelled value, not this copy).
+    assert legacy[1][0] == _LEGACY_ACTOR and CT2 in legacy[2][1]
+    assert CT1 not in legacy[3][2] and "[redacted cpassword]" in legacy[3][2]
+    assert refusable == {
+        ("finding_triage", "actor", ids["actor"]),
+        ("finding_triage", "note", ids["note"]),
+    }
+    assert len(record) == 1
+    payload = json.loads(record[0][0])
+    assert payload["source_table"] == "finding_triage"
+    assert {(x["row_id"], x["field"]) for x in payload["substitutions"]} == {
+        (ids["actor"], "actor"),
+        (ids["note"], "note"),
+        (ids["note"], "rationale"),
+        (ids["rationale"], "rationale"),
+    }
+    for secret in (_LEGACY_ACTOR, CT1, CT2):
+        assert secret not in record[0][0]
+
+
+def test_v8_migration_rerun_inserts_nothing_twice(tmp_path: Path) -> None:
+    db, finding_id = _legacy_db(tmp_path)
+    _seed_legacy_triage(db, finding_id)
+    with pytest.warns(UserWarning):
+        _reopen(db)
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("PRAGMA user_version = 7")
+    finally:
+        conn.close()
+    _reopen(db)  # interrupted-run replay: nothing new, no new substitutions
+    conn = sqlite3.connect(db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM finding_triage_event").fetchone()[0] == 4
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM events "
+                "WHERE event_type = 'maintenance.analyst_text_substituted'"
+            ).fetchone()[0]
+            == 1
+        )
+    finally:
+        conn.close()
+
+
+def test_v8_migration_does_not_duplicate_a_row_an_older_release_copied_verbatim(
+    tmp_path: Path,
+) -> None:
+    """A database migrated by an earlier release holds the verbatim copy; the
+    re-run must recognise it rather than add a marker row beside it."""
+    db, finding_id = _legacy_db(tmp_path)
+    _seed_legacy_triage(db, finding_id)
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "INSERT INTO finding_triage_event (occurrence_id, action, actor, occurred_at, note, "
+            "rationale) VALUES (?, 'acknowledged', ?, '2025-01-02T00:00:00', 'ok', '')",
+            (finding_id, _LEGACY_ACTOR),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    with pytest.warns(UserWarning, match=r"3 legacy field"):
+        _reopen(db)
+    conn = sqlite3.connect(db)
+    try:
+        actors = [
+            r[0]
+            for r in conn.execute(
+                "SELECT actor FROM finding_triage_event WHERE occurred_at = '2025-01-02T00:00:00'"
+            )
+        ]
+        rows = {(r.table, r.column) for r in refusable_rows(conn)}
+    finally:
+        conn.close()
+    assert actors == [_LEGACY_ACTOR]  # not duplicated; still reported below
+    assert ("finding_triage_event", "actor") in rows
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "DOMAIN\\svc#batch",
+        "DOMAIN\\svc!batch",
+        "DOMAIN\\Jöhn Döe",
+        "DOMAIN\\svc_backup$",
+        "DOMAIN\\Jane  Doe",
+        "NT AUTHORITY\\SYSTEM",
+        "IIS APPPOOL\\DefaultAppPool",
+        "José",
+        "用户",
+        "Ανδρέας@example.gr",
+        "jean-luc.picard",
+    ],
+)
+def test_legal_account_names_are_accepted(name: str) -> None:
+    """Sol r2 N1 / DeepSeek r2 NB-2: reject only what AD forbids."""
+    from gpo_lens.analyst_text import valid_principal_name
+
+    assert valid_principal_name(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        *(f"DOMAIN\\a{ch}b" for ch in '"/[]:;|=,+*?<>'),
+        "DOMAIN\\a\x01b",
+        "a\\b\\c",
+        "\\user",
+        "DOMAIN\\",
+        "DOMAIN\\user@x",
+        "@example.com",
+        "user@",
+        "user@exa mple.com",
+        "x" * 257,
+        "RXx2nznYZEGZwOW9vPvIWzfOkcveH8Gw6mtE8TBDbdc",
+    ],
+)
+def test_forbidden_account_names_are_refused(name: str) -> None:
+    from gpo_lens.analyst_text import valid_principal_name
+
+    assert not valid_principal_name(name)
+
+
+def test_xml_entity_declarations_stay_uninspectable_with_a_hint() -> None:
+    """Sol r2 N3, decided: keep refusing (an entity can spell the label, and
+    expanding it is what defusedxml forbids); the message says what to do.
+    A bare external DTD reference is not a declaration and is inspected."""
+    benign = '<!DOCTYPE x [<!ENTITY y "hello">]><x>&y;</x>'
+    assert cpassword_material(benign) == "uninspectable"
+    with pytest.raises(CpasswordInAnalystTextError) as info:
+        check_analyst_text(benign, "note")
+    assert "<!DOCTYPE" in str(info.value) and "declares an entity" in str(info.value)
+    assert cpassword_material('<!DOCTYPE t SYSTEM "http://example.test/"><t/>') is None
+    assert cpassword_material("<!DOCTYPE x><x>&amp;</x>") is None
+
+
 # --- inventory: every write path goes through the guard -------------------------------------
 #
 # Each sink and each request source below is either GUARDED or classified with
 # the reason it carries no operator-supplied text. GUARDED means: for every
-# listed field, the function passes an expression naming that field to a guard
-# call (check_analyst_text, or a helper that calls it) on a line before its
-# first sink. A new sink, source, payload key or field fails these tests until
-# it is guarded or classified.
+# listed field, the function passes that field (``field``, ``field[:n]`` or
+# ``checked_slice(field, n)``) to a guard call (check_analyst_text, or a helper
+# that calls it) on a line before its first sink. A new sink, source, payload
+# key or field fails these tests until it is guarded or classified. Removing
+# the only guard for a field fails them; a field guarded twice (a truncating
+# writer) is covered by TRUNCATING_WRITERS, which requires both stages. Other
+# redundant guards are not individually required.
 #
 # Blind spots (this is a static heuristic, not dataflow analysis):
 # * SQL writes are found from string constants and f-strings; SQL assembled by
@@ -1183,7 +1460,7 @@ def test_pem_certificate_lines_are_refused_with_a_practical_hint() -> None:
 #   subprocesses, other network egress) are not inventoried.
 
 GUARD_CALLS = frozenset(
-    {"check_analyst_text", "_refused", "_guard_payload", "valid_principal_name"}
+    {"check_analyst_text", "_refused", "_guard_payload", "valid_principal_name", "migrated_value"}
 )
 ANALYST_TABLES = frozenset(table for table, _ in ANALYST_TEXT_COLUMNS)
 
@@ -1197,6 +1474,7 @@ GUARDED_FIELDS: dict[tuple[str, str], frozenset[str]] = {
     ("gpo_lens.cli._narration", "cmd_ask"): frozenset({"args.question"}),
     ("gpo_lens.cli._narration", "cmd_explain_setting"): frozenset({"identity"}),
     ("gpo_lens.web.auth", "_forwarded_user"): frozenset({"cleaned"}),
+    ("gpo_lens.store", "_migrate_legacy_triage"): frozenset({"actor", "note", "rationale"}),
 }
 
 SQL_WRITERS = {
@@ -1205,10 +1483,9 @@ SQL_WRITERS = {
     ("gpo_lens.findings", "expire_risk_acceptances"): (
         "system text: actor 'system', note 'Risk acceptance expired at <timestamp>'"
     ),
-    ("gpo_lens.store", "_migrate_schema"): (
-        "v7->v8 copies existing finding_triage rows; older rows are reported by "
-        "analyst-text-check, never rewritten"
-    ),
+    # v7->v8 copy: a refused legacy value is copied as a marker; the legacy
+    # row is left as it was and analyst-text-check reports it.
+    ("gpo_lens.store", "_migrate_legacy_triage"): "GUARDED",
     # The event log: every payload passes _guard_payload first.
     ("gpo_lens.events", "append_event"): "GUARDED",
     ("gpo_lens.events", "append_events"): "GUARDED",
@@ -1235,6 +1512,7 @@ EVENT_WRITERS: dict[tuple[str, str], frozenset[str] | str] = {
     ("gpo_lens.cli._estate", "_emit_ingest_events"): (
         "estate change events built from the ingest-sanitized estate"
     ),
+    ("gpo_lens.store", "_migrate_legacy_triage"): frozenset({"source_table", "substitutions"}),
     ("gpo_lens.store", "_scrub_guarded"): frozenset(
         {
             "changed",
@@ -1250,6 +1528,8 @@ EVENT_SYSTEM_KEYS = frozenset(
     {
         "outcome",
         "snapshot_id",
+        "source_table",
+        "substitutions",
         "changed",
         "discovered_value_count",
         "rewritten_event_ids",
@@ -1485,6 +1765,46 @@ def test_every_guarded_function_is_listed_with_its_fields() -> None:
         assert fields
 
 
+# Writers that truncate need two guards per field: one on what is kept plus the
+# straddle margin (``checked_slice(field, n)``) before the truncating assignment,
+# and one on the exact truncated value after it (truncation can form a token).
+TRUNCATING_WRITERS = {
+    ("gpo_lens.findings", "append_triage_event"): ("note", "rationale", "actor"),
+}
+
+
+def test_truncating_writers_guard_before_and_after_truncation() -> None:
+    for (module, function), fields in TRUNCATING_WRITERS.items():
+        inv = INVENTORY[module]
+        node = inv.functions[function]
+        sink = min(lines for (where, _t), lines in inv.sql.items() if where == function)[0]
+        for field in fields:
+            cut = [
+                n.lineno
+                for n in ast.walk(node)
+                if isinstance(n, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == field for t in n.targets)
+                and isinstance(n.value, ast.Subscript)
+            ]
+            assert len(cut) == 1, (function, field, cut)
+            before = after = False
+            for call in ast.walk(node):
+                if not isinstance(call, ast.Call) or inv._name(call.func) != "check_analyst_text":
+                    continue
+                arg = call.args[0]
+                is_slice = (
+                    isinstance(arg, ast.Call)
+                    and getattr(arg.func, "id", "") == "checked_slice"
+                    and ast.unparse(arg.args[0]) == field
+                )
+                if is_slice and call.lineno < cut[0]:
+                    before = True
+                if ast.unparse(arg) == field and cut[0] < call.lineno < sink:
+                    after = True
+            assert before, f"{function}: no checked_slice guard on {field!r} before truncation"
+            assert after, f"{function}: no guard on the truncated {field!r} before the write"
+
+
 def test_every_sql_write_to_an_operator_text_table_is_inventoried() -> None:
     found = {
         (module, where): lines
@@ -1530,7 +1850,6 @@ def test_every_event_write_and_payload_key_is_inventoried() -> None:
     found = {(m, w): calls for m, inv in INVENTORY.items() for w, calls in inv.events.items()}
     found = {k: v for k, v in found.items() if k[0] != "gpo_lens.events"}
     assert set(found) == set(EVENT_WRITERS)
-    guarded_keys = {field for _, field in ANALYST_TEXT_EVENT_FIELDS}
     for key, expected in EVENT_WRITERS.items():
         if isinstance(expected, str):
             continue  # payload built elsewhere: classified as a whole
@@ -1538,9 +1857,18 @@ def test_every_event_write_and_payload_key_is_inventoried() -> None:
         for call in found[key]:
             literal = _payload_keys(call)
             assert literal is not None, f"{key}: payload is no longer a literal dict"
+            event_type = call.args[1] if len(call.args) > 1 else None
+            assert isinstance(event_type, ast.Constant), f"{key}: event type is not a literal"
+            # Operator keys must be guarded for *this* event type, not for
+            # some other one (_guard_payload checks per type).
+            guarded = {
+                field
+                for kind, field in ANALYST_TEXT_EVENT_FIELDS
+                if kind in ("*", event_type.value)
+            }
+            assert literal <= guarded | EVENT_SYSTEM_KEYS, (key, event_type.value, literal)
             keys |= literal
         assert keys == expected, key
-        assert keys <= guarded_keys | EVENT_SYSTEM_KEYS, key
 
 
 def test_event_payload_guard_covers_every_scanned_field() -> None:

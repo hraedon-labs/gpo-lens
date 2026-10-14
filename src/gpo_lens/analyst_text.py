@@ -38,9 +38,10 @@ wrapped across lines, with prose before and after it), and windows between
 
 (c) text the guard cannot inspect fully is refused as ``uninspectable``:
     structure nested beyond the redactor's recursion limit, or XML that the
-    safe parser rejects for another reason than not being XML (entity
-    declarations, external references). The guard is total: it returns or
-    raises :class:`CpasswordInAnalystTextError`, nothing else.
+    safe parser rejects for another reason than not being XML (a declared
+    entity, internal or external; a bare external DTD reference parses and is
+    inspected). The guard is total: it returns or raises
+    :class:`CpasswordInAnalystTextError`, nothing else.
 
 The guard is for accidents, not a determined insider: a value deliberately
 broken up (spaces every four characters, homoglyphs, re-encoding) passes.
@@ -86,9 +87,8 @@ _REASON = (
 )
 _UNINSPECTABLE = (
     "could not be checked for a Group Policy Preferences cpassword (it is nested "
-    "too deeply, or is XML with entity declarations or external references); "
-    "simplify it — a cpassword is a recoverable credential (MS14-025). Nothing "
-    "was saved or sent."
+    "too deeply, or is XML that declares an entity); simplify it — a cpassword "
+    "is a recoverable credential (MS14-025). Nothing was saved or sent."
 )
 _HINTS: dict[str, str] = {
     "labelled": (
@@ -98,8 +98,16 @@ _HINTS: dict[str, str] = {
         " If it is not a credential (for example a base64-encoded hash or a line of a "
         "PEM certificate), refer to it by its hex hash or thumbprint, or leave it out."
     ),
-    "uninspectable": "",
+    "uninspectable": (
+        " Paste the plain text instead of the nested structure, or remove the XML "
+        "<!DOCTYPE ...> entity declarations."
+    ),
 }
+
+# What a migration copies instead of a legacy value the guard would refuse
+# (the legacy row itself is left as it was; see ``store._migrate_legacy_triage``).
+REFUSED_PRINCIPAL_MARKER = "[refused principal name]"
+REFUSED_TEXT_MARKER = "[refused analyst text]"
 
 # Characters past a truncation point that callers also check, so a value
 # straddling the cut is still seen: the longest candidate (``_MAX_WINDOW``) plus
@@ -161,22 +169,55 @@ def checked_slice(text: str | None, stored_length: int) -> str:
     return (text or "")[: stored_length + STRADDLE_MARGIN]
 
 
-# An account name forwarded by a trusted proxy: ``user``, ``user@domain`` or
-# ``DOMAIN\user``. Word characters (any script), dot, hyphen, apostrophe,
-# dollar (computer accounts) and inner spaces; never ``+``, ``/`` or ``=``.
-_ACCOUNT = re.compile(r"(?:[\w.-]{1,63}\\)?[\w.$'-]+(?: [\w.$'-]+)*(?:@[\w-]+(?:\.[\w-]+)*)?")
+# Characters an AD sAMAccountName may not contain (Microsoft's sAMAccountName
+# schema documentation), which also excludes the base64 ``+``, ``/`` and ``=``.
+_ACCOUNT_FORBIDDEN = frozenset('"/\\[]:;|=,+*?<>')
+_UPN_DOMAIN = re.compile(r"[\w-]+(?:\.[\w-]+)*")
 MAX_PRINCIPAL_LENGTH = 256
 
 
-def valid_principal_name(name: str) -> bool:
-    """Is *name* an account name shape (and free of cpassword material)?
+def _account_part(part: str) -> bool:
+    return bool(part) and not any(
+        ch in _ACCOUNT_FORBIDDEN or ord(ch) < 32 or ord(ch) == 127 for ch in part
+    )
 
+
+def valid_principal_name(name: str) -> bool:
+    """Is *name* an account name (and free of cpassword material)?
+
+    Shapes: ``user``, ``user@domain`` (DNS-style domain) or ``DOMAIN\\user``
+    (the domain may contain spaces: ``NT AUTHORITY``, ``IIS APPPOOL``). Each
+    part may hold any character an AD account name may, i.e. none of
+    ``"/\\[]:;|=,+*?<>`` and no control character; at most 256 characters.
     Used for names that arrive from outside (a forwarded-user header); the
     built-in principals already match.
     """
-    if not name or len(name) > MAX_PRINCIPAL_LENGTH or not _ACCOUNT.fullmatch(name):
+    if not name or len(name) > MAX_PRINCIPAL_LENGTH:
         return False
+    domain, backslash, user = name.partition("\\")
+    if backslash:
+        if not (_account_part(domain) and _account_part(user)) or "@" in user:
+            return False
+    else:
+        user, at, upn_domain = name.partition("@")
+        if not _account_part(user):
+            return False
+        if at and not _UPN_DOMAIN.fullmatch(upn_domain):
+            return False
     return cpassword_material(name) is None
+
+
+def migrated_value(value: object, field: str) -> tuple[object, Kind | None]:
+    """The value a migration may copy for a legacy *field*, and why it was
+    replaced: the value itself, or (when the guard would refuse it) a marker
+    with the refusal kind. Never raises; never returns the refused value."""
+    if not isinstance(value, str):
+        return value, None
+    kind = cpassword_material(value)
+    if kind is None:
+        return value, None
+    marker = REFUSED_PRINCIPAL_MARKER if field == "actor" else REFUSED_TEXT_MARKER
+    return marker, kind
 
 
 def cpassword_material(text: str) -> Kind | None:
@@ -470,12 +511,15 @@ __all__ = [
     "ANALYST_TEXT_COLUMNS",
     "ANALYST_TEXT_EVENT_FIELDS",
     "MAX_PRINCIPAL_LENGTH",
+    "REFUSED_PRINCIPAL_MARKER",
+    "REFUSED_TEXT_MARKER",
     "STRADDLE_MARGIN",
     "CpasswordInAnalystTextError",
     "RefusableRow",
     "check_analyst_text",
     "checked_slice",
     "cpassword_material",
+    "migrated_value",
     "refusable_rows",
     "valid_principal_name",
 ]

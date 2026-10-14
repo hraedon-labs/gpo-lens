@@ -294,7 +294,15 @@ class TestForwardedUser:
 
     @pytest.mark.parametrize(
         "name",
-        ["alice", "CONTOSO\\alice", "alice@contoso.example", "CONTOSO\\John O'Brien", "WS01$"],
+        [
+            "alice",
+            "CONTOSO\\alice",
+            "alice@contoso.example",
+            "CONTOSO\\John O'Brien",
+            "WS01$",
+            "CONTOSO\\svc#batch",
+            "NT AUTHORITY\\SYSTEM",
+        ],
     )
     def test_account_name_shapes_are_accepted(self, monkeypatch, name):
         monkeypatch.delenv("GPO_LENS_AUTH_TOKEN", raising=False)

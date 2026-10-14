@@ -347,8 +347,10 @@ The forwarded name only labels the principal in `audit.log`, audit events and
 the triage actor (role `forwarded`); it grants exactly the same permissions as
 the loopback analyst and is ignored entirely when the request does not arrive
 from the same-host proxy. Because it is stored, it must be an account name —
-`DOMAIN\user` (what `{LOGON_USER}` gives), `user@domain` or `user`, at most
-256 characters; any other value is refused with `401`. Without Windows Auth, `{LOGON_USER}` is empty and the app
+`DOMAIN\user` (what `{LOGON_USER}` gives; the domain may contain spaces),
+`user@domain` or `user`, at most 256 characters, with none of the characters
+AD forbids in an account name (`"/\[]:;|=,+*?<>`); any other value is refused
+with `401`. Without Windows Auth, `{LOGON_USER}` is empty and the app
 falls back to `local-analyst` — so enable `-WindowsAuth` first.
 
 ## Why a shared Python install

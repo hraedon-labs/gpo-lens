@@ -286,9 +286,11 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             print("Set GPO_LENS_API_KEY to enable AI-powered explanations.")
 
 
-_KIND_LABEL = {
+# Exhaustive over analyst_text.Kind (a test pins that the two agree).
+_KIND_LABEL: dict[str, str] = {
     "labelled": "labelled cpassword assignment",
     "ciphertext": "ciphertext-shaped token",
+    "uninspectable": "structure the guard cannot inspect",
 }
 
 

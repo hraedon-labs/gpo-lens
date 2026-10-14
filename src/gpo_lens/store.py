@@ -11,6 +11,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from gpo_lens.analyst_text import (
+    REFUSED_PRINCIPAL_MARKER,
+    REFUSED_TEXT_MARKER,
+    migrated_value,
+)
 from gpo_lens.events import (
     append_event,
     init_events_table,
@@ -508,7 +513,9 @@ REWRITABLE_COLUMNS: dict[str, frozenset[str]] = {
     "group_member": frozenset({"name"}),
     "finding": frozenset({"summary", "detail", "remediation", "gpo_name"}),
     "finding_observation": frozenset({"summary", "evidence_json", "remediation", "gpo_name"}),
-    "finding_triage": frozenset({"note"}),
+    # rationale (added in v6) is analyst text like note; it was missing here, so a
+    # labelled cpassword in a legacy rationale refused the v11 upgrade.
+    "finding_triage": frozenset({"note", "rationale"}),
     "finding_triage_event": frozenset({"note", "rationale"}),
     "evaluation_run": frozenset({"error_summary"}),
     "analysis_input": frozenset({"metadata_json"}),
@@ -1090,6 +1097,130 @@ def _coverage_gap_pk_has_kind(conn: sqlite3.Connection) -> bool:
     return "kind" in pk_cols
 
 
+def _migrate_legacy_triage(conn: sqlite3.Connection) -> None:
+    """v7 -> v8 (WI-092): copy legacy ``finding_triage`` rows into the Plan 024
+    ``finding_triage_event`` log so triage state lives in one store.
+
+    Status mapping: ``open`` -> ``reopened`` (the v2 action that folds to
+    open); ``acknowledged``/``accepted_risk`` carry over. For accepted-risk
+    rows, fall back to the note as the rationale when the v1 row recorded none
+    (v1 had no rationale concept) — nothing is fabricated beyond the
+    operator's own text. Orphaned legacy rows are skipped defensively: old
+    databases may have been modified while foreign-key enforcement was
+    disabled. Released v1.1/v1.2 exposed both APIs. Existing event IDs
+    (including supersedes references) remain immutable; converted rows get
+    stable IDs in legacy chronological order. Readers normalize timestamps to
+    UTC and prefer reopen/revoke/expiry at equal instants before the ID
+    tie-breaker, so migrated approvals cannot reinstate a reopened risk.
+
+    Operator text is checked as it is copied (``analyst_text.migrated_value``):
+    a legacy actor, note or rationale the analyst-text guard would refuse is
+    copied as a marker (``[refused principal name]`` / ``[refused analyst
+    text]``) instead of the value, so the active append-only history never
+    receives it. The legacy row is left exactly as it was, so
+    ``gpo-lens analyst-text-check`` still lists it for the operator, and the
+    substitutions are recorded by row id and field only (a
+    ``maintenance.analyst_text_substituted`` event and a warning). The upgrade
+    is not refused: nobody can edit the legacy table from the app, and a
+    database stuck below v8 would also never reach the v11 cpassword scrub.
+
+    A row already present — after an interrupted run, or copied verbatim by a
+    release before this check — matches on every stored field in its legacy or
+    its copied form; a refusal marker already copied matches any legacy value
+    of that field (the v11 scrub may since have redacted the legacy row in
+    place). So a re-run inserts nothing twice. Existence is
+    decided for all rows before any insert, as the original single
+    ``INSERT ... SELECT`` did, so identical legacy rows are both kept.
+    """
+    rows = conn.execute(
+        """
+        SELECT t.id, t.finding_id,
+               CASE t.status WHEN 'open' THEN 'reopened' ELSE t.status END,
+               t.actor, t.timestamp, t.note,
+               CASE WHEN t.status = 'accepted_risk'
+                    THEN COALESCE(NULLIF(t.rationale, ''), t.note, '')
+                    ELSE '' END,
+               t.expires_at
+        FROM finding_triage t
+        JOIN finding f ON f.id = t.finding_id
+        ORDER BY t.timestamp, t.id
+        """
+    ).fetchall()
+    pending: list[tuple[Any, ...]] = []
+    substitutions: list[dict[str, Any]] = []
+    for legacy_id, occurrence_id, action, actor, occurred_at, note, rationale, expires in rows:
+        copied_actor, actor_kind = migrated_value(actor, "actor")
+        copied_note, note_kind = migrated_value(note, "note")
+        copied_rationale, rationale_kind = migrated_value(rationale, "rationale")
+        exists = conn.execute(
+            """
+            SELECT 1 FROM finding_triage_event e
+            WHERE e.occurrence_id = ? AND e.action = ? AND e.occurred_at = ?
+              AND e.actor IN (?, ?, ?) AND e.note IN (?, ?, ?)
+              AND e.rationale IN (?, ?, ?) AND e.expires_at IS ?
+            LIMIT 1
+            """,
+            (
+                occurrence_id,
+                action,
+                occurred_at,
+                actor,
+                copied_actor,
+                REFUSED_PRINCIPAL_MARKER,
+                note,
+                copied_note,
+                REFUSED_TEXT_MARKER,
+                rationale,
+                copied_rationale,
+                REFUSED_TEXT_MARKER,
+                expires,
+            ),
+        ).fetchone()
+        if exists:
+            continue
+        pending.append(
+            (
+                occurrence_id,
+                action,
+                copied_actor,
+                occurred_at,
+                copied_note,
+                copied_rationale,
+                expires,
+            )
+        )
+        for field, kind in (
+            ("actor", actor_kind),
+            ("note", note_kind),
+            ("rationale", rationale_kind),
+        ):
+            if kind is not None:
+                substitutions.append({"row_id": legacy_id, "field": field, "kind": kind})
+    conn.executemany(
+        """
+        INSERT INTO finding_triage_event
+            (occurrence_id, action, actor, occurred_at, note, rationale,
+             expires_at, supersedes_event_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+        """,
+        pending,
+    )
+    if substitutions:
+        append_event(
+            conn,
+            "maintenance.analyst_text_substituted",
+            {"source_table": "finding_triage", "substitutions": substitutions},
+            commit=False,
+        )
+        warnings.warn(
+            f"triage migration: {len(substitutions)} legacy field(s) carried GPP "
+            "cpassword material and were copied as a marker; the legacy rows are "
+            "unchanged (gpo-lens analyst-text-check lists them; the "
+            "maintenance.analyst_text_substituted event names row ids and fields).",
+            stacklevel=3,
+        )
+
+
 def _migrate_schema(conn: sqlite3.Connection, *, fresh: bool = False) -> _ScrubResult | None:
     """Additive column migrations for DBs created by older gpo-lens versions.
 
@@ -1176,53 +1307,8 @@ def _migrate_schema(conn: sqlite3.Connection, *, fresh: bool = False) -> _ScrubR
             conn.execute("ALTER TABLE coverage_gap_new RENAME TO coverage_gap")
 
         # v7 -> v8 (WI-092): migrate legacy ``finding_triage`` rows into the
-        # Plan 024 ``finding_triage_event`` log so triage state lives in one
-        # store. Status mapping: ``open`` -> ``reopened`` (the v2 action that
-        # folds to open); ``acknowledged``/``accepted_risk`` carry over. For
-        # accepted-risk rows, fall back to the note as the rationale when the
-        # v1 row recorded none (v1 had no rationale concept) — nothing is
-        # fabricated beyond the operator's own text. The NOT EXISTS guard
-        # keeps a re-run after an interrupted migration a no-op. Match every
-        # stored payload field so distinct same-timestamp events are preserved.
-        # Orphaned legacy rows are skipped defensively: old databases may have
-        # been modified while foreign-key enforcement was disabled.
-        # Released v1.1/v1.2 exposed both APIs. Existing event IDs (including
-        # supersedes references) remain immutable; converted rows get stable IDs
-        # in legacy chronological order. Readers normalize timestamps to UTC
-        # and prefer reopen/revoke/expiry at equal instants before the ID
-        # tie-breaker, so migrated approvals cannot reinstate a reopened risk.
-        conn.execute(
-            """
-            INSERT INTO finding_triage_event
-                (occurrence_id, action, actor, occurred_at, note, rationale,
-                 expires_at, supersedes_event_id)
-            SELECT t.finding_id,
-                   CASE t.status WHEN 'open' THEN 'reopened' ELSE t.status END,
-                   t.actor, t.timestamp, t.note,
-                   CASE WHEN t.status = 'accepted_risk'
-                        THEN COALESCE(NULLIF(t.rationale, ''), t.note, '')
-                        ELSE '' END,
-                   t.expires_at, NULL
-            FROM finding_triage t
-            JOIN finding f ON f.id = t.finding_id
-            WHERE NOT EXISTS (
-                SELECT 1 FROM finding_triage_event e
-                WHERE e.occurrence_id = t.finding_id
-                  AND e.action = CASE t.status
-                                     WHEN 'open' THEN 'reopened'
-                                     ELSE t.status END
-                  AND e.occurred_at = t.timestamp
-                  AND e.actor = t.actor
-                  AND e.note = t.note
-                  AND e.rationale = CASE
-                      WHEN t.status = 'accepted_risk'
-                      THEN COALESCE(NULLIF(t.rationale, ''), t.note, '')
-                      ELSE '' END
-                  AND e.expires_at IS t.expires_at
-            )
-            ORDER BY t.timestamp, t.id
-            """
-        )
+        # Plan 024 ``finding_triage_event`` log; see _migrate_legacy_triage.
+        _migrate_legacy_triage(conn)
 
         # v8 -> v9 (Plan 024 §4): record whether an occurrence's subject can be
         # identified stably across snapshots. A detector that emits no GPO and
