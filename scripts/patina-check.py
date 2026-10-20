@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# patina:sha256 53498140795f60ba81ca12b7739f6515244d1e217d27744e45ec83b40e2fac57 rev:e7024c1
+# patina:sha256 4d44b23017ee0f4f05a22f0691786ed564a0fd3c178621c79511dd2923f63a67 rev:1dffec1
 """check_patina.py -- the patina conformance gate (Plan 005).
 
 Verifies that a consuming tool's vendored patina assets have not drifted and
@@ -17,11 +17,17 @@ Checks:
                        Consumers may append CSS below the end marker -- that
                        tail is checked like any other tool CSS (checks 3+4).
   2. theme.js stamp -- first line // patina:sha256 <hash> must match the rest
-                       of the file's bytes.
+                       of the file's bytes. With --upstream, also compare the
+                       theme against its own stamped revision; a newer theme
+                       is an available upgrade, not a conformance failure.
   3. token contract -- every var(--x) referenced in tool CSS must be defined
                        by the contract block or by the tool itself; the tool
                        must not redefine a contract token; with --prefix, all
-                       tool-defined tokens must carry --<prefix>-.
+                       tool-defined tokens must carry --<prefix>-. EXCEPT
+                       inside an at-rule (@media print, forced-colors) carrying
+                       a `patina-allow-context: <reason>`: those are rendering
+                       contexts patina does not define, and before the
+                       exemption a tool could not print legibly and conform.
   4. colour ratchet -- raw colour literals (#hex / rgb / hsl / oklch) in tool
                        CSS are fingerprinted against a committed baseline.
                        A NEW fingerprint fails even if the total is unchanged,
@@ -76,10 +82,19 @@ BEGIN_RE = re.compile(
     r"^/\* patina:begin (?P<rev>\S+) sha256:(?P<hash>[0-9a-f]{64}) \*/$", re.M
 )
 END_RE = re.compile(r"^/\* patina:end \*/$", re.M)
+JINJA_BEGIN_RE = re.compile(
+    r"^\{# patina:begin (?P<rev>\S+) sha256:(?P<hash>[0-9a-f]{64}) #\}$", re.M
+)
+JINJA_END_RE = re.compile(r"^\{# patina:end #\}$", re.M)
 ACCENT_RE = re.compile(r"^/\* accent: (?P<accent>[A-Za-z0-9._-]+) \*/$", re.M)
 THEME_STAMP_RE = re.compile(r"^// patina:sha256 (?P<hash>[0-9a-f]{64})")
+THEME_REV_RE = re.compile(r"^// patina:sha256 [0-9a-f]{64} rev:(?P<rev>\S+)$")
 SELF_STAMP_RE = re.compile(r"^# patina:sha256 (?P<hash>[0-9a-f]{64}) rev:(?P<rev>\S+)$")
-TOKEN_DEF_RE = re.compile(r"(--[A-Za-z0-9_-]+)\s*:")
+# The `--` must start an identifier, or `.ds-btn--primary:hover` reads as a
+# declaration of `--primary` -- and `.ds-btn--crit:hover` as shadowing a status
+# colour, the most serious violation the contract has, on a line that declares
+# nothing. BEM is mainstream; every consumer using it would hit this.
+TOKEN_DEF_RE = re.compile(r"(?<![A-Za-z0-9_-])(--[A-Za-z0-9_-]+)\s*:")
 TOKEN_REF_RE = re.compile(r"var\(\s*(--[A-Za-z0-9_-]+)")
 COLOR_RE = re.compile(r"(#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\boklch\()")
 STYLE_BLOCK_RE = re.compile(r"<style[^>]*>(.*?)</style>", re.DOTALL | re.IGNORECASE)
@@ -89,6 +104,13 @@ INLINE_STYLE_RE = re.compile(r"""\bstyle\s*=\s*["']([^"']*)["']""", re.IGNORECAS
 # is just a disabled check. The reason must be substantive (>= 4 chars).
 ALLOW_RE = re.compile(r"patina-allow:\s*(?P<reason>\S.{3,})")
 ALLOW_MARK = "patina-allow"
+
+# A rendering context patina does not define gets its OWN marker, not the
+# colour-literal one. They mean different things -- "this literal is fine here"
+# versus "this whole block is a context the contract was never written for" --
+# and one reason covers the block rather than each of a dozen declarations.
+CONTEXT_RE = re.compile(r"patina-allow-context:\s*(?P<reason>\S.{3,})")
+CONTEXT_MARK = "patina-allow-context"
 
 RATCHET_VERSION = 2
 
@@ -171,15 +193,15 @@ def check_self(gate: Gate):
         gate.ok(f"checker intact (patina {m.group('rev')})")
 
 
-def split_vendored(text: str):
+def split_vendored(text: str, begin_re=BEGIN_RE, end_re=END_RE):
     """-> (rev, stamp, block, tail, tail_line_offset) or (None, err, ...).
 
     Fails closed. Exactly one begin marker and one end marker, in that order,
     or we refuse to interpret the file at all: every ambiguous shape here is
     either a mangled vendor or a consumer about to lose CSS.
     """
-    begins = list(BEGIN_RE.finditer(text))
-    ends = list(END_RE.finditer(text))
+    begins = list(begin_re.finditer(text))
+    ends = list(end_re.finditer(text))
     if not begins and not ends:
         return None, "no stamped patina block found", None, None, 0
     if len(begins) != 1 or len(ends) != 1:
@@ -432,7 +454,7 @@ def check_docs(gate: Gate, docs_dir: Path, upstream: Path | None, declared_versi
         )
 
 
-def check_theme(gate: Gate, theme_path: Path):
+def check_theme(gate: Gate, theme_path: Path, upstream: Path | None = None):
     if not theme_path.is_file():
         gate.fail(f"theme.js missing: {theme_path}")
         return
@@ -445,8 +467,105 @@ def check_theme(gate: Gate, theme_path: Path):
         return
     if sha256_text(rest) != m.group("hash"):
         gate.fail("theme.js: bytes differ from stamp -- edited or stale; re-sync")
-    else:
-        gate.ok("theme.js intact")
+        return
+    gate.ok("theme.js intact")
+    if upstream is None:
+        return
+
+    # Theme and token copies can be updated independently. Use the theme's
+    # own revision, not the token block's revision or the upstream worktree.
+    rm = THEME_REV_RE.fullmatch(first.rstrip("\r\n"))
+    if rm is None:
+        gate.fail(
+            "theme.js: no revision in its stamp -- integrity was checked, "
+            "but comparison with upstream needs a recorded revision; re-sync"
+        )
+        return
+    rev = rm.group("rev")
+    if _git(upstream, "rev-parse", "--git-dir") is None:
+        gate.fail("theme.js: --upstream is not a git checkout; cannot verify its revision")
+        return
+    if _git(upstream, "cat-file", "-e", f"{rev}^{{commit}}") is None:
+        gate.fail(
+            f"theme.js: stamped revision {rev} does not exist in {upstream} "
+            "-- fetch the recorded history or deliberately re-sync"
+        )
+        return
+    pinned = _git(upstream, "show", f"{rev}:theme.js")
+    if pinned is None:
+        gate.fail(f"patina {rev} does not contain theme.js; cannot verify this theme")
+        return
+    if sha256_text(pinned) != sha256_text(rest):
+        gate.fail(
+            f"theme.js DRIFTED from patina {rev}: its contents do not match "
+            "the revision it records -- commit the change in patina and re-sync"
+        )
+        return
+    gate.ok(f"theme.js matches patina at its stamped rev {rev}")
+    current = _git(upstream, "show", "HEAD:theme.js")
+    if current is not None and sha256_text(current) != sha256_text(rest):
+        gate.note(
+            f"theme.js upgrade is available since {rev}. Adopting it is a "
+            "deliberate re-sync with a reviewable diff, not a conformance failure."
+        )
+
+
+def check_component(gate: Gate, path: Path, source: str, upstream: Path | None = None):
+    """Verify owned component bytes and their own pinned source revision.
+
+    CSS and Jinja use comment delimiters native to their file format. Consumer
+    tails remain outside the owned block and are never part of its hash.
+    """
+    if not path.is_file():
+        gate.fail(f"{source} missing: {path}")
+        return
+    try:
+        # Git may transport a text file as CRLF on Windows. Canonical LF
+        # matches the source's .gitattributes and the token/theme text policy.
+        text = path.read_bytes().decode("utf-8").replace("\r\n", "\n")
+    except (OSError, UnicodeDecodeError) as exc:
+        gate.fail(f"{source}: cannot read UTF-8 component ({type(exc).__name__})")
+        return
+    patterns = (JINJA_BEGIN_RE, JINJA_END_RE) if source.endswith(".j2") else (BEGIN_RE, END_RE)
+    rev, stamp, block, _tail, _offset = split_vendored(text, *patterns)
+    if rev is None:
+        gate.fail(f"{source}: {stamp}")
+        return
+    if sha256_text(block) != stamp:
+        gate.fail(f"{source}: owned bytes differ from stamp -- re-sync")
+        return
+    gate.ok(f"{source} intact")
+    if upstream is None:
+        return
+    if _git(upstream, "rev-parse", "--git-dir") is None:
+        gate.fail(f"{source}: --upstream is not a git checkout")
+        return
+    if _git(upstream, "cat-file", "-e", f"{rev}^{{commit}}") is None:
+        gate.fail(f"{source}: stamped revision {rev} does not exist -- fetch recorded history")
+        return
+
+    def source_bytes(revision):
+        proc = subprocess.run(
+            ["git", "-C", str(upstream), "show", f"{revision}:{source}"], capture_output=True,
+        )
+        return proc.stdout if proc.returncode == 0 else None
+
+    pinned = source_bytes(rev)
+    if pinned is None:
+        gate.fail(f"patina {rev} does not contain {source}")
+        return
+    if pinned != block.encode("utf-8"):
+        gate.fail(f"{source} DRIFTED from patina {rev} -- commit source changes and re-sync")
+        return
+    gate.ok(f"{source} matches patina at its stamped rev {rev}")
+    current = source_bytes("HEAD")
+    if current is not None and current != pinned:
+        gate.note(f"{source} upgrade is available since {rev}; deliberate re-sync, not a failure")
+
+
+def markup_files(root: Path):
+    """HTML and reference Jinja files participate in the same checks."""
+    return sorted(set(root.rglob("*.html")) | set(root.rglob("*.j2")))
 
 
 def tool_css_sources(static_dir: Path, tokens_path: Path, extra_dirs=()):
@@ -460,7 +579,7 @@ def tool_css_sources(static_dir: Path, tokens_path: Path, extra_dirs=()):
             if p.resolve() == tokens_path.resolve():
                 continue
             sources.append(Source(p.name, p.read_text(encoding="utf-8")))
-        for p in sorted(root.rglob("*.html")):
+        for p in markup_files(root):
             text = p.read_text(encoding="utf-8")
             for i, block in enumerate(STYLE_BLOCK_RE.findall(text)):
                 sources.append(Source(f"{p.name}<style#{i + 1}>", block))
@@ -470,14 +589,107 @@ def tool_css_sources(static_dir: Path, tokens_path: Path, extra_dirs=()):
     return sources
 
 
+# The exemption is for rendering contexts patina genuinely does not define.
+# It is NOT for a competing screen-theme system or a breakpoint: those are
+# exactly the drift the no-shadowing rule exists to stop, and the first version
+# of this check allowed both because it tested only that the prelude began with
+# `@`. It then printed "a rendering context patina does not define" -- asserting
+# something it had not checked.
+CONTEXT_FEATURES = ("print", "forced-colors", "monochrome")
+
+
+def at_rule_interiors(text: str):
+    """(start, end, prelude) for each @-rule block."""
+    spans, stack = [], []
+    prev = 0
+    for m in re.finditer(r"[{}]", text):
+        i = m.start()
+        if text[i] == "{":
+            prelude = text[prev:i].strip()
+            stack.append((prelude, i))
+        elif stack:
+            prelude, start = stack.pop()
+            if prelude.startswith("@"):
+                spans.append((start, i, prelude))
+        prev = i + 1
+    return spans
+
+
+def _enclosing_at_rule(pos: int, spans):
+    """The innermost at-rule block containing pos, or None."""
+    best = None
+    for a, b, prelude in spans:
+        if a < pos < b and (best is None or a > best[0]):
+            best = (a, b, prelude)
+    return best
+
+
+def _is_context_at_rule(prelude: str) -> bool:
+    return any(f in prelude for f in CONTEXT_FEATURES)
+
+
 def check_contract(gate: Gate, contract: set, sources, prefix: str | None):
-    defined, referenced = {}, {}
+    defined, referenced, scoped_ok = {}, {}, 0
     for src in sources:
         text = strip_comments_keep_lines(src.text)
-        for name in TOKEN_DEF_RE.findall(text):
+        spans = at_rule_interiors(text)
+        allowed_lines = {
+            i
+            for i, line in enumerate(src.text.splitlines())
+            if CONTEXT_RE.search(line) or ALLOW_RE.search(line)
+        }
+        for m in TOKEN_DEF_RE.finditer(text):
+            name = m.group(1)
+            span = _enclosing_at_rule(m.start(), spans) if name in contract else None
+            if span is not None and not _is_context_at_rule(span[2]):
+                gate.fail(
+                    f"{src.label}:{text[: m.start()].count(chr(10)) + 1}: re-maps "
+                    f"contract token {name} inside `{span[2][:48]}`. The at-rule "
+                    "exemption is only for rendering contexts patina does not "
+                    f"define ({', '.join(CONTEXT_FEATURES)}). A competing theme "
+                    "system or a breakpoint re-mapping contract tokens is the "
+                    "drift this rule exists to stop."
+                )
+                continue
+            if span is not None:
+                # A contract token re-mapped inside an at-rule is a RENDERING
+                # CONTEXT, not drift. patina defines two contexts, both screen;
+                # paper is a third and patina ships no values for it. dossier
+                # prints its provenance records as a deliverable, and on paper
+                # the substrate colour is not the document's to choose -- so
+                # with no exemption there was NO legal way to print legibly and
+                # conform. Requires a stated reason, like every other hatch.
+                # The reason may sit on the line OR anywhere inside the
+                # enclosing at-rule block. A context re-map is naturally a
+                # block of a dozen declarations; demanding a comment per line
+                # would be the ceremony this family keeps legislating against,
+                # and the block is the real unit of the deviation anyway.
+                line_no = text[: m.start()].count("\n")
+                first_line = text[: span[0]].count("\n")
+                last_line = text[: span[1]].count("\n")
+                if line_no in allowed_lines or any(
+                    ln in allowed_lines for ln in range(first_line, last_line + 1)
+                ):
+                    scoped_ok += 1
+                    continue
+                gate.fail(
+                    f"{src.label}:{line_no + 1}: re-maps contract token {name} "
+                    "inside an at-rule with no stated reason. A rendering "
+                    "context patina does not define (print, forced-colors) is "
+                    "legitimate -- put one reason anywhere in the block:\n"
+                    "         /* patina-allow-context: <why this context needs "
+                    "its own mapping> */"
+                )
+                continue
             defined.setdefault(name, src.label)
         for name in TOKEN_REF_RE.findall(text):
             referenced.setdefault(name, src.label)
+
+    if scoped_ok:
+        gate.note(
+            f"{scoped_ok} contract token(s) re-mapped inside at-rules with a "
+            "stated reason -- a rendering context patina does not define"
+        )
 
     for name, label in sorted(defined.items()):
         if name in contract:
@@ -517,7 +729,7 @@ def collect_class_usage(static_dir: Path, extra_dirs, prefix: str):
     """
     used = {}
     for root in (static_dir, *extra_dirs):
-        for p in sorted(root.rglob("*.html")):
+        for p in markup_files(root):
             for i, line in enumerate(p.read_text(encoding="utf-8").splitlines()):
                 for attr in CLASS_ATTR_RE.findall(line):
                     if "{" in attr:
@@ -529,11 +741,23 @@ def collect_class_usage(static_dir: Path, extra_dirs, prefix: str):
 
 
 def collect_defined_classes(sources):
+    """Every class name that has a rule, including inside at-rules.
+
+    The first version split on braces and took alternate chunks. A nested
+    at-rule puts two `{` in a row, inverting the parity, so every selector
+    inside `@media`/`@supports` was invisible -- and inside those blocks the
+    parity flip meant DECLARATION text was scanned as selectors, which can mint
+    definitions that do not exist. It under-reported responsive and print-only
+    rules as dead and over-reported elsewhere. Taking the text immediately
+    before each `{` is parity-free; an at-rule prelude is skipped by its `@`.
+    """
     defined = set()
     for src in sources:
         text = strip_comments_keep_lines(src.text)
-        # Only selector text, never declaration values (.5rem is not a class).
-        for chunk in re.split(r"[{}]", text)[::2]:
+        for m in re.finditer(r"([^{}]*)\{", text):
+            chunk = m.group(1).strip()
+            if chunk.startswith("@"):
+                continue
             defined.update(CLASS_DEF_RE.findall(chunk))
     return defined
 
@@ -556,6 +780,16 @@ def check_undefined_classes(
         return {}
     used = collect_class_usage(static_dir, extra_dirs, prefix)
     if not used:
+        # Silence is indistinguishable from a pass. A consumer can be fully
+        # conformant on the TOKEN prefix rule while using unprefixed class
+        # names -- openbia was -- and switch this check off without being told.
+        # Prefixing openbia's classes immediately surfaced `button-link`, which
+        # had rendered as bare link text for the life of the file.
+        gate.note(
+            f"no `{prefix}-` classes found in markup -- check 5 did not run. "
+            "The token prefix rule and the class prefix are different "
+            "namespaces; unprefixed class names silently disable this check."
+        )
         return {}
     defined = collect_defined_classes(sources)
     missing = {n: loc for n, loc in used.items() if n not in defined}
@@ -600,8 +834,30 @@ def scan_colour_literals(gate: Gate, sources):
     violations, allows = {}, 0
     for src in sources:
         raw_lines = src.text.splitlines()
-        exempt = set()
+        # A block blessed by `patina-allow-context:` is exempt from the colour
+        # ratchet as well. The docs tell you to write ONE reason for the block;
+        # recording a colour violation per line for obeying that instruction
+        # would pollute the baseline with the single deviation patina has
+        # explicitly blessed -- and would teach people to add a second marker
+        # per line, which is the ceremony the block scope exists to avoid.
+        stripped_full = strip_comments_keep_lines(src.text)
+        context_lines = set()
+        for a, b, prelude in at_rule_interiors(stripped_full):
+            if not _is_context_at_rule(prelude):
+                continue
+            first = stripped_full[:a].count("\n")
+            last = stripped_full[:b].count("\n")
+            if any(
+                CONTEXT_RE.search(ln)
+                for ln in raw_lines[first : last + 1]
+            ):
+                context_lines.update(range(first, last + 1))
+        exempt = set(context_lines)
         for i, line in enumerate(raw_lines):
+            # `patina-allow-context:` CONTAINS `patina-allow`, so strip the
+            # context marker before judging this line, or every legitimate
+            # context reason is reported as an allow without a reason.
+            line = CONTEXT_RE.sub("", line)
             if ALLOW_MARK not in line:
                 continue
             if ALLOW_RE.search(line):
@@ -612,7 +868,7 @@ def scan_colour_literals(gate: Gate, sources):
                     f"{src.at(i)}: `{ALLOW_MARK}` without a reason -- write "
                     "`/* patina-allow: <why this literal must stay> */`"
                 )
-        for i, line in enumerate(strip_comments_keep_lines(src.text).splitlines()):
+        for i, line in enumerate(stripped_full.splitlines()):
             if i in exempt:
                 continue
             hits = COLOR_RE.findall(line)
@@ -759,7 +1015,11 @@ FACETS = {
     },
     "structure": {
         "label": "structure",
-        "legal": {"reviewed", "deferred", "not-applicable"},
+        # `attested` belongs here for the same reason it belongs on
+        # content_model: `reviewed` means a human decided, which an
+        # agent-written change cannot claim. Omitting it sent dossier's
+        # completed archetype audit into a `note` on a `deferred` facet.
+        "legal": {"attested", "reviewed", "deferred", "not-applicable"},
         "about": "surface briefs exist; no unjustified known failure modes",
     },
 }
@@ -925,6 +1185,16 @@ def check_review_freshness(gate: Gate, decl):
             spec["_stale"] = f"{n} commit(s) since review"
 
 
+def _field(label, value):
+    """A declared reason, indented under its facet. Multi-line evidence is
+    common -- dossier's enumeration runs to sixty lines -- and it must stay
+    readable rather than being truncated: the reason is the artifact."""
+    body = str(value).strip().splitlines() or [""]
+    out = [f"        {label}: {body[0]}"]
+    out.extend(f"          {ln}" for ln in body[1:])
+    return out
+
+
 def facet_report(decl):
     """One line per facet, states typed, mechanism visible, and deliberately no
     rollup score: 3/4 would be read as worse than 4/4 and we would have
@@ -954,17 +1224,17 @@ def facet_report(decl):
             extra = f" -- {spec['_stale']}" if spec.get("_stale") else ""
             lines.append(f"        reviewed through {through}{extra}")
         if spec.get("evidence"):
-            lines.append(f"        evidence: {spec['evidence']}")
+            lines.extend(_field("evidence", spec["evidence"]))
         if spec.get("why"):
-            lines.append(f"        why:   {spec['why']}")
+            lines.extend(_field("why", spec["why"]))
         if spec.get("until"):
-            lines.append(f"        until: {spec['until']}")
+            lines.extend(_field("until", spec["until"]))
         # A claim is rarely all-or-nothing: cert-watch's content model IS
         # reviewed and has five enumerated open violations. Without somewhere to
         # say so the only honest options were to overclaim or to declare the
         # whole facet deferred, which would erase the review that happened.
         if spec.get("note"):
-            lines.append(f"        note:  {spec['note']}")
+            lines.extend(_field("note", spec["note"]))
     return lines
 
 
@@ -973,6 +1243,11 @@ def main():
     ap.add_argument("static_dir", type=Path)
     ap.add_argument("--tokens", default="css/tokens.css")
     ap.add_argument("--theme", default="theme.js")
+    ap.add_argument(
+        "--components", type=Path, default=None, metavar="TEMPLATES_DIR",
+        help="check css/components.css and TEMPLATES_DIR/macros/ui.j2 ownership "
+        "and their recorded upstream revisions (opt-in reference components)",
+    )
     ap.add_argument(
         "--no-theme",
         action="store_true",
@@ -992,8 +1267,8 @@ def main():
         "--upstream",
         type=Path,
         default=None,
-        help="path to a patina checkout; re-derives the vendored block from it "
-        "and reports real drift instead of mere integrity",
+        help="path to a patina checkout; verifies tokens, theme and components against "
+        "their recorded revisions and reports drift separately from upgrades",
     )
     ap.add_argument(
         "--docs",
@@ -1060,7 +1335,10 @@ def main():
             declared_version = str(decl["patina"].get("version", "")).strip() or None
         check_docs(gate, args.docs, args.upstream, declared_version)
     if not args.no_theme:
-        check_theme(gate, static_dir / args.theme)
+        check_theme(gate, static_dir / args.theme, args.upstream)
+    if args.components is not None:
+        check_component(gate, static_dir / "css/components.css", "components.css", args.upstream)
+        check_component(gate, args.components / "macros/ui.j2", "macros/ui.j2", args.upstream)
     sources = tool_css_sources(static_dir, tokens_path, args.extra)
     if tail_src is not None:
         sources.append(tail_src)

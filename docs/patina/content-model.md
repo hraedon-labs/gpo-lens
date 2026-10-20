@@ -1,4 +1,4 @@
-<!-- VENDORED FROM patina 0.5.0 (e7024c1) -- patina-owned. Do not edit, reformat or lint this file; edit patina and re-run sync.sh. -->
+<!-- VENDORED FROM patina 0.6.0 (1dffec1) -- patina-owned. Do not edit, reformat or lint this file; edit patina and re-run sync.sh. -->
 # patina content-model contract (the concept layer)
 
 Tokens keep the family's colours coherent; patterns and archetypes keep its

@@ -1,4 +1,4 @@
-<!-- VENDORED FROM patina 0.5.0 (e7024c1) -- patina-owned. Do not edit, reformat or lint this file; edit patina and re-run sync.sh. -->
+<!-- VENDORED FROM patina 0.6.0 (1dffec1) -- patina-owned. Do not edit, reformat or lint this file; edit patina and re-run sync.sh. -->
 # patina patterns catalog
 
 A reference for the shared component shapes across the tool family. Tokens
@@ -7,15 +7,12 @@ catalog goes one step further: it shows the **shapes** that tools reuse — the
 topbar, stat strip, table, pill, and so on — so a new tool can build the same
 instrument-panel feel without reverse-engineering an existing one.
 
-Today each tool owns its own component CSS with its own prefix (`cw-`, `gp-`,
-etc.), and the patterns below describe **what to build and how to name it**, not
-a shared stylesheet. That is no longer the end state: **Plan 006 (ratified
-2026-08-14) decided patina will ship a reference implementation** —
-`components.css` (neutral `pt-` prefix) + `macros/ui.j2` — that new tools vendor
-wholesale, while existing tools keep their prefixes and adopt opportunistically.
-**Neither file is built yet** (Plan 006 WI-2/3/4 open), so this catalog is still
-the whole delivery; when they land, each section gains a pointer to its `pt-`
-counterpart (WI-4).
+Existing tools keep their component CSS and prefixes (`cw-`, `gp-`, etc.).
+**Plan 006's approved reference implementation now ships:** `components.css`
+(neutral `pt-` prefix) + `macros/ui.j2`, opted into with
+`sync.sh --components <templates-dir>`. New tools vendor these wholesale;
+existing tools adopt deliberately. This catalog records the shapes and their
+rationale; [components.md](components.md) documents the concrete macro API.
 
 **Tiers.** `archetypes.md` sorts these sections into two tiers with different
 rules: §§1–2 (the frame) and §§3–5, 7–14 (the invisible shapes) are Tier 1 —
@@ -34,7 +31,14 @@ shape, the section below carries the implementation and points back.
 | Tone/variant | Domain words (`.expired`, `.critical`, `.healthy`) mapped to status tokens |
 | Utilities | Optional — cert-watch has a rich utility layer; gpo-lens keeps it lean |
 
+The reference code uses `pt-`. Geometry recipes below remain useful to existing
+tools with their own prefixes; new tools link the implementation rather than
+copying these recipes.
+
 ## 1 — App shell
+
+Reference: `.pt-app / .pt-page / .pt-wrap (base-template markup)` in [components.css](../components.css) and
+[macros/ui.j2](../macros/ui.j2).
 
 A full-viewport flex column: fixed topbar at the top, scrollable content below.
 
@@ -54,6 +58,9 @@ Tokens: `--bg` on the app, `--panel` on the topbar, `--border` on topbar
 bottom edge.
 
 ## 2 — Topbar + navigation
+
+Reference: `.pt-topbar / .pt-nav; ui.nav(), ui.icon_button()` in [components.css](../components.css) and
+[macros/ui.j2](../macros/ui.j2).
 
 A flex row containing the brand, nav links, spacer, and action buttons.
 
@@ -111,6 +118,9 @@ Tokens: `--panel`, `--panel-2`, `--border`, `--text`, `--text-2`, `--text-3`,
 
 ## 3 — Buttons
 
+Reference: `.pt-btn; ui.button()` in [components.css](../components.css) and
+[macros/ui.j2](../macros/ui.j2).
+
 ```
 .<prefix>-btn          display: inline-flex; align-items: center; gap: 6px;
                         font-size: var(--fs-sm); padding: 6px 14px;
@@ -127,6 +137,9 @@ Tokens: `--panel-2`, `--panel-3`, `--border-2`, `--text`, `--radius`,
 `--btn-strong-bg`, `--btn-strong-text`, `--fs-sm`.
 
 ## 4 — Inputs and fields
+
+Reference: `.pt-field / .pt-input / .pt-select; ui.field(), ui.select()` in [components.css](../components.css) and
+[macros/ui.j2](../macros/ui.j2).
 
 ```
 .<prefix>-field        margin-bottom: var(--space-3)
@@ -148,6 +161,9 @@ Tokens: `--inset`, `--border`, `--accent`, `--accent-soft`, `--text`, `--text-2`
 
 ## 5 — Panel / card
 
+Reference: `.pt-panel; ui.panel()` in [components.css](../components.css) and
+[macros/ui.j2](../macros/ui.j2).
+
 ```
 .<prefix>-panel        background: var(--panel); border: 1px solid var(--border);
                         border-radius: var(--radius-lg)
@@ -157,6 +173,9 @@ Tokens: `--inset`, `--border`, `--accent`, `--accent-soft`, `--text`, `--text-2`
 Tokens: `--panel`, `--border`, `--radius-lg`.
 
 ## 6 — Stat strip
+
+Reference: `.pt-stats / .pt-stat; ui.stats(), ui.stat()` in [components.css](../components.css) and
+[macros/ui.j2](../macros/ui.j2).
 
 > **Plan 007 (2026-08-14, revised same day after blind review):** the stat
 > strip is the *dashboard* summary header — see `archetypes.md`. Its rule is
@@ -220,6 +239,9 @@ Tokens: `--border`, `--panel-2`, `--radius-lg`, `--row-hover`, `--text`,
 
 ## 7 — Pill (status indicator)
 
+Reference: `.pt-pill; ui.pill()` in [components.css](../components.css) and
+[macros/ui.j2](../macros/ui.j2).
+
 An inline-flex dot + label for status. No background, no border.
 
 ```
@@ -238,6 +260,9 @@ Tokens: `--ok`, `--warn`, `--crit`, `--text-3`, `--fs-sm`.
 
 ## 8 — Chip (metadata tag)
 
+Reference: `.pt-chip; ui.chip()` in [components.css](../components.css) and
+[macros/ui.j2](../macros/ui.j2).
+
 An inline-flex bordered tag for metadata. Mono font.
 
 ```
@@ -254,6 +279,9 @@ Tokens: `--border-2`, `--text-2`, `--text-3`, `--ok`, `--warn`, `--crit`,
 `--accent`, `--font-mono`, `--fs-xs`.
 
 ## 9 — Table
+
+Reference: `.pt-table-wrap / .pt-table; ui.table()` in [components.css](../components.css) and
+[macros/ui.j2](../macros/ui.j2).
 
 Mono uppercase headers, bordered rows, row-hover highlight.
 
@@ -275,6 +303,9 @@ Tokens: `--border`, `--radius-lg`, `--text-3`, `--row-hover`, `--font-mono`,
 
 ## 10 — Empty state
 
+Reference: `.pt-empty / .pt-state; ui.collection_state()` in [components.css](../components.css) and
+[macros/ui.j2](../macros/ui.j2).
+
 Centred placeholder when a view has no data.
 
 ```
@@ -290,6 +321,9 @@ Centred placeholder when a view has no data.
 Tokens: `--panel-2`, `--text`, `--text-3`, `--fs-md`, `--fs-sm`.
 
 ## 11 — Callout / alert
+
+Reference: `.pt-callout; ui.callout()` in [components.css](../components.css) and
+[macros/ui.j2](../macros/ui.j2).
 
 A bordered block with optional icon for status messages.
 
@@ -307,6 +341,9 @@ Tokens: `--panel-2`, `--border`, `--radius`, `--warn`, `--crit`, `--info`,
 
 ## 12 — Drop zone
 
+Reference: `.pt-drop; ui.dropzone()` in [components.css](../components.css) and
+[macros/ui.j2](../macros/ui.j2).
+
 Dashed-border target for file drops.
 
 ```
@@ -321,6 +358,9 @@ Tokens: `--border-2`, `--accent`, `--accent-soft`, `--inset`, `--text-3`,
 
 ## 13 — Breadcrumb
 
+Reference: `.pt-breadcrumb; ui.breadcrumb()` in [components.css](../components.css) and
+[macros/ui.j2](../macros/ui.j2).
+
 ```
 .<prefix>-breadcrumb   display: flex; align-items: center; gap: 6px;
                         font-size: var(--fs-sm); color: var(--text-3)
@@ -332,6 +372,9 @@ Tokens: `--border-2`, `--accent`, `--accent-soft`, `--inset`, `--text-3`,
 Tokens: `--text-2`, `--text-3`, `--accent`, `--fs-sm`.
 
 ## 14 — Chain / precedence
+
+Reference: `.pt-chain; ui.chain()` in [components.css](../components.css) and
+[macros/ui.j2](../macros/ui.j2).
 
 A vertical ladder of nodes with a connecting spine — used for certificate trust
 chains and GPO precedence.
@@ -353,9 +396,10 @@ Tokens: `--border`, `--accent`, `--bg`.
 
 ## Adding a new tool
 
-1. Choose a 2–3 letter prefix (`ad-`, `kp-`, etc.).
-2. Start with the app shell (§1), topbar (§2), and buttons (§3) — they give
-   you a recognisably "family" frame with minimal CSS.
+1. Vendor tokens and reference components with `--components <templates-dir>`.
+   Choose a tool prefix for domain-specific additions, leaving `pt-` owned by patina.
+2. Start with `.pt-app`, `.pt-topbar` and the shared macros — they give
+   you the family frame without reimplementing component CSS.
 3. Add stat strips, tables, pills, and chips as the tool's views need them.
 4. **Colours and spacing come from tokens.** Never write a raw colour — no
    `#hex`, no `rgb()`, no named colour — in tool CSS; draw every one from
@@ -372,3 +416,12 @@ Tokens: `--border`, `--accent`, `--bg`.
    catalog itself specifies px paddings, so a px ratchet would be all noise.
 5. Domain-specific patterns (posture grids, grade badges) are fine — just build
    them on the same tokens.
+
+## Extending the reference implementation
+
+A new domain-specific shape belongs in a tool-prefixed stylesheet or macro
+file. A shape independently needed by several tools should be proposed here,
+with its operator purpose, applicable states and rendered evidence. Improve a
+shared shape in patina and re-sync deliberately; keep consumer additions
+outside the owned blocks. A missing state or incorrect accessible name is a
+component defect to fix upstream, rather than a reason for per-page CSS.

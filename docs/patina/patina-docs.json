@@ -1,12 +1,13 @@
 {
-  "patina_version": "0.5.0",
-  "patina_rev": "e7024c1",
+  "patina_version": "0.6.0",
+  "patina_rev": "1dffec1",
   "note": "Hashes cover the SOURCE bytes; each vendored file carries one extra banner line above them.",
   "files": {
-    "adoption.md": "662c7b527c023a82b242d1733fb9979071e2e613c4616ab922c8b258e25784ae",
-    "archetypes.md": "70103dc635c0eaccd6e71f5597a7e84173fc8bec9423216939511a44fced922e",
+    "adoption.md": "ee072210f2350ddbeec6a5a7094eec431d48e1bcc3ec71fffe30c8369323f838",
+    "archetypes.md": "6ad02a252642b5f714526b0eed8e077406aa7fe871d6c456ab69606d7a042fbd",
+    "components.md": "bfbdc532c566225787e8ac90b92e9c91676f879fa75f7f3209018a44d57bf0b0",
     "content-model.md": "15b2ff2209e07aabe527dde7aaadba026f03b55207b92afffa1bd94872683389",
-    "patterns.md": "2379845513e0ac8572e1b59a8d5b122edcc62e3f3e3803f0e272d7f6f1801f1a",
-    "token-contract.md": "17a508584e7e48c8d96b5a1838f02d1ae053b77d01efab35d1e3fbd4a90ae856"
+    "patterns.md": "1ad9c4030f1ad7f927b164585f9879b591cc8b1650849b66fbbbdd16cd72b4be",
+    "token-contract.md": "f2d4a218cd6dd23e1fef57b9c6076652add3060b17db199000534f51913f2023"
   }
 }

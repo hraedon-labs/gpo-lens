@@ -1,4 +1,4 @@
-<!-- VENDORED FROM patina 0.5.0 (e7024c1) -- patina-owned. Do not edit, reformat or lint this file; edit patina and re-run sync.sh. -->
+<!-- VENDORED FROM patina 0.6.0 (1dffec1) -- patina-owned. Do not edit, reformat or lint this file; edit patina and re-run sync.sh. -->
 # The patina token contract
 
 This is the canonical list of design tokens every family tool shares, the rules
@@ -85,6 +85,19 @@ component assignments; a tool still chooses.
 | `--fs-xl` | 22 | the page title | display or hero text |
 | `--fs-2xl` | 30 | a single dominant figure — the one number a page exists to show | anything a page has more than one of |
 
+**The scale is written for glancing, and that is a console inheritance.**
+openbia's adoption (2026-08-15) is the evidence: `--fs-base` at 13.5px is a
+console assumption, `--fs-sm` at 12.5px is ruled out for intake-form labels by
+its own contraindication, and `--fs-xs`'s "not for anything read for more than
+a glance" simply does not describe a stakeholder attesting a downtime procedure
+or a manager reading a four-section report. openbia resolved it by selecting a
+different step — `body { font-size: var(--fs-md) }`, which shadows nothing and
+is explicitly permitted above — but the contract has **no vocabulary for saying
+that deliberately**, so the choice reads as carelessness rather than a decision.
+A second gap from the same adoption: two heading steps (`--fs-lg` panels,
+`--fs-xl` page title) do not cover a document that legitimately nests three
+heading levels, and `--fs-md` is contraindicated as a heading substitute.
+
 Deliberately **not** doing yet: semantic aliases (`--text-metadata` and
 friends). Document the meaning the scale has actually earned before minting
 names for it.
@@ -95,7 +108,8 @@ names for it.
 
 ### Base helpers shipped in `tokens.css`
 `.mono` `.tnum` `.muted`, link + `:focus-visible` styling, scrollbar, and a
-`prefers-reduced-motion` reset. Everything else is the tool's own components.
+`prefers-reduced-motion` reset. Optional `components.css` supplies the reference
+shapes after this base; domain-specific components remain tool-owned.
 
 ## Accent registry
 
@@ -151,11 +165,12 @@ the wrong delivery — prose for humans instead of code for machines. What made
 the reversal *safe* is Plan 005: shared code is only safe to share once drift
 in a vendored copy fails mechanically.
 
-**Status: ratified, not built.** Neither `components.css` nor `macros/ui.j2`
-exists yet — Plan 006 WI-2 (extract), WI-3 (prove on a thin consumer), WI-4
-(document) are open. Do not write code that assumes a `pt-` class exists.
+**Status: reference implementation delivered 2026-10-02.** `components.css`
+and `macros/ui.j2` ship through opt-in `sync.sh --components <templates-dir>`.
+Plan 006 WI-2 (extract) and WI-4 (document) are implemented; WI-3 (live
+agent-notes adoption) remains open. Existing consumers adopt deliberately.
 
-Until they ship — and after, as the human-readable half — **`patterns.md`**
+The human-readable half, **`patterns.md`**, still
 catalogs the shared component shapes (topbar, stat strip, table, pill, chip,
 callout, panel, empty state, etc.) with canonical structure, token usage, and
 naming conventions, and **`archetypes.md`** covers whole-page structure. New

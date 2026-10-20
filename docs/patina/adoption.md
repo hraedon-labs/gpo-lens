@@ -1,9 +1,12 @@
-<!-- VENDORED FROM patina 0.5.0 (e7024c1) -- patina-owned. Do not edit, reformat or lint this file; edit patina and re-run sync.sh. -->
+<!-- VENDORED FROM patina 0.6.0 (1dffec1) -- patina-owned. Do not edit, reformat or lint this file; edit patina and re-run sync.sh. -->
 # Adopting patina — the conformance declaration
 
 A consumer commits a `patina.toml` at its repo root saying which parts of
 patina it claims, and by what mechanism. `check_patina.py --declaration
 patina.toml` validates the claims and reports them.
+
+Pair `--no-theme` with the checker whenever you synced `--no-theme`: without it
+the gate fails on a `theme.js` the consumer deliberately does not have.
 
 **This file is consumer-owned.** `sync.sh` never writes or rewrites it. The
 standard is upstream-owned; the adoption declaration is downstream-owned. That
@@ -90,9 +93,16 @@ destroys the information that justified separating them.
 
 **patina fixes which states are legal per facet.** A tool cannot declare
 `structure = "enforced"`, because no script decides whether a page expresses an
-operator's mental model. Allowing the claim would make machine proof, human
+operator's mental model. Allowing that claim would make machine proof, human
 review and author attestation interchangeable in the output — and the point of
 typing them separately is that they are not.
+
+It *can* declare `structure = "attested"`. That was added on 2026-08-15, after
+dossier completed a full archetype audit, came out clean, and had nowhere to
+record it: `reviewed` means a human decided, and the facet offered no state an
+agent-written audit could honestly claim. The same argument that put `attested`
+on `content_model` applies here, and omitting it from the facet where an agent
+audit is most often the *only* available evidence was simply inconsistent.
 
 Machine-decidability is not importance. "Every `var()` resolves" is trivial to
 automate and comparatively unimportant; "this screen matches how the operator
@@ -125,6 +135,63 @@ commits have landed since*, and *never reviewed*. Scoping staleness to
 UI-relevant paths — templates, styles, the routes that render them — is the
 obvious refinement and is deliberately not built yet; storing the revision is
 the part that matters.
+
+## Rendering contexts patina does not define
+
+**Contract tokens may have context-specific mappings in explicitly declared
+rendering contexts.** One reason covers the block:
+
+```css
+/* patina-allow-context:
+   print needs paper-specific surface and contrast values; patina has no
+   canonical print context. */
+@media print {
+  :root { --bg: #fff; --text: #000; /* … */ }
+}
+```
+
+The marker is deliberately its own — `patina-allow-context:`, not the colour
+ratchet's `patina-allow:`. They assert different things: "this literal is fine
+here" versus "this whole block is a context the contract was never written
+for". And the reason is block-scoped, because a context re-map is naturally a
+dozen declarations and thirteen copies of one justification is compliance
+theatre.
+
+The no-shadowing rule exists to stop **drift** — one tool's `--panel` quietly
+differing from another's. A print re-map creates no drift on any surface patina
+defines, because patina defines exactly two rendering contexts and both are
+screen (`:root[data-theme="dark"|"light"]`). Paper is a third, and `tokens.css`
+ships no values for it.
+
+Before this exemption there was **no legal way to print legibly and conform**.
+dossier is a provenance instrument whose printed record is a deliverable, and a
+dark-theme record printed with the screen tokens is pale text on unprinted
+white; the only conforming alternatives were to stop printing, or to re-plumb
+~120 rules onto `--ds-*` aliases so its components stopped referencing contract
+tokens at all — which destroys the thing the contract actually cares about, and
+is precisely the "cheapest path to green points away from the goal" failure this
+family keeps legislating against.
+
+**What patina owes here, precisely.** Not a canonical print palette — *a model
+able to express additional rendering contexts without calling them contract
+violations*. Those are different debts, and taking the first one now would
+repeat in a new layer the exact mistake the archetype tier already made:
+cert-watch established light and dark, dossier establishes print, so patina
+rushes to define *the* family print theme before knowing whether a provenance
+tool's audit-handoff requirements are representative of anything.
+
+dossier has established that **print is a legitimate context**. It has not
+established that every consumer should share one print treatment. So the
+mapping stays local until a second consumer independently demonstrates enough
+commonality to extract — the same evidence-flow rule as archetype promotion.
+Recurrence across consumers triggers review, not extraction.
+
+One consequence worth stating: **when a gate systematically rewards
+circumvention, the gate is wrong.** Before this exemption the mechanically
+cheapest way to conform was to re-plumb dossier's components onto `--ds-*`
+aliases so they stopped referencing contract tokens at all — greener checker,
+weaker design system. A rule with that incentive is not a strict rule; it is a
+broken one.
 
 ## Attestation
 
@@ -201,6 +268,76 @@ into `OWNERSHIP.md` at sync time:
 The standard is upstream-owned. What you claim about your adoption of it is
 yours.
 
+## Open family-pattern reviews (triggered by recurrence, not yet promoted)
+
+Independent recurrence across consumers triggers **review**. These are the live
+candidates as of 2026-08-15. None is promoted; each is recorded so the next
+instance is cheap to spot.
+
+**1. The paper substrate — strongest evidence, and the scope is the finding.**
+dossier and openbia independently re-map the same surface/text ramp under
+`@media print`, in the same order, for the same stated reason, having never
+seen each other's CSS. Different domains, different reasons for printing.
+
+What is shared is *the substrate only*. What is emphatically not:
+
+| | dossier | openbia |
+|---|---|---|
+| what is printed | one provenance record | a whole multi-section report |
+| why | audit handoff, once | recurrence — legible when the system that made it is down |
+| type | no size rule at all | physical units (10.5/16/13/11**pt**) |
+| status colour | preserved — coloured pills | degraded to outline + literal enum text |
+
+Both divergences follow from what the paper is *for*, not from taste: physical
+units because the artifact is measured in sheets, colour degradation because
+openbia's output goes into a binder and is read off a mono laser during a
+disaster, where a filled amber badge is an indistinguishable grey block.
+**Shipping type sizing or status treatment as family defaults would force
+dossier to print worse in order to serve openbia's binder.** Extract the
+substrate; leave the rest local. Note also that openbia renders a second paper
+path through reportlab, so a family print theme cannot assume CSS is the only
+one.
+
+**2. `local/worklist` — a genuine independent match.** dossier's and openbia's
+`review_queue.html` ask the same operator questions in the same order (what is
+queued on me, what do I take first, how long has it waited, who is accountable,
+where do I act), both derive the set rather than store it, both order by
+urgency and say so in the lead, and **neither carries a single control**. The
+discriminator is the empty state: both authors independently wrote emptiness as
+*success*. An Inventory is never "done"; a worklist's goal state is empty.
+
+It is **not** Inventory — Inventory's grammar is scopes → objects with
+counts-as-clickable-chips, and neither queue has a scope, filter or search,
+because the set is handed to you rather than scoped by you. dossier's own
+declaration currently force-fits it to Inventory; that mapping is wrong and is
+corrected there. Against promotion: openbia's has zero interaction, so the
+shared *interaction* grammar is thin. Review, not promotion.
+
+**3. `local/derivation` — weaker signal, flagged.** openbia's
+`downtime_coverage.html` (per-group total / covered / uncovered / percentage
+against a stated target of zero) looks like the "coverage reconciliation" shape
+gpo-lens's `admx_coverage.html` was recorded under. Not yet compared
+side-by-side.
+
+**No recurrence yet: `local/report-document`.** openbia's `report.html` is the
+estate's only document surface so far — numbered sections each answering a
+stated question, provenance in the header because the document outlives the
+query, every table naming its evidence tier because the reader cannot re-run
+it. Its banned failure mode is already obvious if it is ever promoted: **the
+dashboard-in-a-report**, which spends the reader's attention on posture they
+cannot act on or verify, and quietly substitutes a number for the stated
+question.
+
+## Recording an audit that found something
+
+`attested` claims the property holds. An audit that was genuinely performed and
+**found a violation** is `deferred` — with the finding in `why`, the fix
+condition in `until`, and the completed audit in `evidence`, which is displayed
+for every state. Deferring does not erase the work; it says the claim does not
+hold *yet* and names what was found. openbia's `structure` facet is the worked
+example: the audit covered all 16 templates and turned up a live banned failure
+mode, so the facet cannot be `attested`, and the audit is still recorded.
+
 ## Two things that bite on first sync
 
 **Your linter will want to edit the vendored files, and editing them breaks
@@ -211,16 +348,20 @@ Two individually correct invariants — "vendored code stays byte-identical" and
 "all repository files satisfy our formatter" — that collide wherever the
 formatter reaches the vendor tree.
 
-**patina cannot fix this upstream, and there is now evidence rather than an
-assumption.** Trivially portable complaints were fixed at the source (an
-ambiguous `l`, one long line), but the two adopting consumers run mutually
-unsatisfiable configurations: cert-watch selects `E,F,I,B,UP,SIM` at
-line-length 100 and is now clean, while gpo-lens additionally enables `FURB`,
-`ISC`, `PLW` and `EXE` and reports **30** findings on the same files —
-`re.M` versus `re.MULTILINE`, implicit string concatenation inside a tuple,
-`subprocess.run` without an explicit `check=`, a shebang on a file the vendor
-step made non-executable. These are style preferences, not defects, and no
-single source can satisfy all of them. Exclusion is the answer.
+**patina cannot fix this upstream for everyone.** Trivially portable complaints
+were fixed at the source (an ambiguous `l`, one long line), and two of the four
+consumers — cert-watch (`E,F,I,B,UP,SIM` at 100) and openbia (`E,F,I,UP,B,SIM`
+at 100) — now report nothing on the vendored files. gpo-lens additionally
+enables `FURB`, `ISC`, `PLW` and `EXE` and reports **30** findings on the same
+bytes: `re.M` versus `re.MULTILINE`, implicit string concatenation inside a
+tuple, `subprocess.run` without an explicit `check=`, a shebang on a file the
+vendor step made non-executable. Style preferences, not defects — and no single
+source satisfies every consumer's rule set at once.
+
+So the collision is **not universal**; it depends on how strict your config is.
+Exclusion is still the right answer, because the reason is byte-identity rather
+than style: a formatter that rewrites a vendored file breaks its stamp whether
+or not the rewrite was an improvement.
 
 Exclude the vendored paths from your linter and formatter — they are not your
 code, and their style is patina's problem:

@@ -1,4 +1,4 @@
-<!-- VENDORED FROM patina 0.5.0 (e7024c1) -- patina-owned. Do not edit, reformat or lint this file; edit patina and re-run sync.sh. -->
+<!-- VENDORED FROM patina 0.6.0 (1dffec1) -- patina-owned. Do not edit, reformat or lint this file; edit patina and re-run sync.sh. -->
 # patina page archetypes (structure tier 2)
 
 `patterns.md` covers component shapes. This document covers whole pages — how
@@ -238,6 +238,22 @@ dashboard's counts-on-filters rule. Zero decoration: the log IS the content.
 relative timestamps ("3 hours ago") and icon badges. *Why:* card feeds cut
 row density 3–5× and relative time is useless in an audit context; both are
 consumer-app grammar leaking into an operations tool.
+
+**Worked counterexample — the ban is on the mechanism, not the noun.**
+dossier's `activity_feed.html` carries the banned *name*, the route is `/feed`,
+and it is fully conformant: a dense filterable reverse-chronological `<table>`
+(when / action / key / title / project / actor), timestamps in `mono tnum` and
+**absolute** (`%Y-%m-%d %H:%M`, never "3 hours ago"), object-as-link, filters
+on actor kind and transition, no avatars, no icon badges, no cards. Audited
+2026-08-15.
+
+Keep this example. What is prohibited is *rendering operational history in
+social-feed grammar that destroys chronology and scanability* — card-per-event,
+avatar emphasis, relative time. It is not the word "feed", and it is not
+activity pages in general. Concrete counterexamples matter more here than
+anywhere else in this file: a prohibition with no negative control broadens
+semantically over time, and an agent reading "activity feeds are banned" will
+eventually refuse to build a log table.
 
 ## Applying this file
 
