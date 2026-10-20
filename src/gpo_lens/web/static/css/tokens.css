@@ -1,20 +1,28 @@
+/* VENDORED FROM patina -- do not edit here. Edit patina and re-run sync.sh. */
+/* accent: gpo-lens */
+
+/* patina:begin 1dffec1 sha256:1f91e08d09f1ed29fc1f680584aa57338f772044a2c27fab55064cf459389ce0 */
 /* ============================================================
-   gpo-lens — shared "instrument panel" design system
+   patina — shared design tokens for the instrument-panel tool family
    ------------------------------------------------------------
-   The token layer (the --* custom properties: surfaces, type scale,
-   space scale, status hues) is the COHERENCE CONTRACT shared across
-   the tool family (cert-watch, gpo-lens, …). Keep these names and
-   values in sync between tools; only the accent + app components differ.
+   THIS IS THE COHERENCE CONTRACT. Every tool in the family (cert-watch,
+   gpo-lens, …) consumes these custom properties so surfaces, type, spacing,
+   and status colours stay identical. Tools build their own components on top
+   of these vars and keep their own component CSS separately.
 
-   Family story: cert-watch is the struck bronze of a certificate seal.
-   gpo-lens is the verdigris — the blue-green patina of an aged
-   institutional bronze plaque. Same metal, different finish.
+   This file is the source of truth. Do not edit a vendored copy in a tool —
+   edit it here and re-run patina's sync.sh. A vendored copy is the
+   concatenation of this file followed by one accents/<tool>.css (which
+   overrides --accent for that tool).
 
-   Theme is driven by data-theme on <html> (default dark). An external
-   /static/theme.js sets it before first paint (the CSP forbids inline JS).
+   Theme: data-theme on <html> (default dark). Pair with theme.js, which sets
+   the attribute before first paint.
+
+   Family story: same metal, different finish. Each tool overrides --accent —
+   cert-watch is struck bronze, gpo-lens is verdigris. See accents/.
    ============================================================ */
 
-/* ---------- FONTS (self-hosted; OFL — see ../fonts/) ---------- */
+/* ---------- FONTS (self-hosted; OFL — see fonts/) ---------- */
 @font-face {
   font-family: "IBM Plex Mono";
   font-style: normal; font-weight: 400; font-display: swap;
@@ -31,13 +39,15 @@
   src: url("../fonts/ibm-plex-mono-latin-600.woff2") format("woff2");
 }
 
-/* ---------- TOKENS (shared family layer) ---------- */
+/* ---------- TOKENS ---------- */
 :root,
 :root[data-theme="dark"] {
   --font-sans: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace;
 
-  /* Warm-charcoal surfaces: an instrument panel, not a cold SaaS night theme. */
+  /* Warm-charcoal surfaces: an instrument panel, not a cold SaaS night theme.
+     Hue sits at a low-chroma warm neutral (R >= G >= B) so the UI reads like
+     aged metal/paper rather than blue glass. */
   --bg: #0e0d0b;
   --bg-soft: #131210;
   --panel: #181612;
@@ -51,27 +61,34 @@
   --text-2: #ada69a;
   --text-3: #767065;
 
-  /* Accent = verdigris (patinated bronze). Sibling to cert-watch's gold seal.
-     Used for links, focus, the wordmark, active nav — never for status. */
-  --accent: #5fb3a3;
-  --accent-2: #5fb3a3;
-  --accent-soft: rgba(95, 179, 163, 0.13);
-  --accent-line: rgba(95, 179, 163, 0.42);
+  /* Default accent = a neutral warm steel. Each tool MUST override this in its
+     accents/<tool>.css; the default only keeps an un-themed page coherent.
+     Accent is for links/focus/wordmark/active nav — never for status. */
+  --accent: #b9a98c;
+  --accent-2: #b9a98c;
+  --accent-soft: rgba(185, 169, 140, 0.13);
+  --accent-line: rgba(185, 169, 140, 0.42);
 
   /* chrome-strength button (warm white) */
   --btn-strong-bg: #ece8e1;
   --btn-strong-text: #181612;
 
-  --ok: #34d399;      --ok-soft: rgba(52, 211, 153, 0.14);
-  --warn: #fbbf24;    --warn-soft: rgba(251, 191, 36, 0.15);
-  --crit: #f87171;    --crit-soft: rgba(248, 113, 113, 0.15);
-  --info: #7cc0e8;    --info-soft: rgba(124, 192, 232, 0.14);
+  /* Status quad "warm & quiet" — chosen 2026-08-14 (plan 004): sage, antique
+     gold, terracotta, steel. Every value passes 4.5:1 on --bg AND --panel and
+     all 6 pairs clear >=8 dE under protan/deutan/tritan simulation (the
+     previous quad — Tailwind emerald/amber/red-400 — failed: light ok 2.9:1,
+     deutan collapse of ok/warn/crit). Change only with plan-004-grade
+     validation; scripts/check_contrast.py gates the floors in CI. */
+  --ok: #7fd091;      --ok-soft: rgba(127, 208, 145, 0.14);
+  --warn: #ce9d44;    --warn-soft: rgba(206, 157, 68, 0.15);
+  --crit: #cc6050;    --crit-soft: rgba(204, 96, 80, 0.15);
+  --info: #60aeda;    --info-soft: rgba(96, 174, 218, 0.14);
 
   --shadow: 0 1px 2px rgba(0,0,0,.45), 0 8px 28px rgba(0,0,0,.3);
   --row-hover: rgba(255, 238, 214, 0.03);
 
   /* TYPE SCALE */
-  --fs-xs:   12px;
+  --fs-xs:   11px;
   --fs-sm:   12.5px;
   --fs-base: 13.5px;
   --fs-md:   15px;
@@ -108,33 +125,37 @@
   --text-2: #5f594d;
   --text-3: #938c7c;
 
-  /* Deep patina ink for the accent in light mode. */
-  --accent: #2c7d6e;
-  --accent-2: #2c7d6e;
-  --accent-soft: rgba(44, 125, 110, 0.10);
-  --accent-line: rgba(44, 125, 110, 0.38);
+  --accent: #6f6552;
+  --accent-2: #6f6552;
+  --accent-soft: rgba(111, 101, 82, 0.10);
+  --accent-line: rgba(111, 101, 82, 0.38);
 
   --btn-strong-bg: #221f18;
   --btn-strong-text: #f3f0e9;
 
-  --ok: #15a34a;      --ok-soft: rgba(21, 163, 74, 0.10);
-  --warn: #c2740a;    --warn-soft: rgba(194, 116, 10, 0.11);
-  --crit: #dc3030;    --crit-soft: rgba(220, 48, 48, 0.10);
-  --info: #1f6f9e;    --info-soft: rgba(31, 111, 158, 0.10);
+  /* Status quad "warm & quiet", light: deep inks on warm paper. The crimson
+     crit (h~8) and golden-ochre warn are physics, not taste: warm-red + amber
+     is not CVD-separable at 4.5:1 on this paper (plan 004, "what the physics
+     forced"). */
+  --ok: #004e19;      --ok-soft: rgba(0, 78, 25, 0.10);
+  --warn: #836101;    --warn-soft: rgba(131, 97, 1, 0.11);
+  --crit: #b64461;    --crit-soft: rgba(182, 68, 97, 0.10);
+  --info: #25729e;    --info-soft: rgba(37, 114, 158, 0.10);
 
   --shadow: 0 1px 2px rgba(60,48,20,.07), 0 6px 22px rgba(60,48,20,.08);
   --row-hover: rgba(120,90,30,0.04);
 }
 
+/* ---------- BASE ---------- */
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
   font-family: var(--font-sans);
   font-size: var(--fs-base);
+  line-height: 1.5;
   background: var(--bg);
   color: var(--text);
-  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -145,652 +166,28 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 3px;
-}
-.gp-sr-only {
-  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
-}
-.gp-skip-link {
-  position: fixed; left: 12px; top: 8px; z-index: 2000;
-  padding: 8px 12px; border-radius: var(--radius); background: var(--btn-strong-bg);
-  color: var(--btn-strong-text); transform: translateY(-150%);
-}
-.gp-skip-link:focus { transform: translateY(0); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 
-/* ---------- APP LAYOUT ---------- */
-.gp-app { display: flex; flex-direction: column; min-height: 100vh; }
-.gp-page { flex: 1; }
-.gp-wrap { max-width: 1080px; margin: 0 auto; padding: 26px; }
-
-/* ---------- TOP BAR + NAV ---------- */
-.gp-topbar {
-  display: flex; align-items: center; gap: 22px;
-  padding: 0 26px; height: 58px; flex: 0 0 auto;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
-}
-.gp-wordmark { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; }
-.gp-wordmark:hover { text-decoration: none; color: inherit; }
-.gp-mark {
-  width: 28px; height: 28px; border-radius: 7px; flex: 0 0 auto;
-  display: flex; align-items: center; justify-content: center; color: var(--accent);
-  background: var(--inset); border: 1px solid var(--border-2);
-}
-.gp-name { font-family: var(--font-mono); font-size: 14.5px; font-weight: 600; letter-spacing: -.2px; }
-.gp-ver {
-  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3);
-  border: 1px solid var(--border-2); border-radius: 5px; padding: 1px 5px; margin-left: 2px;
-}
-.gp-nav { display: flex; gap: 1px; margin-left: 6px; flex-wrap: wrap; align-items: center; row-gap: 0; }
-.gp-nav a {
-  font-size: 12.5px; font-weight: 500; color: var(--text-2);
-  padding: 6px 8px; border-radius: 7px; text-decoration: none; cursor: pointer;
-  transition: background .12s, color .12s;
-}
-.gp-nav a:hover { background: var(--panel-2); color: var(--text); text-decoration: none; }
-.gp-nav a.active { color: var(--text); background: var(--panel-3); }
-/* Workflow groups (Estate / Posture / Change / Tools) with hairline dividers. */
-.gp-nav-group { display: flex; gap: 1px; }
-.gp-nav-sep { width: 1px; height: 16px; background: var(--border-2); margin: 0 5px; }
-.gp-spacer { flex: 1 1 auto; }
-
-.gp-iconbtn {
-  width: 34px; height: 34px; border-radius: var(--radius); border: 1px solid var(--border);
-  background: var(--panel-2); color: var(--text-2); cursor: pointer;
-  display: flex; align-items: center; justify-content: center; transition: all .12s;
-}
-.gp-iconbtn:hover { color: var(--text); border-color: var(--border-2); }
-
-/* ---------- PAGE HEADER ---------- */
-.gp-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
-.gp-page-head h1 { margin: 0; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -.4px; }
-.gp-page-head .sub { font-size: 13px; color: var(--text-3); margin-top: 4px; }
-.gp-eyebrow {
-  font-family: var(--font-mono); font-size: 10.5px; font-weight: 500; color: var(--text-3);
-  text-transform: uppercase; letter-spacing: .12em; margin-bottom: 6px;
-}
-
-/* ---------- SECTION ---------- */
-.gp-section { margin-top: 26px; }
-.gp-section > h2 {
-  font-size: var(--fs-md); font-weight: 600; letter-spacing: -.2px; margin: 0 0 12px;
-  display: flex; align-items: baseline; gap: 9px;
-}
-.gp-section > h2 .count { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-3); font-weight: 500; }
-.gp-section > h3 { font-size: var(--fs-base); font-weight: 600; color: var(--text-2); margin: 18px 0 8px; }
-
-/* ---------- PANEL ---------- */
-.gp-panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); }
-.gp-panel.pad { padding: 16px 18px; }
-
-/* ---------- BUTTONS ---------- */
-.gp-btn {
-  font-family: var(--font-sans); font-size: 13px; font-weight: 500;
-  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
-  padding: 8px 14px; border-radius: var(--radius); border: 1px solid var(--border-2);
-  background: var(--panel-2); color: var(--text); transition: all .12s; white-space: nowrap;
-  text-decoration: none;
-}
-.gp-btn:hover { background: var(--panel-3); border-color: var(--text-3); text-decoration: none; }
-.gp-btn.primary { background: var(--btn-strong-bg); border-color: transparent; color: var(--btn-strong-text); }
-.gp-btn.primary:hover { filter: brightness(0.92); }
-:root[data-theme="dark"] .gp-btn.primary:hover { filter: brightness(1.1); }
-.gp-btn:disabled { opacity: .45; cursor: not-allowed; }
-.gp-btn-danger { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 34%, transparent); }
-.gp-btn-danger:hover { background: var(--crit-soft); border-color: var(--crit); }
-
-/* ---------- INPUTS / SELECT ---------- */
-.gp-field { display: flex; flex-direction: column; gap: 6px; }
-.gp-label { font-size: 11.5px; font-weight: 500; color: var(--text-2); letter-spacing: .02em; }
-.gp-input, .gp-select {
-  font-family: var(--font-sans); font-size: 13px; color: var(--text); width: 100%;
-  background: var(--inset); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 9px 11px; outline: none; transition: border-color .12s, box-shadow .12s;
-}
-.gp-input::placeholder { color: var(--text-3); }
-.gp-input:focus, .gp-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.gp-input:disabled, .gp-select:disabled { opacity: .5; cursor: not-allowed; }
-.gp-input.mono { font-family: var(--font-mono); }
-.gp-form-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
-
-/* ---------- STAT STRIP ----------
-   One bordered instrument strip with hairline dividers. */
-.gp-stats {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 0;
-  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg);
-  overflow: hidden;
-}
-.gp-stat { padding: 14px 18px 13px; border-left: 1px solid var(--border); min-width: 0; }
-.gp-stat:first-child { border-left: none; }
-.gp-stat-label {
-  font-family: var(--font-mono); font-size: 10.5px; font-weight: 500;
-  color: var(--text-3); text-transform: uppercase; letter-spacing: .08em;
-}
-.gp-stat-val {
-  font-family: var(--font-mono); font-size: 26px; font-weight: 600; letter-spacing: -.5px;
-  margin-top: 8px; line-height: 1; font-variant-numeric: tabular-nums;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.gp-stat-val.identity { font-size: 16px; color: var(--accent); }
-
-/* ---------- STATUS (dot + colored text) ---------- */
-.gp-pill {
-  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
-  font-size: 11.5px; font-weight: 600; line-height: 1.4; letter-spacing: .01em;
-}
-.gp-pill .dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
-.gp-pill.critical { color: var(--crit); }   .gp-pill.critical .dot { background: var(--crit); }
-.gp-pill.high     { color: var(--warn); }   .gp-pill.high .dot     { background: var(--warn); }
-.gp-pill.medium   { color: var(--warn); }   .gp-pill.medium .dot   { background: var(--warn); }
-.gp-pill.low      { color: var(--text-2); } .gp-pill.low .dot      { background: var(--text-2); }
-.gp-pill.info     { color: var(--info); }   .gp-pill.info .dot     { background: var(--info); }
-.gp-pill.ok       { color: var(--ok); }     .gp-pill.ok .dot       { background: var(--ok); }
-.gp-pill.muted    { color: var(--text-3); } .gp-pill.muted .dot    { background: var(--text-3); }
-
-/* ---------- CHIPS ---------- */
-.gp-chip {
-  display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); font-weight: 500;
-  padding: 1.5px 7px; border-radius: 4px; border: 1px solid var(--border);
-  color: var(--text-2); background: transparent; font-family: var(--font-mono); white-space: nowrap;
-}
-.gp-chip.ok       { color: var(--ok);   border-color: color-mix(in srgb, var(--ok) 32%, transparent);   background: var(--ok-soft); }
-.gp-chip.warn     { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 32%, transparent); background: var(--warn-soft); }
-.gp-chip.crit     { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 32%, transparent); background: var(--crit-soft); }
-.gp-chip.accent   { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
-.gp-chip.info     { color: var(--info); border-color: color-mix(in srgb, var(--info) 32%, transparent); background: var(--info-soft); }
-.gp-chip.muted    { color: var(--text-3); }
-/* Link-chips (search facets, filter removal) need to signal clickability. */
-a.gp-chip { cursor: pointer; text-decoration: none; transition: background .12s, border-color .12s; }
-a.gp-chip:hover { background: var(--panel-3); border-color: var(--border-2); text-decoration: none; }
-
-/* ---------- COMPLIANCE BADGES ---------- */
-.gp-badge {
-  display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); font-weight: 500;
-  padding: 1.5px 7px; border-radius: 4px; border: 1px solid var(--accent-line);
-  color: var(--accent); background: var(--accent-soft); white-space: nowrap;
-  font-family: var(--font-mono); margin: 1px 2px 1px 0;
-}
-
-/* ---------- TABLE ---------- */
-.gp-table-wrap { border: 1px solid var(--border); border-radius: var(--radius-lg); overflow-x: auto; }
-.gp-table { width: 100%; border-collapse: separate; border-spacing: 0; }
-.gp-table th {
-  text-align: left; font-family: var(--font-mono); font-size: 10.5px; font-weight: 500; color: var(--text-3);
-  letter-spacing: .07em; text-transform: uppercase; padding: 12px 14px 9px;
-  border-bottom: 1px solid var(--border); white-space: nowrap; background: var(--panel);
-}
-.gp-table td { padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: top; font-size: var(--fs-sm); }
-.gp-table tr:last-child td { border-bottom: none; }
-.gp-table tbody tr { transition: background .1s; }
-.gp-table tbody tr:hover { background: var(--row-hover); }
-.gp-table td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
-/* Long unbreakable identities (e.g. deep registry paths like Citrix's
-   oidInternetRegionConnectionAuthorizationDecision) must wrap, or they force the
-   column wide enough to push later columns — the Value column — past the wrap's
-   overflow:hidden edge and clip them off-screen. break-word keeps the table
-   within its container so every column stays visible. */
-.gp-table .mono { font-family: var(--font-mono); overflow-wrap: anywhere; word-break: break-word; }
-.gp-table tr.dim td { color: var(--text-3); }
-.gp-table tr.flag { background: var(--warn-soft); }
-.gp-table tr.flag:hover { background: var(--warn-soft); }
-
-/* ---------- KEY/VALUE METADATA TABLE ---------- */
-.gp-kv { width: 100%; border-collapse: collapse; }
-.gp-kv th {
-  text-align: left; width: 160px; padding: 8px 16px 8px 0; vertical-align: top;
-  font-size: var(--fs-sm); font-weight: 500; color: var(--text-3);
-  border-bottom: 1px solid var(--border);
-}
-.gp-kv td { padding: 8px 0; vertical-align: top; font-size: var(--fs-sm); border-bottom: 1px solid var(--border); }
-.gp-kv tr:last-child th, .gp-kv tr:last-child td { border-bottom: none; }
-
-/* ---------- POSTURE GRID (dashboard health indicators) ----------
-   Indicators are toned only when they fire; clean ones collapse into a
-   single quiet "all clear" line so the eye lands on what matters. */
-.gp-posture { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
-.gp-ind {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 11px 13px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel);
-}
-.gp-ind .lab { font-size: 12.5px; color: var(--text); }
-.gp-ind .val { font-family: var(--font-mono); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.gp-ind.crit { border-color: color-mix(in srgb, var(--crit) 34%, transparent); background: var(--crit-soft); }
-.gp-ind.crit .val { color: var(--crit); }
-.gp-ind.warn { border-color: color-mix(in srgb, var(--warn) 30%, transparent); background: var(--warn-soft); }
-.gp-ind.warn .val { color: var(--warn); }
-.gp-ind.info { border-color: color-mix(in srgb, var(--info) 30%, transparent); background: var(--info-soft); }
-.gp-ind.info .val { color: var(--info); }
-/* A posture card that deep-links into the findings table reads as actionable. */
-a.gp-ind { text-decoration: none; color: inherit; cursor: pointer; transition: border-color .12s, transform .12s; }
-a.gp-ind:hover { border-color: var(--text-muted); transform: translateY(-1px); }
-a.gp-ind:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.gp-allclear {
-  margin-top: 12px; font-size: 12.5px; color: var(--text-3); line-height: 1.6;
-}
-.gp-allclear b { color: var(--ok); font-weight: 600; }
-.gp-allclear .names { font-family: var(--font-mono); font-size: 11.5px; }
-
-/* ---------- PRECEDENCE CHAIN (signature) ----------
-   The OU's effective GPO chain as a vertical ladder: link order top→bottom,
-   a connector spine with node dots, enforced links pinned, winner marked.
-   Echoes cert-watch's certificate-chain motif, repurposed for GP precedence. */
-.gp-chain { position: relative; margin: 4px 0 0 0; padding: 0; list-style: none; }
-.gp-chain li { position: relative; padding: 0 0 14px 34px; }
-.gp-chain li:last-child { padding-bottom: 0; }
-.gp-chain .node {
-  position: absolute; left: 8px; top: 4px; width: 14px; height: 14px; border-radius: 50%;
-  border: 2px solid var(--border-2); background: var(--panel); z-index: 2;
-}
-.gp-chain li.enforced .node { border-color: var(--warn); }
-.gp-chain li.disabled .node { border-style: dashed; }
-.gp-chain .spine { position: absolute; left: 14px; top: 16px; bottom: -4px; width: 2px; background: var(--border-2); }
-.gp-chain li:last-child .spine { display: none; }
-.gp-chain-card {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel-2);
-}
-.gp-chain li.disabled .gp-chain-card { opacity: .6; }
-.gp-chain-name { font-size: 13px; font-weight: 500; color: var(--text); }
-.gp-chain-meta { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-.gp-chain-gates { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
-.gp-applies-all { font-size: var(--fs-xs); }
-.gp-chain-ord {
-  font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-3);
-  border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px;
-}
-
-/* ---------- CALLOUT / BANNER ---------- */
-.gp-callout {
-  display: flex; gap: 11px; padding: 13px 15px; border-radius: var(--radius);
-  border: 1px solid var(--border); background: var(--panel); font-size: 13px; line-height: 1.55;
-}
-.gp-callout .ico { flex: 0 0 auto; margin-top: 1px; }
-.gp-callout.warn { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
-.gp-callout.warn .ico { color: var(--warn); }
-.gp-callout.crit { background: var(--crit-soft); border-color: color-mix(in srgb, var(--crit) 30%, transparent); }
-.gp-callout.crit .ico { color: var(--crit); }
-.gp-callout.info { background: var(--info-soft); border-color: color-mix(in srgb, var(--info) 30%, transparent); }
-.gp-callout.info .ico { color: var(--info); }
-.gp-callout.accent { background: var(--accent-soft); border-color: var(--accent-line); }
-.gp-callout.accent .ico { color: var(--accent); }
-.gp-callout h4 { margin: 0 0 3px; font-size: 13px; font-weight: 600; }
-.gp-callout p { margin: 0; color: var(--text-2); }
-.gp-callout ul { margin: 7px 0 0; padding-left: 18px; color: var(--text-2); }
-.gp-callout li { margin: 2px 0; }
-
-/* ---------- DROP ZONE (ingest) ---------- */
-.gp-drop {
-  position: relative;
-  border: 1.5px dashed var(--border-2); border-radius: var(--radius-lg); padding: 34px 20px;
-  text-align: center; background: var(--inset); transition: border-color .14s, background .14s; cursor: pointer;
-}
-.gp-drop:hover, .gp-drop.over { border-color: var(--accent); background: var(--accent-soft); }
-.gp-drop .ico { color: var(--accent); margin-bottom: 10px; }
-.gp-drop .hint { font-size: 12.5px; color: var(--text-3); margin-top: 4px; }
-
-/* ---------- CODE / PRE ---------- */
-.gp-pre {
-  margin: 0; background: var(--inset); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 13px 15px; overflow-x: auto; font-family: var(--font-mono); font-size: 12.5px;
-  line-height: 1.6; color: var(--text-2); white-space: pre-wrap; word-break: break-word;
-}
-
-/* ---------- EMPTY STATE ---------- */
-.gp-empty { padding: 48px 0; text-align: center; }
-.gp-empty .ico {
-  width: 46px; height: 46px; border-radius: 13px; background: var(--inset); color: var(--text-3);
-  display: inline-flex; align-items: center; justify-content: center; margin-bottom: 12px;
-}
-.gp-empty .title { font-size: 14px; font-weight: 600; }
-.gp-empty .sub { font-size: 12.5px; color: var(--text-3); margin-top: 4px; }
-
-/* ---------- ERROR PAGE ---------- */
-.gp-error { max-width: 460px; margin: 9vh auto 0; text-align: center; padding: 0 24px; }
-.gp-error .code { font-family: var(--font-mono); font-size: 64px; font-weight: 600; color: var(--accent); line-height: 1; letter-spacing: -2px; }
-.gp-error h1 { font-size: var(--fs-lg); font-weight: 600; margin: 14px 0 6px; }
-.gp-error p { color: var(--text-2); margin: 0 0 22px; }
-
-/* ---------- SCROLLBAR ---------- */
 ::-webkit-scrollbar { width: 9px; height: 9px; }
 ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 6px; }
-
-/* ---------- RESPONSIVE ---------- */
-@media (max-width: 760px) {
-  .gp-stats { grid-template-columns: repeat(2, 1fr); }
-  .gp-stat:nth-child(odd) { border-left: none; }
-  .gp-stat:nth-child(n+3) { border-top: 1px solid var(--border); }
-}
-@media (max-width: 600px) {
-  .gp-wrap { padding: 16px 13px; }
-  .gp-topbar { height: auto; flex-wrap: wrap; gap: 8px; padding: 10px 13px; }
-  .gp-nav { order: 3; width: 100%; }
-  .gp-table { min-width: 560px; }
-  .gp-page-head { flex-direction: column; align-items: flex-start; }
-}
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
 
-/* ---------- CONFIRM DIALOG (ingest) ---------- */
-.gp-confirm-overlay {
-  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.5); z-index: 1000;
-  display: flex; align-items: center; justify-content: center;
+/* patina accent: gpo-lens — verdigris, the blue-green patina of aged bronze.
+   Concatenated after tokens.css to override the default accent. */
+:root,
+:root[data-theme="dark"] {
+  --accent: #5fb3a3;
+  --accent-2: #5fb3a3;
+  --accent-soft: rgba(95, 179, 163, 0.13);
+  --accent-line: rgba(95, 179, 163, 0.42);
 }
-.gp-confirm-dialog {
-  background: var(--panel); border: 1px solid var(--border-2); border-radius: var(--radius-lg);
-  padding: 24px; max-width: 420px; box-shadow: var(--shadow);
+:root[data-theme="light"] {
+  --accent: #2c7d6e;
+  --accent-2: #2c7d6e;
+  --accent-soft: rgba(44, 125, 110, 0.10);
+  --accent-line: rgba(44, 125, 110, 0.38);
 }
-.gp-confirm-dialog h3 { margin: 0 0 8px; font-size: var(--fs-md); font-weight: 600; }
-.gp-confirm-dialog p { margin: 0; color: var(--text-2); font-size: var(--fs-sm); line-height: 1.5; }
-
-/* ---------- UPLOAD LOADING ---------- */
-.gp-drop.loading { pointer-events: none; opacity: 0.6; }
-.gp-drop.loading > *:not(.ico) { visibility: hidden; }
-.gp-drop.loading .ico svg { animation: spin 1s linear infinite; }
-.gp-drop.loading::after {
-  content: "Uploading…"; position: absolute; top: 50%; left: 50%;
-  transform: translate(-50%, -50%); font-size: var(--fs-base); color: var(--text-2);
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* ---------- BREADCRUMB ---------- */
-.gp-breadcrumb {
-  padding: 8px 26px; font-size: 12.5px; color: var(--text-3);
-  border-bottom: 1px solid var(--border); background: var(--bg-soft);
-}
-.gp-breadcrumb a { color: var(--text-2); }
-.gp-breadcrumb a:hover { color: var(--text); text-decoration: none; }
-.gp-breadcrumb .sep { margin: 0 7px; opacity: 0.5; }
-.gp-breadcrumb .current { color: var(--text-2); }
-
-/* ---------- FILTER BAR (dashboard findings) ---------- */
-.gp-filter-bar {
-  display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;
-  margin-bottom: 14px;
-}
-.gp-filter-search { flex: 1 1 200px; min-width: 160px; }
-.gp-export-btn { font-size: 11.5px; padding: 5px 10px; margin-left: auto; }
-
-/* ---------- PAGINATION ---------- */
-.gp-pagination {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; margin-top: 14px; flex-wrap: wrap;
-}
-.gp-pagination-info {
-  font-family: var(--font-mono); font-size: 11.5px; color: var(--text-3);
-  white-space: nowrap;
-}
-.gp-pagination-controls { display: flex; align-items: center; gap: 5px; }
-.gp-page-btn { font-size: var(--fs-xs); padding: 5px 11px; }
-.gp-page-btn:disabled { opacity: .35; cursor: not-allowed; }
-.gp-page-num {
-  font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: 500;
-  padding: 5px 9px; border-radius: var(--radius-sm); color: var(--text-2);
-  text-decoration: none; transition: background .1s, color .1s;
-}
-.gp-page-num:hover { background: var(--panel-2); color: var(--text); text-decoration: none; }
-.gp-pagination-current {
-  font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: 600;
-  padding: 5px 9px; border-radius: var(--radius-sm); color: var(--btn-strong-text);
-  background: var(--btn-strong-bg);
-}
-.gp-pagination-ellipsis { padding: 5px 4px; color: var(--text-3); }
-
-/* Tabbed sub-navigation (Conflicts: resolved vs defined lenses). */
-.gp-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 0 0 18px; }
-.gp-tab {
-  padding: 9px 15px; font-size: var(--fs-sm); color: var(--text-3); text-decoration: none;
-  border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .12s, border-color .12s;
-}
-.gp-tab:hover { color: var(--text); }
-.gp-tab.active { color: var(--text); border-bottom-color: var(--accent); }
-.gp-tab .count {
-  font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-3);
-  background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; margin-left: 4px;
-}
-/* Expandable scope list inside a conflict row's <details>. */
-.gp-table td details summary { cursor: pointer; color: var(--accent); font-variant-numeric: tabular-nums; }
-.gp-scope-list { margin-top: 6px; max-height: 220px; overflow-y: auto; font-size: var(--fs-xs); color: var(--text-3); text-align: left; }
-.gp-scope-list div { padding: 1px 0; }
-
-/* ---------- DANGER CARDS ----------
-   Findings grouped by check_id, each group a bordered card.
-   Remediation appears once per group in a collapsible <details>;
-   individual findings list the GPO + per-finding detail. */
-.gp-danger-group {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  margin-bottom: var(--space-4);
-  overflow: hidden;
-}
-.gp-danger-group-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
-}
-.gp-danger-group-head h3 {
-  margin: 0;
-  font-size: var(--fs-base);
-  font-weight: 600;
-  color: var(--text);
-}
-.gp-danger-group-head code {
-  font-family: var(--font-mono);
-  font-size: var(--fs-xs);
-  color: var(--text-3);
-  background: var(--inset);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 1px 6px;
-}
-.gp-danger-citation {
-  margin-left: auto;
-  font-size: var(--fs-xs);
-  white-space: nowrap;
-}
-.gp-danger-remediation {
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel-2);
-}
-.gp-danger-remediation summary {
-  cursor: pointer;
-  font-size: var(--fs-xs);
-  font-weight: 500;
-  color: var(--text-2);
-  letter-spacing: .02em;
-}
-.gp-danger-remediation summary + .mono {
-  margin-top: 8px;
-  line-height: 1.55;
-}
-.gp-danger-findings { padding: 0; }
-.gp-danger-finding {
-  display: flex;
-  gap: var(--space-3);
-  padding: 10px 16px;
-  border-top: 1px solid var(--border);
-  align-items: flex-start;
-}
-.gp-danger-finding:first-child { border-top: none; }
-.gp-danger-finding-gpo {
-  flex: 0 0 200px;
-  min-width: 0;
-  font-size: var(--fs-sm);
-}
-.gp-danger-finding-detail {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-/* ---------- CAVEAT SUMMARY (OU detail) ----------
-   One-line mechanism counts replace the bullet wall; per-GPO detail
-   stays behind a <details> element. */
-.gp-caveat-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 8px 0 4px;
-}
-.gp-caveat-details { margin-top: 6px; }
-.gp-caveat-details summary {
-  cursor: pointer;
-  font-size: var(--fs-xs);
-  color: var(--accent);
-  font-weight: 500;
-}
-.gp-caveat-details ul {
-  margin: 7px 0 0;
-  padding-left: 18px;
-  color: var(--text-3);
-  font-size: var(--fs-xs);
-}
-.gp-caveat-details li { margin: 2px 0; }
-
-/* ---------- WI-1: Settings ledger ---------- */
-.gp-ledger-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.gp-ledger-filter {
-  flex: 1;
-  max-width: 360px;
-  padding: 5px 10px;
-  border: 1px solid var(--border-2);
-  border-radius: 4px;
-  background: var(--inset);
-  color: var(--text);
-  font-size: var(--fs-sm);
-  font-family: var(--font-sans);
-}
-.gp-ledger-filter:focus {
-  outline: none;
-  border-color: var(--accent-line);
-  box-shadow: 0 0 0 2px var(--accent-soft);
-}
-.gp-ledger-count {
-  font-size: var(--fs-xs);
-  color: var(--text-3);
-  white-space: nowrap;
-}
-.gp-ledger-table th { font-size: var(--fs-xs); }
-.gp-ledger-detail { margin-top: 4px; }
-.gp-ledger-detail > summary {
-  color: var(--accent);
-}
-.gp-ledger-evidence {
-  margin-top: 4px;
-  padding: 6px 10px;
-  background: var(--inset);
-  border-radius: 4px;
-  border: 1px solid var(--border);
-}
-.gp-ledger-evidence .gp-kv {
-  font-size: var(--fs-xs);
-}
-.gp-ledger-evidence .gp-kv th { font-weight: 500; }
-.gp-ledger-evidence .gp-kv td { word-break: break-all; }
-
-/* ---------- WI-2: GPO dossier ---------- */
-.gp-verdict-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0;
-  margin-bottom: 20px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel);
-  overflow: hidden;
-}
-.gp-verdict-item {
-  display: flex;
-  flex-direction: column;
-  padding: 8px 14px;
-  border-right: 1px solid var(--border);
-  min-width: 120px;
-}
-.gp-verdict-item:last-child { border-right: none; }
-.gp-verdict-item .label {
-  font-size: var(--fs-xs);
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.gp-verdict-item .value {
-  font-size: var(--fs-sm);
-  color: var(--text);
-  margin-top: 2px;
-  word-break: break-word;
-}
-.gp-verdict-item.flag { background: var(--crit-soft); }
-.gp-verdict-item.accent { background: var(--accent-soft); }
-.gp-two-col {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-@media (max-width: 800px) {
-  .gp-two-col { grid-template-columns: 1fr; }
-  .gp-verdict-item { border-right: none; border-bottom: 1px solid var(--border); }
-}
-
-/* ---------- Findings inbox ---------- */
-.gp-findings-filters { align-items: flex-end; }
-.gp-findings-filters .gp-field { flex: 1 1 150px; }
-.gp-findings-filters .gp-filter-search { flex-basis: 220px; }
-.gp-triage { min-width: 190px; }
-.gp-triage > summary { list-style: none; }
-.gp-triage > summary::-webkit-details-marker { display: none; }
-.gp-triage-form {
-  display: grid; gap: 8px; margin-top: 8px; padding: 10px;
-  border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel-2);
-}
-.gp-triage-meta { margin-top: 6px; font-size: var(--fs-xs); color: var(--text-3); }
-.gp-triage-note { margin-top: 4px; color: var(--text-2); overflow-wrap: anywhere; }
-.gp-triage-error {
-  margin: 0; padding: 6px 8px; border-left: 3px solid var(--crit); border-radius: 4px;
-  background: var(--crit-soft); color: var(--text); overflow-wrap: anywhere;
-}
-
-/* ---------- Plan 025 WI-3: Explore / Tools directory pages ---------- */
-.gp-dir-intro { max-width: 68ch; margin: 0 0 20px; }
-.gp-dir-section { margin: 0 0 24px; }
-.gp-dir-row {
-  display: grid; grid-template-columns: 160px 1fr; gap: 4px 18px;
-  padding: 12px 18px; border-top: 1px solid var(--border);
-  text-decoration: none; color: var(--text); transition: background .12s;
-}
-.gp-dir-row:first-child { border-top: none; }
-.gp-dir-row:hover { background: var(--panel-2); text-decoration: none; }
-.gp-dir-row:hover .gp-dir-title { color: var(--accent); }
-.gp-dir-title { font-weight: 500; font-size: 13.5px; }
-.gp-dir-desc { font-size: var(--fs-sm); line-height: 1.5; }
-@media (max-width: 560px) {
-  .gp-dir-row { grid-template-columns: 1fr; }
-}
-
-/* Plan 025: compact settings search and wrapping navigation on narrow screens. */
-.gp-nav-search { display: flex; gap: 6px; min-width: 0; }
-.gp-nav-search .gp-input { width: 160px; min-width: 0; }
-@media (max-width: 1100px) {
-  .gp-topbar { height: auto; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; }
-}
-@media (max-width: 600px) {
-  .gp-nav-search { order: 4; width: 100%; }
-  .gp-nav-search .gp-input { flex: 1; width: auto; }
-  .gp-nav-group { flex-wrap: wrap; }
-}
+/* patina:end */

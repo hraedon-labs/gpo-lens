@@ -1,5 +1,71 @@
 # Changelog
 
+## Unreleased
+
+Draft **v1.6.0** — release target and date TBD by the owner (the status-colour
+change is visible, so a patch number was not assumed).
+
+### Adopt patina 0.6.0's vendored token contract
+
+The web UI's design tokens are no longer a hand-synced copy. They are vendored
+from patina 0.6.0 (the shared design-token layer for this tool family) and
+checked on every test run. Operators will notice a small visual change and
+nothing else: no route, setting, schema or API changed.
+
+**What changes visually**
+
+- **Status colours** (ok / warning / critical / info chips, pills, severity
+  accents, in both themes) use patina's ratified "warm & quiet" palette in place
+  of the old Tailwind-derived one. The old quad failed measurement (light-theme
+  "ok" at 2.90:1; ok/warning/critical collapsing under deuteranopia). Dark
+  theme moves from bright emerald/amber/red to sage / antique gold /
+  terracotta / steel; light theme "ok" and "warning" become much darker
+  (deep green, dark gold) and critical becomes a rose-red.
+- **Small text is 1px smaller.** `--fs-xs` goes from 12px to 11px (patina's
+  value; gpo-lens had drifted from it). It carries the triage meta line, danger
+  remediation text and the ledger evidence table.
+- **Status text is nudged toward the body text colour** (critical, warning and
+  info chips, pills and indicator numbers, and the Delete button label), and a
+  chip inside a flag, worse/better, verdict-flag or callout container now sits
+  on the plain panel instead of stacking its tint on the container's. Status
+  text measures at least 4.5:1 on the surfaces gp.css draws it on, in both
+  themes (pinned by `tests/test_status_text_contrast.py`), and axe reports no
+  status-colour contrast violation on the main pages in either theme. The raw
+  0.6.0 palette dipped to 3.6:1 (dark critical on its tint). Dots, borders and
+  icons keep the plain status colour. Not changed: muted text (`--text-3`,
+  patina's quiet tier, about 3.2-3.9:1 in dark and 2.9:1 in light) and the
+  light-theme accent used for links (4.3:1 on the page background, lower on
+  tinted rows) remain below 4.5:1; fixing them changes the look of the whole UI
+  and is left to the owner.
+- **The trends table's worse/better row tones** are now the theme's critical
+  and ok tints instead of fixed Bootstrap-era red and green.
+- **The posture-card hover border now appears** (it referenced a token that
+  never existed, so it never showed).
+- **The theme toggle** announces its next action ("Switch to light theme" /
+  "Switch to dark theme") instead of a fixed label, ignores a corrupt saved
+  preference (falls back to dark), and follows a theme change made in another
+  tab. The stored preference key is unchanged (`gpol-theme`), so existing
+  preferences carry over.
+
+**Under the hood**
+
+- `static/css/gp.css` is new and holds gpo-lens's own component CSS, which used
+  to live inside `tokens.css`. `base.html` links `tokens.css` then `gp.css`.
+  `tokens.css`, `theme.js`, `fonts/`, `scripts/patina-check.py` and
+  `docs/patina/` are patina-owned: re-sync them with patina's `sync.sh`, never
+  edit them (they carry integrity stamps; the checker fails if they differ).
+- `patina.toml` records what gpo-lens claims per conformance facet. `vendor` and
+  `contract` are enforced by `tests/test_patina_conformance.py`.
+  `content_model` is *attested*: gpo-lens is read-only towards Active
+  Directory but persists snapshots and finding triage (status plus a 2000-char
+  note), and the write-path enumeration was redone at v1.5.0. `structure` is
+  *deferred*.
+- The conformance gate flagged 13 CSS classes that templates use but no stylesheet
+  defines (e.g. `gp-export-controls`, new in v1.5.0). They are baselined in
+  `tests/patina-ratchet.json` rather than styled, so the gate only fails on a
+  new one.
+- `scripts/patina-check.py` and `docs/patina/` are excluded from ruff.
+
 ## v1.5.0 — 2026-10-14
 
 **Back up the database and `audit.log` before upgrading.** v1.5.0 migrates the

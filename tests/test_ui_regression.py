@@ -223,7 +223,12 @@ class TestNavigationStructure:
         assert "<title>" in html
         assert "</title>" in html
         assert 'rel="stylesheet"' in html
+        # Both halves of the split stylesheet: patina's vendored token
+        # contract, then gpo-lens's own component layer. Dropping the gp.css
+        # link renders every page unstyled while every other assertion here
+        # still passes, so it is asserted explicitly.
         assert "tokens.css" in html
+        assert "gp.css" in html
 
     @pytest.mark.parametrize("path", _PAGES)
     def test_every_page_has_body_with_gp_prefix(self, _client, path) -> None:

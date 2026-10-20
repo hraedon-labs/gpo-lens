@@ -81,9 +81,13 @@ def test_new_primary_nav_and_accessibility(client):
     assert 'href="#main-content"' in page
     assert '<header class="gp-topbar">' in page
     assert '<main class="gp-page" id="main-content" tabindex="-1">' in page
-    css = (ROOT / "src/gpo_lens/web/static/css/tokens.css").read_text()
-    assert ":focus-visible" in css and ".gp-skip-link:focus" in css
-    assert "@media (max-width: 600px)" in css
+    # The base focus ring is patina's (vendored tokens.css); the skip link and
+    # the narrow-screen rules are gpo-lens's own component CSS in gp.css.
+    css_dir = ROOT / "src/gpo_lens/web/static/css"
+    assert ":focus-visible" in (css_dir / "tokens.css").read_text()
+    own = (css_dir / "gp.css").read_text()
+    assert ".gp-skip-link:focus" in own
+    assert "@media (max-width: 600px)" in own
 
 
 def test_reversible_nav(tmp_path, monkeypatch):

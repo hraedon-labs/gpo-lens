@@ -1,0 +1,79 @@
+{
+  "version": 2,
+  "allows": 0,
+  "undefined_classes": [
+    {
+      "fp": "8e65b1d057511124",
+      "where": "briefing.html:53",
+      "sample": "gp-briefing"
+    },
+    {
+      "fp": "f698791cee8a069b",
+      "where": "golden_diff.html:42",
+      "sample": "gp-card"
+    },
+    {
+      "fp": "f4053d748e5dfd9d",
+      "where": "ou_detail.html:78",
+      "sample": "gp-chain-card-main"
+    },
+    {
+      "fp": "f1b983c879702830",
+      "where": "golden_diff.html:41",
+      "sample": "gp-dash-cards"
+    },
+    {
+      "fp": "e9b06ae97878c7c9",
+      "where": "_exports.html:3",
+      "sample": "gp-export-controls"
+    },
+    {
+      "fp": "8e544c6f661f941e",
+      "where": "search.html:41",
+      "sample": "gp-facets"
+    },
+    {
+      "fp": "50d89d62764f87ea",
+      "where": "_ledger.html:6",
+      "sample": "gp-ledger"
+    },
+    {
+      "fp": "f849b198686d1eed",
+      "where": "briefing.html:67",
+      "sample": "gp-posture-grid"
+    },
+    {
+      "fp": "8505dd21cfff61b1",
+      "where": "briefing.html:71",
+      "sample": "gp-posture-label"
+    },
+    {
+      "fp": "6c9c92d5c5e7e573",
+      "where": "briefing.html:70",
+      "sample": "gp-posture-value"
+    },
+    {
+      "fp": "76e1825147bc3add",
+      "where": "search.html:34",
+      "sample": "gp-result-summary"
+    },
+    {
+      "fp": "0ecd65cdb33b32c7",
+      "where": "search.html:61",
+      "sample": "gp-search-group"
+    },
+    {
+      "fp": "fd98d2288cbc1734",
+      "where": "delegation.html:40",
+      "sample": "gp-tag"
+    }
+  ],
+  "color_literals": [
+    {
+      "fp": "af18f19773bc93a9",
+      "n": 1,
+      "where": "gp.css",
+      "sample": "background: rgba(0,0,0,0.5); z-index: 1000;"
+    }
+  ]
+}

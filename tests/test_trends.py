@@ -458,8 +458,10 @@ class TestTrendsWebRoute:
     def test_trends_route_highlights_worse(self, _client) -> None:
         resp = _client.get("/trends")
         assert resp.status_code == 200
-        # Snapshot 2 had increased danger count -> should have red background.
-        assert "rgba(220,53,69" in resp.text
+        # Snapshot 2 had increased danger count -> the row carries the "worse"
+        # tone. That used to be an inline rgba() literal; it is now a class
+        # resolving to --crit-soft, so the assertion follows the class.
+        assert 'class="worse"' in resp.text
 
 
 @pytest.mark.skipif(not _HAS_WEB, reason="web extra not installed")

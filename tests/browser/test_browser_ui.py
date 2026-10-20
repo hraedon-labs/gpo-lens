@@ -67,9 +67,12 @@ AXE_PAGES = [path for _, path in PRIMARY_NAV] + ["/ingest"]
 # or link styling is a visual-design decision for the owner, not a trivial fix.
 BASELINE_REASONS = {
     "color-contrast": (
-        "Muted/secondary text tokens (version tag, eyebrows, table headers, "
-        "descriptions) measure below WCAG AA 4.5:1; fixing means changing the "
-        "palette tokens, a visual-design decision deferred to the owner."
+        "Muted text (--text-3: version tag, eyebrows, table headers, descriptions, "
+        "muted chips) is patina's quiet tier, below 4.5:1 by patina's own design (its "
+        "gate only warns). Status-coloured text is not baselined: gp.css keeps it at "
+        "4.5:1 (tests/test_status_text_contrast.py). Raising muted text to AA means "
+        "setting it at about --text-2 (~16% toward --text-3 in dark, ~12% in light), "
+        "which removes the muted tier: a visual-design decision deferred to the owner."
     ),
     "link-in-text-block": (
         "Inline links are distinguished from body text by colour only; adding "

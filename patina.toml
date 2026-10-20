@@ -1,0 +1,83 @@
+# gpo-lens's adoption declaration for patina (see patina docs/adoption.md).
+#
+# CONSUMER-OWNED: patina's sync.sh never writes or rewrites this file. patina
+# defines what conformance means; this file records what gpo-lens claims.
+# Checked by tests/test_patina_conformance.py.
+
+[patina]
+version = "0.6.0"
+accent  = "gpo-lens"
+prefix  = "gp"
+static  = "src/gpo_lens/web/static"
+
+[conformance.vendor]
+state = "enforced"
+
+[conformance.contract]
+state = "enforced"
+
+# NOT `not-applicable`, despite patina docs/adoption.md using gpo-lens as its
+# worked example of exactly that claim ("read-only analysis; no persisted
+# mutable domain state"). That example is wrong about this tool. gpo-lens is
+# read-only towards Active Directory, not towards its own store: it persists
+# finding triage state (`UPDATE finding`, `INSERT INTO finding_triage_event`)
+# including a 2000-char operator note, and snapshot lifecycle (`INSERT INTO
+# snapshot` / `DELETE FROM snapshot`). A free-text note attached to a record is
+# the precise concept class that motivated this facet.
+#
+# The claim is `attested`, not `reviewed`: no human has been through it, and
+# there is no UI-INVENTORY.md yet. Re-derived 2026-10-20 at v1.5.0 (a484d73),
+# which added write paths since the first enumeration (2026-08-15), by listing
+# every `@app.post` route, every SQL write reachable from one, and every
+# <form method="post"> in templates/:
+#   snapshot        create -> POST /ingest (ingest.html upload form); delete ->
+#                   POST /ingest/delete (ingest.html per-row form, confirm
+#                   dialog via js-confirm-delete). Each appends an audit.*
+#                   event as a side effect, never as a second control.
+#   finding triage  status (open / acknowledged / accepted_risk) + note ->
+#                   POST /findings/{id}/triage, one inline <form> per row in
+#                   findings.html. triage-form.js is progressive enhancement
+#                   of that same form (fetch to the same route, in-place error
+#                   box for a refused cpassword note), not a second control.
+#                   The note doubles as the accepted_risk rationale.
+#                   finding_occurrence.html displays the append-only triage
+#                   history and accepted_risks.html lists accepted risks
+#                   (GET, read-only); neither offers a control.
+#   ask question    POST /ask persists the sanitized question as an
+#                   `audit.narrate` event. It is an audit record, not a record
+#                   the user edits, and nothing in the UI renders or edits it.
+# Compute-and-discard POST routes (no database write; /explain and the diffs
+# write only the audit.log line): /baseline, /golden, /resultant, /explain
+# (explain_facts.html, included by base.html on every page).
+# Not exposed by any control: append_triage_event can also record `commented`,
+# a risk-acceptance expiry (`expires_at`) and a distinct `rationale`, and
+# expire_risk_acceptances() exists, but no route or template reaches them
+# (the sweep has no caller outside tests), so the UI has one control for
+# the concept and the richer model is unreachable rather than duplicated.
+# One concept, one control holds as of 2026-10-20.
+[conformance.content_model]
+state    = "attested"
+evidence = """Re-enumerated 2026-10-20 at v1.5.0 (a484d73): 8 POST routes, 8 \
+post forms, one fetch() call site. snapshot: create via POST /ingest \
+(ingest.html upload form), delete via POST /ingest/delete (ingest.html per-row \
+form). finding triage (status + 2000-char note, note doubles as accepted_risk \
+rationale): one inline form per row in findings.html -> POST \
+/findings/{id}/triage; static/triage-form.js enhances that same form and adds \
+no second control; finding_occurrence.html and accepted_risks.html only \
+display. /ask persists the sanitized question as an audit.narrate event (audit \
+record, no edit control). /baseline /golden /resultant /explain compute and \
+discard (audit.log line only). The model's commented / expires_at / separate \
+rationale actions and expire_risk_acceptances() have no route or template, so \
+no concept has two controls. One concept, one control holds as of 2026-10-20."""
+note     = "no UI-INVENTORY.md yet; the enumeration above is the substitute"
+
+# gpo-lens's pages are the reason this facet cannot be enforced anywhere:
+# resultant, baseline_diff, golden_diff, conflicts, admx_coverage and briefing
+# match none of archetypes.md's five archetypes. They are not failure modes —
+# they are shapes patina has no vocabulary for (a diff view, a coverage
+# reconciliation, a per-principal evaluation trace). No surface briefs exist,
+# so the deviation cannot yet be recorded the way docs/adoption.md asks.
+[conformance.structure]
+state = "deferred"
+why   = "six pages have no matching archetype and no surface briefs are written; the shapes need naming before they can be judged"
+until = "the first of those pages is rewritten, or a second family tool reaches for a diff view (patina's stated trigger for harvesting a deviation)"

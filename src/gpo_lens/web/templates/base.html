@@ -1,12 +1,17 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-theme-key="gpol-theme">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}gpo-lens{% endblock %}</title>
     <link rel="icon" href="{{ url_for('static', path='favicon.svg') }}" type="image/svg+xml">
-    <link rel="stylesheet" href="{{ url_for('static', path='css/tokens.css') }}">
+    {# theme.js first: a classic script after a <link rel=stylesheet> is blocked
+       until that sheet loads, so putting it ahead sets data-theme as early as
+       possible. tokens.css is patina's vendored token contract; gp.css is
+       gpo-lens's own component layer and must come after it. #}
     <script src="{{ url_for('static', path='theme.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/tokens.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/gp.css') }}">
 </head>
 <body>
 <a class="gp-skip-link" href="#main-content">Skip to main content</a>

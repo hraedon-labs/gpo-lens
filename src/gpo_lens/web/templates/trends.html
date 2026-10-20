@@ -58,7 +58,7 @@
       </thead>
       <tbody>
         {% for p in points %}
-        <tr {% if row_tones[p.snapshot_id] == 'worse' %}style="background:rgba(220,53,69,0.12)"{% elif row_tones[p.snapshot_id] == 'better' %}style="background:rgba(40,167,69,0.12)"{% endif %}>
+        <tr {% if row_tones[p.snapshot_id] == 'worse' %}class="worse"{% elif row_tones[p.snapshot_id] == 'better' %}class="better"{% endif %}>
           <td>{{ p.snapshot_id }}</td>
           <td class="mono">{{ p.taken_at or '—' }}</td>
           <td>{{ p.gpo_count }}</td>
