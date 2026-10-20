@@ -105,8 +105,14 @@
 .gp-btn.primary:hover { filter: brightness(0.92); }
 :root[data-theme="dark"] .gp-btn.primary:hover { filter: brightness(1.1); }
 .gp-btn:disabled { opacity: .45; cursor: not-allowed; }
-.gp-btn-danger { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 34%, transparent); }
-.gp-btn-danger:hover { background: var(--crit-soft); border-color: var(--crit); }
+/* patina 0.6.0's --crit measures >=4.5:1 on --bg and --panel only (4.29:1 dark /
+   4.75:1 light on --panel-2, 3.60:1 dark on its own --crit-soft tint). The button
+   therefore sits on --panel, and its hover tint switches the label to --text. */
+.gp-btn-danger {
+  color: var(--crit); background: var(--panel);
+  border-color: color-mix(in srgb, var(--crit) 34%, transparent);
+}
+.gp-btn-danger:hover { background: var(--crit-soft); color: var(--text); border-color: var(--crit); }
 
 /* ---------- INPUTS / SELECT ---------- */
 .gp-field { display: flex; flex-direction: column; gap: 6px; }
