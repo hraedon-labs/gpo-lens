@@ -24,6 +24,19 @@ nothing else: no route, setting, schema or API changed.
 - **Small text is 1px smaller.** `--fs-xs` goes from 12px to 11px (patina's
   value; gpo-lens had drifted from it). It carries the triage meta line, danger
   remediation text and the ledger evidence table.
+- **Status text is nudged toward the body text colour** (critical, warning and
+  info chips, pills and indicator numbers, and the Delete button label), and a
+  chip inside a flag, worse/better, verdict-flag or callout container now sits
+  on the plain panel instead of stacking its tint on the container's. Status
+  text measures at least 4.5:1 on the surfaces gp.css draws it on, in both
+  themes (pinned by `tests/test_status_text_contrast.py`), and axe reports no
+  status-colour contrast violation on the main pages in either theme. The raw
+  0.6.0 palette dipped to 3.6:1 (dark critical on its tint). Dots, borders and
+  icons keep the plain status colour. Not changed: muted text (`--text-3`,
+  patina's quiet tier, about 3.2-3.9:1 in dark and 2.9:1 in light) and the
+  light-theme accent used for links (4.3:1 on the page background, lower on
+  tinted rows) remain below 4.5:1; fixing them changes the look of the whole UI
+  and is left to the owner.
 - **The trends table's worse/better row tones** are now the theme's critical
   and ok tints instead of fixed Bootstrap-era red and green.
 - **The posture-card hover border now appears** (it referenced a token that

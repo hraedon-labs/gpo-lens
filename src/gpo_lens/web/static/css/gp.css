@@ -105,11 +105,22 @@
 .gp-btn.primary:hover { filter: brightness(0.92); }
 :root[data-theme="dark"] .gp-btn.primary:hover { filter: brightness(1.1); }
 .gp-btn:disabled { opacity: .45; cursor: not-allowed; }
-/* patina 0.6.0's --crit measures >=4.5:1 on --bg and --panel only (4.29:1 dark /
-   4.75:1 light on --panel-2, 3.60:1 dark on its own --crit-soft tint). The button
-   therefore sits on --panel, and its hover tint switches the label to --text. */
+/* Status TEXT tokens. patina guarantees --ok/--warn/--crit/--info >= 4.5:1 only on
+   --bg and --panel; gpo-lens also sets them on --panel-2 and on their own -soft
+   tints (chips, indicators), where crit/info/warn dip below 4.5:1. Text uses these
+   steps, nudged toward --text, derived so a re-sync of the palette carries over.
+   tests/test_status_text_contrast.py pins >= 4.5:1 on every surface, both themes.
+   Dots, borders and icons keep the plain status colour (non-text, 3:1). */
+:root {
+  --gp-warn-text: color-mix(in srgb, var(--warn) 90%, var(--text));
+  --gp-crit-text: color-mix(in srgb, var(--crit) 70%, var(--text));
+  --gp-info-text: color-mix(in srgb, var(--info) 84%, var(--text));
+}
+
+/* The danger button label uses --gp-crit-text on --panel; on its hover tint the
+   label switches to --text. */
 .gp-btn-danger {
-  color: var(--crit); background: var(--panel);
+  color: var(--gp-crit-text); background: var(--panel);
   border-color: color-mix(in srgb, var(--crit) 34%, transparent);
 }
 .gp-btn-danger:hover { background: var(--crit-soft); color: var(--text); border-color: var(--crit); }
@@ -154,11 +165,11 @@
   font-size: 11.5px; font-weight: 600; line-height: 1.4; letter-spacing: .01em;
 }
 .gp-pill .dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
-.gp-pill.critical { color: var(--crit); }   .gp-pill.critical .dot { background: var(--crit); }
-.gp-pill.high     { color: var(--warn); }   .gp-pill.high .dot     { background: var(--warn); }
-.gp-pill.medium   { color: var(--warn); }   .gp-pill.medium .dot   { background: var(--warn); }
+.gp-pill.critical { color: var(--gp-crit-text); }   .gp-pill.critical .dot { background: var(--crit); }
+.gp-pill.high     { color: var(--gp-warn-text); }   .gp-pill.high .dot     { background: var(--warn); }
+.gp-pill.medium   { color: var(--gp-warn-text); }   .gp-pill.medium .dot   { background: var(--warn); }
 .gp-pill.low      { color: var(--text-2); } .gp-pill.low .dot      { background: var(--text-2); }
-.gp-pill.info     { color: var(--info); }   .gp-pill.info .dot     { background: var(--info); }
+.gp-pill.info     { color: var(--gp-info-text); }   .gp-pill.info .dot     { background: var(--info); }
 .gp-pill.ok       { color: var(--ok); }     .gp-pill.ok .dot       { background: var(--ok); }
 .gp-pill.muted    { color: var(--text-3); } .gp-pill.muted .dot    { background: var(--text-3); }
 
@@ -169,12 +180,19 @@
   color: var(--text-2); background: transparent; font-family: var(--font-mono); white-space: nowrap;
 }
 .gp-chip.ok       { color: var(--ok);   border-color: color-mix(in srgb, var(--ok) 32%, transparent);   background: var(--ok-soft); }
-.gp-chip.warn     { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 32%, transparent); background: var(--warn-soft); }
-.gp-chip.crit     { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 32%, transparent); background: var(--crit-soft); }
+.gp-chip.warn     { color: var(--gp-warn-text); border-color: color-mix(in srgb, var(--warn) 32%, transparent); background: var(--warn-soft); }
+.gp-chip.crit     { color: var(--gp-crit-text); border-color: color-mix(in srgb, var(--crit) 32%, transparent); background: var(--crit-soft); }
 .gp-chip.accent   { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
-.gp-chip.info     { color: var(--info); border-color: color-mix(in srgb, var(--info) 32%, transparent); background: var(--info-soft); }
+.gp-chip.info     { color: var(--gp-info-text); border-color: color-mix(in srgb, var(--info) 32%, transparent); background: var(--info-soft); }
 .gp-chip.muted    { color: var(--text-3); }
 /* Link-chips (search facets, filter removal) need to signal clickability. */
+/* A chip inside a tinted container (flag/worse/better rows, verdict flag, callouts)
+   would otherwise sit on its own tint composited over the container tint, a surface
+   no token contract covers (dark crit 4.04:1 on a flag row). Give it the plain
+   panel instead: its text, border and (outside containers) tint stay as above. */
+:is(tr.flag, tr.worse, tr.better, .gp-verdict-item.flag, .gp-callout) .gp-chip {
+  background-color: var(--panel);
+}
 a.gp-chip { cursor: pointer; text-decoration: none; transition: background .12s, border-color .12s; }
 a.gp-chip:hover { background: var(--panel-3); border-color: var(--border-2); text-decoration: none; }
 
@@ -236,11 +254,11 @@ a.gp-chip:hover { background: var(--panel-3); border-color: var(--border-2); tex
 .gp-ind .lab { font-size: 12.5px; color: var(--text); }
 .gp-ind .val { font-family: var(--font-mono); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .gp-ind.crit { border-color: color-mix(in srgb, var(--crit) 34%, transparent); background: var(--crit-soft); }
-.gp-ind.crit .val { color: var(--crit); }
+.gp-ind.crit .val { color: var(--gp-crit-text); }
 .gp-ind.warn { border-color: color-mix(in srgb, var(--warn) 30%, transparent); background: var(--warn-soft); }
-.gp-ind.warn .val { color: var(--warn); }
+.gp-ind.warn .val { color: var(--gp-warn-text); }
 .gp-ind.info { border-color: color-mix(in srgb, var(--info) 30%, transparent); background: var(--info-soft); }
-.gp-ind.info .val { color: var(--info); }
+.gp-ind.info .val { color: var(--gp-info-text); }
 /* A posture card that deep-links into the findings table reads as actionable. */
 a.gp-ind { text-decoration: none; color: inherit; cursor: pointer; transition: border-color .12s, transform .12s; }
 a.gp-ind:hover { border-color: var(--text-3); transform: translateY(-1px); }
