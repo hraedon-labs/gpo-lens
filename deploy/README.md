@@ -121,7 +121,8 @@ an operator's test restore; it does not replace it.
 its source or image with the matching database backup. Install or build the
 chosen release from a trusted checkout, restart, then check `/healthz`,
 `/api/version`, the index, existing snapshots and a known GPO. Schema
-migrations run automatically when the database opens. Older databases move
+migrations run automatically on the first read-write open (ingest, serve or
+web upload); read-only commands do not migrate. Older databases move
 forward; a migrated newer database is not guaranteed to work with older code.
 Rollback means restoring the pre-upgrade data **and** running the previous
 code. Test restore on an isolated installation before depending on it for

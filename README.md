@@ -5,7 +5,7 @@ estate (it never touches live AD) and answers questions about it. The
 deterministic core has no AI in the truth path; the optional LLM layer only
 explains facts the core computed.
 
-**Project status:** the current release is **v1.5.0** (tag `v1.5.0`); see the
+**Project status:** the current release is **v1.5.0** (2026-10-14, tag `v1.5.0`); see the
 [changelog](CHANGELOG.md). The commands below describe 1.4 and later. The
 dependency inventory, scheduled collection helper, CLI ZIP ingest and freshness
 warning require 1.4. Report security issues privately as described in

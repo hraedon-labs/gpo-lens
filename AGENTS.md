@@ -43,7 +43,7 @@ facts the core computed. `README.md` has the full charter.
 - **`samples/` is gitignored and must never be committed.**
 - **Read-only.** No code writes to or connects to Active Directory. Input is
   files only.
-- **No AI in the deterministic core.** Tiers 1–2.5 run with zero model calls.
+- **No AI in the deterministic core.** Tiers 1–2.5 must run with zero model calls.
 - **Flag, don't simulate.** Topology resolution is OU-level; never claim
   object-level RSoP (no per-user security/WMI/loopback evaluation). Topology
   views flag scoping mechanisms (loopback, security filtering, WMI filters,
