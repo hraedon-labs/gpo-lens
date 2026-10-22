@@ -1,57 +1,59 @@
 # AGENTS.md
 
-Conventions and quick reference for agents (and humans) working on gpo-lens.
+Conventions and quick reference for agents and humans working on gpo-lens.
 
 ## What this is
 
-Local-first, **read-only** Group Policy analysis. The tool ingests *copies* of a
+Local-first, **read-only** Group Policy analysis. gpo-lens ingests *copies* of a
 GPO estate (it never touches live AD) and answers questions about it. The
-deterministic core has **no AI in the truth path** — the LLM layer only
-narrates facts the core computed. See `README.md` for the full charter.
+deterministic core has **no AI in the truth path**; the LLM layer only narrates
+facts the core computed. `README.md` has the full charter.
 
 ## Orient
 
-1. **Read the model.** `docs/tier1-normalized-model.md` — the normalized data
-   model, mapped against two real exports, with the join-key and parser gotchas.
-   The dataclasses in `src/gpo_lens/model.py` are the concrete contract.
-2. **Read the spec.** `docs/spec/wi_*.md` — one file per work item, with explicit
-   acceptance criteria (`AC-NN`) and exact function signatures. **The spec is the
-   contract.** Implement to the ACs.
-3. **Validate against reality.** `tests/` encodes the *measured* numbers from the
-    real exports (e.g. work domain = 100+ GPOs, several disabled-but-populated sides,
-    1,000+ SOMs). Your implementation is correct when those pass. The sample exports
-   live in `samples/` (gitignored — never commit them; WORK-DOMAIN.local is a real work
-   domain's SYSVOL). Sample-dependent tests skip if `samples/` is absent.
+1. **Read the model.** `docs/tier1-normalized-model.md` is the normalized data
+   model, mapped against two real exports, with the join-key and parser
+   gotchas. The dataclasses in `src/gpo_lens/model.py` are the concrete
+   contract.
+2. **Read the spec.** `docs/spec/wi_*.md` has one file per work item, with
+   explicit acceptance criteria (`AC-NN`) and exact function signatures. **The
+   spec is the contract.** Implement to the ACs.
+3. **Validate against reality.** `tests/` encodes the *measured* numbers from
+   the real exports (e.g. work domain = 100+ GPOs, several disabled-but-populated
+   sides, 1,000+ SOMs). Your implementation is correct when those pass. The
+   sample exports live in `samples/` (gitignored; never commit them,
+   WORK-DOMAIN.local is a real work domain's SYSVOL). Sample-dependent tests
+   skip if `samples/` is absent.
 
 ## Hard rules
 
 - **No work-domain identifiers in committed files.** Reflections and docs use
   placeholders (`WORK-DOMAIN.local`, `LABDOMAIN`). Exact counts are allowed
   only in test assertions against `samples/`; docs use ranges. **Reflections are
-  the repeat offender** — when a reflection *describes* a leak, refer to "the
-  work-domain FQDN", never paste the literal token (that re-leaks it).
-  Enforced two ways: the CI `identifier-gate` job (hard gate) **and** a local
-  pre-commit hook (early warning) — activate it once per clone with
+  the repeat offender.** When a reflection *describes* a leak, say "the
+  work-domain FQDN"; never paste the literal token, which re-leaks it.
+  Two checks enforce this: the CI `identifier-gate` job (hard gate) and a local
+  pre-commit hook (early warning). Activate the hook once per clone with
   `git config core.hooksPath githooks` (or `scripts/install-git-hooks.sh`) and
   provide the denylist via `$GPO_LENS_FORBIDDEN_IDENTIFIERS` or a gitignored
   `.identifiers-denylist.local`. The hook scans staged content before the commit
-  exists, closing the window where a token reaches history before CI flags it.
+  exists, so a token cannot reach history before CI flags it.
 - **Fixture data is synthetic.** No real GPO names, OU paths, or domain names
   in committed test files.
 - **`samples/` is gitignored and must never be committed.**
 - **Read-only.** No code writes to or connects to Active Directory. Input is
   files only.
-- **No AI in the deterministic core.** Tiers 1–2.5 must run with zero model calls.
+- **No AI in the deterministic core.** Tiers 1–2.5 run with zero model calls.
 - **Flag, don't simulate.** Topology resolution is OU-level; never claim
-  object-level RSoP (no per-user security/WMI/loopback evaluation). Scoping
-  mechanisms (loopback, security filtering, WMI filters, item-level targeting,
-  AD-site links) are flagged with caveats in topology views, never simulated.
+  object-level RSoP (no per-user security/WMI/loopback evaluation). Topology
+  views flag scoping mechanisms (loopback, security filtering, WMI filters,
+  item-level targeting, AD-site links) with caveats and never simulate them.
   Sites are modeled as `container_type="site"` SOMs (a parallel axis, excluded
   from OU-precedence views); per-machine site membership is not resolved.
 - **Coverage honesty.** Collection is bounded by the collector account's AD
   access (a stripped-AU GPO is invisible to a least-privilege account). Don't
-  paper over it — reconcile `gpo-inventory.json` (authoritative, privileged run)
-  + `collection-errors.json` against the export and surface missing GPOs as
+  paper over it: reconcile `gpo-inventory.json` (authoritative, privileged run)
+  and `collection-errors.json` against the export and surface missing GPOs as
   `coverage_gap` findings. Never present a partial estate as complete.
 - **Canonical GPO id everywhere:** lowercase, braces stripped. All cross-input
   joins use it (see `normalize.canonical_guid`).
@@ -110,10 +112,10 @@ that disappears fails. After a deliberate a11y fix, regenerate with
 `GPO_LENS_AXE_WRITE_BASELINE=1` and review the diff.
 
 **Formatting is `ruff format`'s job, not yours.** CI runs
-`ruff format --check`, so a hand-styled block fails the build; run
-`ruff format .` rather than reflowing by hand or arguing with it in review.
-Note it also formats Python code blocks inside Markdown, so `docs/spec/` and
-`plans/` examples are governed too. Adopted 2026-08-07 in `4b7f2cd`, which is
+`ruff format --check`, so a hand-styled block fails the build. Run
+`ruff format .` rather than reflowing by hand or arguing with it in review. It
+also formats Python code blocks inside Markdown, so `docs/spec/` and `plans/`
+examples are governed too. Adopted 2026-08-07 in `4b7f2cd`, which is
 listed in `.git-blame-ignore-revs` — run
 `git config blame.ignoreRevsFile .git-blame-ignore-revs` once per clone so
 `git blame` reports authors instead of the reformat.
@@ -140,12 +142,13 @@ the golden estate, and creates a **draft** GitHub release with a CycloneDX SBOM,
 human step.
 
 Slice 1 is **stdlib-only** (`xml.etree.ElementTree`, `json`, `sqlite3`,
-`argparse`) — keep it dependency-free so the core stays portable/air-gappable.
+`argparse`). Keep it dependency-free so the core stays portable and
+air-gappable.
 
 ## Collectors
 
 `scripts/Export-GpoEstate.ps1` produces the inputs (read-only PowerShell, run on
-a DC/RSAT box). The tool consumes its output dir.
+a DC/RSAT box). gpo-lens consumes its output directory.
 
 Read-only is enforced by `tests/test_collector_readonly.py`: it parses every
 DC/RSAT-side script with the PowerShell AST (via `pwsh`) in two layers. The
@@ -208,9 +211,9 @@ classified. Locally the test skips when `pwsh` is absent; in CI it fails.
 
 ## Baseline diff
 
-Microsoft ships Security Baselines as nested zips containing GPO backups.
-`load_baseline_from_zip` handles the nesting.  Each GPO's `gpreport.xml`
-is UTF-16 encoded — `parse_report_xml` detects the encoding.
+Microsoft ships Security Baselines as nested zips containing GPO backups, and
+`load_baseline_from_zip` handles the nesting. Each GPO's `gpreport.xml` is
+UTF-16 encoded; `parse_report_xml` detects the encoding.
 
 Baseline settings are compared by `(side, cse, identity)` — the ADMX crosswalk
 in `admx_parser.py` resolves registry paths back to policy names for display.

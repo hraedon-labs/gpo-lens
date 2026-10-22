@@ -1,36 +1,50 @@
 # Taking over a gpo-lens installation
 
 Start here if you've inherited a running gpo-lens and the person who set it up
-isn't around to ask. This page describes **v1.4.0**, the current release
-(2026-10-06); the capabilities below that are new in 1.4 require it. gpo-lens
+isn't around to ask. This page describes **v1.5.0**, the current release
+(2026-10-14). Capabilities marked 1.4 or 1.5 below need that release. gpo-lens
 has two halves:
 
 - **Collection.** A PowerShell script, run on a DC or RSAT box, exports the
   Group Policy estate to files. It is read-only and never writes to AD.
-- **Analysis.** The gpo-lens web app (on IIS, a container, or systemd) ingests those exports
-  and answers questions about them.
+- **Analysis.** The gpo-lens web app (on IIS, a container, or systemd) ingests
+  those exports and answers questions about them.
 
 The app only knows what the last export told it. If collection stops, the app
-keeps showing an increasingly old estate. In 1.4, Briefing warns when the newest
-import is stale; 1.3.1 operators must check snapshot age manually. Import age does
-not establish source collection age. Most of this page is about keeping collection alive.
+keeps showing an increasingly old estate. From 1.4, Briefing warns when the
+newest import is stale; on 1.3.1, check snapshot age manually. Import age does
+not establish source collection age. Most of this page is about keeping
+collection alive.
+
+## What's new in 1.5
+
+- **GPP `cpassword` values are no longer stored.** Ingest replaces them with
+  `[redacted cpassword]`, and operator-supplied text (triage notes, risk
+  rationales, Ask questions) that carries one is refused. The first read-write
+  open migrates the database to schema 11; see [Upgrading](#6-upgrading).
+- `gpo-lens analyst-text-check` lists stored rows the new guard would refuse
+  (ids only, never values). Backups and original exports made before upgrading
+  still contain the values.
+- With `GPO_LENS_FORWARDED_USER_HEADER` set, the forwarded name must be an
+  account name; anything else gets `401`. IIS `{LOGON_USER}` is accepted.
 
 ## What's new in 1.4
 
 - Advanced Audit Configuration and Public Key settings appear in search,
   ledgers, exports and baseline/golden comparisons. Audit CSV disagreements
   are flagged; override caveats make no device-level claim. Re-ingest copied
-  inputs to obtain the new identities. Legacy IEM is marked deprecated.
-- **Explore → External dependencies** inventories configured server/share
-  references with redacted downloads. Broken-reference findings now cover only
+  inputs to get the new identities. Legacy IEM is marked deprecated.
+- **Explore → External dependencies** inventories configured server and share
+  references, with redacted downloads. Broken-reference findings cover only
   what can be verified offline; ADMX findings aggregate per GPO. See the
-  dependency and ADMX guidance below for JSON contract version 2 and triage.
-- The scheduled collector supports gMSA/service accounts, retention and ZIP
-  delivery; delivery still needs a separate ingest. CLI ingest accepts bounded
+  [dependency and ADMX guidance](#dependency-and-admx-guidance-for-14) for JSON
+  contract version 2 and triage.
+- The scheduled collector supports gMSA and service accounts, retention and ZIP
+  delivery. Delivery still needs a separate ingest. CLI ingest accepts bounded
   collector ZIPs as well as directories. Section 3 covers operations.
-- Briefing warns after eight days without a new import by default and retains
+- Briefing warns after eight days without a new import (the default) and keeps
   high-severity danger ordering. Exports and comparisons have large-estate
-  performance budgets with deterministic output and preserved redaction.
+  performance budgets, with deterministic output and preserved redaction.
 
 ## What's new for an operator in 1.3
 
@@ -38,23 +52,24 @@ not establish source collection age. Most of this page is about keeping collecti
   The wordmark opens Briefing; old URLs and filters remain valid, including the
   legacy dashboard at `/`. Ingest and optional Ask are under Tools.
 - `GPO_LENS_LEGACY_NAV=1` restores the earlier primary links after a restart;
-  Ask stays under Tools. Unset it and restart to return to the new navigation.
+  Ask stays under Tools. Unset it and restart to go back.
 - Markdown/CSV downloads carry filters, snapshot/evaluation provenance and
   caveats for audit tickets. Dossiers, findings, occurrence history, accepted
   risks, briefings, settings and comparisons have deterministic exports;
   `gpo-lens export` provides CLI equivalents.
 - Fresh IIS sites require `-WindowsAuth` or the explicit
-  `-AllowAnonymousNetworkAccess` choice. Upgrades preserve existing access and
-  warn prominently if anonymous; do not change authentication mid-upgrade
+  `-AllowAnonymousNetworkAccess` choice. Upgrades keep existing access and
+  warn prominently if it is anonymous. Don't change authentication mid-upgrade
   without arranging and testing colleague access.
 - New IIS firewall rules use `-FirewallRemoteAddress LocalSubnet` on
   Domain/Private profiles; existing rules stay intact. IIS installs consume
   hash-pinned web requirements exported from `uv.lock`, then install the local
   project with `--no-deps` using the shared Python.
-- Every proxy needs `GPO_LENS_ALLOWED_HOSTS`. IIS merges a missing value from
-  HTTPS bindings plus machine FQDN/short name without changing other variables;
-  an existing policy is kept. Container proxy and systemd guides set it too.
-  A 400 naming that variable means the browser authority needs configuration.
+- Every proxy needs `GPO_LENS_ALLOWED_HOSTS`. IIS adds a missing value from
+  the HTTPS bindings plus the machine FQDN and short name, leaves other
+  variables alone, and keeps an existing policy. The container proxy and
+  systemd guides set it too. A 400 naming that variable means the browser
+  authority needs configuring.
 - [Container](../deploy/container/README.md) and
   [systemd](../deploy/systemd/README.md) are alternatives to IIS. Start at the
   [deployment index](../deploy/README.md) for their common access boundary and
@@ -85,30 +100,30 @@ public. Fill them in with the previous owner before they leave.
 1. **Anyone who can reach the site can replace the estate.** gpo-lens has no
    per-user login. Behind a same-host IIS or Linux proxy every request looks
    local and gets full rights, including ingest and delete. Access control is
-   the proxy/network's job:
-   Windows Authentication on IIS, TLS/basic auth in the Linux examples, an
-   IP allow-list, or an isolated network. Don't remove it.
-   `GPO_LENS_AUTH_TOKEN` is not a substitute (it breaks the browser UI).
+   the proxy's or network's job: Windows Authentication on IIS, TLS and basic
+   auth in the Linux examples, an IP allow-list, or an isolated network. Don't
+   remove it. `GPO_LENS_AUTH_TOKEN` is not a substitute (it breaks the browser
+   UI).
    Details: [shared access boundary](../deploy/README.md#access-boundary) and
    [IIS access control](../deploy/iis/README.md#access-control--read-this).
-2. **The coverage-gap check is only as good as the inventory you give it.** A
-   GPO whose read permission has been stripped is *invisible* to the
-   least-privilege collector, not just unreadable. gpo-lens catches that by
-   comparing the export against `gpo-inventory.json`. Only an inventory from
-   a privileged run can name what the routine account can't see (section 3).
+2. **The coverage-gap check is only as good as its inventory.** A GPO whose
+   read permission has been stripped is *invisible* to the least-privilege
+   collector, not just unreadable. gpo-lens catches that by comparing the export
+   against `gpo-inventory.json`. Only an inventory from a privileged run can
+   name what the routine account can't see (section 3).
 3. **Use SQLite's online backup while running, or stop the app first.** Don't
    copy `gpo-lens.sqlite3` from under a running app. Both
    procedures are in [IIS backup and restore](../deploy/iis/README.md#backup-and-restore)
    and the [Linux backup rules](../deploy/README.md#backup-restore-and-upgrade-rules).
-   A live main-file copy can omit committed WAL changes; an offline backup must
-   preserve the complete data directory, including any WAL/SHM sidecars.
-   A database restores into the same or a newer gpo-lens, but not into an
-   older one.
-4. **On IIS upgrade, re-run the installer with just `-ConfigureIIS`.** It keeps the
-   live port, hostname, certificate binding, Windows Authentication, and
-   `web.config` settings, adding a missing `GPO_LENS_ALLOWED_HOSTS`.
-   Anonymous sites warn and continue; existing firewall rules stay intact. Pass binding flags only to change them deliberately.
-   Container/systemd upgrades use their own guides and retain proxy configuration.
+   A live copy of the main file can omit committed WAL changes. An offline
+   backup must keep the whole data directory, including any WAL/SHM sidecars.
+   A database restores into the same or a newer gpo-lens, never an older one.
+4. **On IIS upgrade, re-run the installer with just `-ConfigureIIS`.** It keeps
+   the live port, hostname, certificate binding, Windows Authentication and
+   `web.config` settings, and adds a missing `GPO_LENS_ALLOWED_HOSTS`.
+   Anonymous sites warn and continue; existing firewall rules stay intact. Pass
+   binding flags only to change them deliberately. Container and systemd
+   upgrades use their own guides and keep the proxy configuration.
 
 ## 3. Keeping collection alive
 
@@ -153,24 +168,23 @@ successful export pairs, rotating 5 MiB logs with five backups. Customize with
 Use `-InventoryPath C:\GpoInventory\gpo-inventory.json` to overlay the
 periodically refreshed privileged inventory into **both** the routine folder
 and ZIP. Use `-CopyTo '\\lab.example.com\gpo-drop'` to deliver the newest ZIP.
-Delivery is a copy; an operator must still ingest it through **Tools > Ingest**
-or `gpo-lens --db <database> ingest <collector.zip> --diff-latest`. The app does
-not watch an inbox. Use a dedicated output root per task; privileged exports
-and the authoritative inventory belong outside routine retention.
-Registration records `-TaskName` in `.gpo-lens-collection-owner`; missing or
-mismatched markers stop the runner before collection or pruning. Re-register
-older tasks to create the marker. Another task's root requires explicit
-`-Force` takeover with a warning; the previous task then refuses to run.
+Delivery is a copy. An operator must still ingest it through **Tools > Ingest**
+or `gpo-lens --db <database> ingest <collector.zip> --diff-latest`; the app does
+not watch an inbox. Use a dedicated output root per task. Keep privileged
+exports and the authoritative inventory outside routine retention.
+Registration records `-TaskName` in `.gpo-lens-collection-owner`. A missing or
+mismatched marker stops the runner before collection or pruning, so re-register
+older tasks to create it. Taking over another task's root needs an explicit
+`-Force` and prints a warning; the previous task then refuses to run.
 [The IIS guide](../deploy/iis/README.md#scheduled-collection) has the full
 permissions, manual privileged-inventory refresh and lab validation steps.
 
 **Signs collection has stopped:** **Briefing** shows the newest imported
 snapshot's age and warns with **Collection may have stopped** when it is older
-than eight days, even if no settings changed. Set
-`GPO_LENS_STALE_SNAPSHOT_DAYS` to a positive integer before startup and restart
-the app to change the threshold. Unknown/future timestamps also warn. This
-measures import age; verify the source export age too. An old ZIP re-imported
-today can look fresh by import time.
+than eight days, even if no settings changed. To change the threshold, set
+`GPO_LENS_STALE_SNAPSHOT_DAYS` to a positive integer and restart the app.
+Unknown or future timestamps also warn. This measures import age, so verify the
+source export's age too: an old ZIP re-imported today looks fresh.
 
 Verify the task and export age on the collector host:
 
@@ -185,10 +199,10 @@ The task must finish with `LastTaskResult = 0` (`0x0`); confirm a new ZIP and
 `Collection succeeded` log line after that run. A `0x0` result can still be a partial
 collection: check the log's `Failed` list and the `coverage_gap` findings after
 ingest. ZIPs delivered with `-CopyTo` are never pruned. Check **Tools > Ingest >
-Snapshots** to verify the import happened too. A hard timeout can leave a
-partial export folder or `.partial` copy; investigate before removing it.
-Routine failures preserve existing exports and do not prune them. Check monthly,
-or wire the task result/newest-export age into your site's monitoring.
+Snapshots** to confirm the import happened. A hard timeout can leave a partial
+export folder or `.partial` copy; investigate before removing it. Routine
+failures keep existing exports and do not prune them. Check monthly, or wire the
+task result and newest-export age into your site's monitoring.
 
 **One-off export** on the collector host:
 
@@ -196,10 +210,10 @@ or wire the task result/newest-export age into your site's monitoring.
 .\scripts\Export-GpoEstate.ps1 -OutputRoot C:\GpoExport
 ```
 
-Then upload the ZIP through **Tools > Ingest**, or in 1.4 use CLI `ingest <file.zip>`.
-On 1.3.1, CLI ingest takes the complete export directory.
-Both safely handle Windows PowerShell 5.1 backslash ZIP entries; no manual
-repacking is needed. Real exports are often 50-100 MB+; the site's
+Then upload the ZIP through **Tools > Ingest**, or from 1.4 use CLI
+`ingest <file.zip>`. On 1.3.1, CLI ingest takes the complete export directory.
+Both handle Windows PowerShell 5.1 backslash ZIP entries; no manual repacking is
+needed. Real exports are often 50-100 MB+; the site's
 `web.config` allows up to 500 MB.
 
 ## 4. Routine
@@ -215,9 +229,10 @@ repacking is needed. Real exports are often 50-100 MB+; the site's
 ## 5. AI narration (optional, off unless configured)
 
 **Tools → Ask** and separate **Explain these facts** actions are optional.
-Configure `GPO_LENS_API_KEY` (and optionally `GPO_LENS_LLM_PROVIDER`,
+Set `GPO_LENS_API_KEY` (and optionally `GPO_LENS_LLM_PROVIDER`,
 `GPO_LENS_LLM_ENDPOINT`, `GPO_LENS_LLM_MODEL`) only after your organisation
-approves the provider and data egress. Know who approved it if already enabled.
+approves the provider and the data egress. If it is already enabled, find out
+who approved it.
 Web explanations send bounded counts, fixed caveats and analysis provenance;
 names, configured values, raw evidence and HTML are excluded. Ask also sends
 the user's question for routing. Without a key, explanation actions are absent
@@ -230,37 +245,42 @@ produces deterministic findings or exports.
 
 ## 6. Upgrading
 
-v1.4 migrates the database to schema 10. A pre-upgrade backup of the database
-and separate `audit.log` is required before upgrading. v1.3.1 and earlier cannot open
-a migrated database. To roll back, restore the pre-upgrade backup of the database
-and `audit.log` while stopped, before starting the previous release.
+v1.5 migrates the database to schema 11 (it scrubs stored `cpassword` values);
+v1.4 migrated it to schema 10. A pre-upgrade backup of the database and the
+separate `audit.log` is required before upgrading. v1.4.0 and earlier cannot
+open a schema 11 database, and v1.3.1 and earlier cannot open a schema 10
+database. To roll back, restore the pre-upgrade backup of the database and
+`audit.log` while stopped, before starting the previous release. The scrub
+needs free disk space about the size of the database.
 
-**Target v1.4.0 once published. Back up first.** The upgrade suite covers releases since
-v0.5.0 with actual databases created by v0.5.0, v0.7.0, v0.7.1, v1.0.0,
-v1.1.0, v1.2.0 and v1.3.1 (including the latest released schema). This is the tested upgrade
-path from any release since v0.5.0; it is not a separate fixture for every patch
-tag. [Upgrade tests](../tests/test_released_db_upgrades.py) preserve snapshots,
-entities, events, audit logs and supported finding/risk history; they also test
-online backup/restore while committed changes remain in WAL. Test your own
+**Target v1.5.0. Back up first.** The upgrade suite covers releases since
+v0.5.0, using real databases created by v0.5.0, v0.7.0, v0.7.1, v1.0.0, v1.1.0,
+v1.2.0 and v1.3.1 (schema 9). That is the tested upgrade path from any release
+since v0.5.0; there is no separate fixture for every patch tag or for v1.4.0.
+[Upgrade tests](../tests/test_released_db_upgrades.py) preserve snapshots,
+entities, events, audit logs and supported finding and risk history, and test
+online backup and restore while committed changes remain in WAL. Test your own
 backup on an isolated instance before upgrading production.
 
 ### Before you upgrade an existing site
 
-- Record `/api/version`, the actual browser URL, data/site paths, HTTPS
-  bindings and TLS certificate. Keep the previous release and configuration.
+- Record `/api/version`, the actual browser URL, the data and site paths, the
+  HTTPS bindings and the TLS certificate. Keep the previous release and
+  configuration.
 - Check in IIS Manager whether **Windows Authentication is on and anonymous
   authentication is off**. If anonymous access is intentional, confirm the
-  existing IP/network restrictions. An upgrade preserves it; schedule any
+  existing IP and network restrictions. An upgrade keeps it; schedule any
   access-control change separately and test the colleague's login.
-- Review the existing firewall address/profile scope. New rules default to
-  LocalSubnet; retained rules are not tightened automatically.
+- Review the existing firewall address and profile scope. New rules default to
+  LocalSubnet; existing rules are not tightened automatically.
 - Check `GPO_LENS_ALLOWED_HOSTS` against the browser authority and approved
-  aliases. If absent, the installer derives it; keep an existing value.
-- Make and test a WAL-safe backup: online SQLite `.backup` plus
+  aliases. If it is absent, the installer derives it; an existing value is kept.
+- Make and test a WAL-safe backup: an online SQLite `.backup` plus
   `PRAGMA integrity_check` and `audit.log`, or stop the pool and copy the whole
-  data directory including sidecars. Restore while stopped, preserve the old
-  directory, remove unrelated sidecars, fix ACLs, verify integrity/snapshot
-  count/a known GPO. Use the [tested IIS commands](../deploy/iis/README.md#backup-and-restore).
+  data directory including sidecars. Restore while stopped, keep the old
+  directory, remove unrelated sidecars, fix ACLs, and verify integrity, the
+  snapshot count and a known GPO. Use the
+  [tested IIS commands](../deploy/iis/README.md#backup-and-restore).
 - Confirm the chosen checkout includes `deploy/iis/requirements-web.lock.txt`;
   hash-pinned installs keep the dependency set aligned with the release.
 
@@ -269,21 +289,23 @@ The steps below are for IIS. Alternatives:
 and [systemd upgrade/rollback](../deploy/systemd/README.md#upgrade-and-rollback).
 
 1. Read the [CHANGELOG](../CHANGELOG.md) entries between your version and the
-   target **v1.4.0** once published. Releases are annotated git tags (`vX.Y.Z`).
+   target **v1.5.0**. Releases are annotated git tags (`vX.Y.Z`).
 2. Back up the database and `audit.log` (rule 3).
-3. In the server's checkout: `git fetch --tags` then `git checkout v1.4.0` once the coordinator publishes the tag.
+3. In the server's checkout: `git fetch --tags` then `git checkout v1.5.0`.
 4. From an elevated PowerShell in that checkout:
    `.\scripts\install-windows.ps1 -ConfigureIIS`. It stops the pool, refreshes
    the venv using the committed hash-pinned requirements and the checkout
    with `--no-deps`, adds the host policy if missing, and restarts it.
-5. Confirm the header and `/api/version` show **1.4.0**, then run one ingest. Schema
-   changes are additive and applied automatically when the database is opened.
+5. Confirm the header and `/api/version` show **1.5.0**, then run one ingest.
+   Schema changes apply automatically on the first read-write open (ingest,
+   serve or web upload); read-only commands do not migrate.
 
-**To roll back**, stop the pool, restore the previous code/venv and the
+**To roll back**, stop the pool, restore the previous code and venv and the
 matching backup from step 2 using the stopped restore procedure, then restart.
-Preserve the current data directory and remove stale WAL/SHM for a standalone
-backup before restoring; repair ACLs and verify integrity/snapshots/a known GPO. A database a newer version has opened
-isn't guaranteed to work with an older one.
+Keep the current data directory, and remove stale WAL/SHM before restoring a
+standalone backup. Repair ACLs and verify integrity, snapshots and a known GPO.
+A database a newer version has opened isn't guaranteed to work with an older
+one.
 
 ## 7. Where updates come from
 
@@ -306,11 +328,11 @@ with it; see [AGENTS.md](../AGENTS.md) for the module map and conventions.
 
 ## Dependency and ADMX guidance for 1.4
 
-Version 1.4 adds **Explore → External
-dependencies** and `gpo-lens dependencies --server old-fs01 --json` for file/print
-server migration planning. Counts and targets describe configured paths, not
+Version 1.4 adds **Explore → External dependencies** and
+`gpo-lens dependencies --server old-fs01 --json` for file and print server
+migration planning. Counts and targets describe configured paths, not
 reachability or application. The view has deterministic, authorized, redacted
-Markdown/CSV downloads. External paths no longer create doctor findings.
+Markdown and CSV downloads. External paths no longer create doctor findings.
 
 Load central-store and Microsoft toolkit templates together with repeatable
 `--admx-dir` on ingest, doctor, ADMX queries, comparisons and serve, or

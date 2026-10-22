@@ -2,15 +2,15 @@
 
 ## Unreleased
 
-Draft **v1.6.0** — release target and date TBD by the owner (the status-colour
-change is visible, so a patch number was not assumed).
+Draft **v1.6.0**. The owner sets the release target and date; the status-colour
+change is visible, so a patch number was not assumed.
 
 ### Adopt patina 0.6.0's vendored token contract
 
 The web UI's design tokens are no longer a hand-synced copy. They are vendored
 from patina 0.6.0 (the shared design-token layer for this tool family) and
-checked on every test run. Operators will notice a small visual change and
-nothing else: no route, setting, schema or API changed.
+checked on every test run. Operators see a small visual change and nothing
+else: no route, setting, schema or API changed.
 
 **What changes visually**
 
@@ -22,7 +22,7 @@ nothing else: no route, setting, schema or API changed.
   terracotta / steel; light theme "ok" and "warning" become much darker
   (deep green, dark gold) and critical becomes a rose-red.
 - **Small text is 1px smaller.** `--fs-xs` goes from 12px to 11px (patina's
-  value; gpo-lens had drifted from it). It carries the triage meta line, danger
+  value; gpo-lens had drifted from it). It styles the triage meta line, danger
   remediation text and the ledger evidence table.
 - **Status text is nudged toward the body text colour** (critical, warning and
   info chips, pills and indicator numbers, and the Delete button label), and a
@@ -39,8 +39,8 @@ nothing else: no route, setting, schema or API changed.
   and is left to the owner.
 - **The trends table's worse/better row tones** are now the theme's critical
   and ok tints instead of fixed Bootstrap-era red and green.
-- **The posture-card hover border now appears** (it referenced a token that
-  never existed, so it never showed).
+- **The posture-card hover border now appears.** It referenced a token that
+  never existed.
 - **The theme toggle** announces its next action ("Switch to light theme" /
   "Switch to dark theme") instead of a fixed label, ignores a corrupt saved
   preference (falls back to dark), and follows a theme change made in another
@@ -49,7 +49,7 @@ nothing else: no route, setting, schema or API changed.
 
 **Under the hood**
 
-- `static/css/gp.css` is new and holds gpo-lens's own component CSS, which used
+- `static/css/gp.css` is new. It holds gpo-lens's own component CSS, which used
   to live inside `tokens.css`. `base.html` links `tokens.css` then `gp.css`.
   `tokens.css`, `theme.js`, `fonts/`, `scripts/patina-check.py` and
   `docs/patina/` are patina-owned: re-sync them with patina's `sync.sh`, never
@@ -60,10 +60,10 @@ nothing else: no route, setting, schema or API changed.
   Directory but persists snapshots and finding triage (status plus a 2000-char
   note), and the write-path enumeration was redone at v1.5.0. `structure` is
   *deferred*.
-- The conformance gate flagged 13 CSS classes that templates use but no stylesheet
-  defines (e.g. `gp-export-controls`, new in v1.5.0). They are baselined in
-  `tests/patina-ratchet.json` rather than styled, so the gate only fails on a
-  new one.
+- The conformance gate flagged 13 CSS classes that templates use but no
+  stylesheet defines (e.g. `gp-export-controls`, new in v1.5.0). They are
+  baselined in `tests/patina-ratchet.json` rather than styled, so the gate fails
+  only on a new one.
 - `scripts/patina-check.py` and `docs/patina/` are excluded from ruff.
 
 ## v1.5.0 — 2026-10-14

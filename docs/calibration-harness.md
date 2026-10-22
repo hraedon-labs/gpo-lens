@@ -3,8 +3,8 @@
 Run `scripts/calibrate.py` with the project's dev and web extras installed.
 Pass only the ZIP exports you intend to inspect; the harness never discovers
 sample exports. Multiple archives create snapshots in the supplied order.
-Resolved and unresolved principal counts come from the corresponding persisted
-snapshot's `principal` rows, including when the in-memory projection omits them.
+Resolved and unresolved principal counts come from the persisted snapshot's
+`principal` rows, including when the in-memory projection omits them.
 
 ```sh
 .venv/bin/python scripts/calibrate.py --out /tmp/calibration.json export.zip
@@ -12,21 +12,21 @@ snapshot's `principal` rows, including when the in-memory projection omits them.
 
 The default JSON and stdout contain aggregate measurements and fixed source
 vocabulary. Input identifiers, messages, and HTTP bodies stay private. The
-self-check scans non-vocabulary string values against strings from the input
-and databases. Keys, numbers, and booleans are exempt. Exact allowed string
+self-check compares non-vocabulary string values against strings from the input
+and databases. Keys, numbers, and booleans are exempt. The allowed string
 values come mechanically from source-defined finding/rule codes, severities,
 CLI commands, route declarations, `Literal`/`Enum` declarations, source warning
 templates, trusted schema and exception locations, and the harness's fixed
-constants (including its Microsoft CSE GUID allow-list). An allowed word within
-a longer string does not exempt that string. Refusal prints a numeric field
-position and writes no new report.
+constants (including its Microsoft CSE GUID allow-list). An allowed word inside
+a longer string does not exempt that string. On refusal, the harness prints a
+numeric field position and writes no new report.
 
-Use `--keep-db /tmp/calibration.sqlite3` to preserve the measured database; its
+Use `--keep-db /tmp/calibration.sqlite3` to keep the measured database; its
 destination must not exist. The database contains estate data and survives a
-self-check refusal when explicitly requested. Extracted inputs and temporary
+self-check refusal when you request it. Extracted inputs and temporary
 databases are cleaned up.
 
-For examples to guide parser and feature work, opt into a separate detail file:
+For examples to guide parser and feature work, ask for a separate detail file:
 
 ```sh
 .venv/bin/python scripts/calibrate.py --out /tmp/calibration.json \
@@ -35,10 +35,11 @@ For examples to guide parser and feature work, opt into a separate detail file:
 
 **The detail file contains estate data. Never commit or publish it.** It is
 labelled accordingly, written with private temporary-file permissions, and
-refused inside Git worktrees, including symlink destinations and other Git
-repositories. Both detail flags are required together. All output destinations
-must differ from inputs and each other. Detail content never enters the default
-JSON or stdout and is written only after the sanitized self-check passes.
+refused inside Git worktrees (including symlink destinations and other Git
+repositories). Both detail flags are required together. All output destinations
+must differ from the inputs and from each other. Detail content never enters
+the default JSON or stdout, and it is written only after the sanitized
+self-check passes.
 
 Each category contains at most ten examples:
 
@@ -64,8 +65,8 @@ Each category contains at most ten examples:
   exceptions stopping an operation. Operation failures take priority within
   this category's cap.
 
-Categories may be empty when no examples were observed or when an earlier
-failure prevented a measurement. Failures remain visible in sanitized operation
-statuses and exception locations. A successful harness exit means the report
-passed sanitization; inspect operation statuses before treating calibration as
-complete. Timings vary between runs and detail collection adds overhead.
+A category is empty when no examples were observed or an earlier failure
+prevented a measurement. Failures stay visible in the sanitized operation
+statuses and exception locations. A successful exit means only that the report
+passed sanitization; inspect the operation statuses before treating calibration
+as complete. Timings vary between runs, and detail collection adds overhead.

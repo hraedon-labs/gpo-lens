@@ -1,65 +1,66 @@
 # Design — Multi-domain/forest support: the swimlane model (WI-059)
 
-**Status:** design draft (post-1.0)  
+**Status:** design draft (post-1.0); not implemented (no `MultiEstate`, `CrossDomainLink` or `multi-estate` command exists in the code)  
 **Author:** coding agent, from the enterprise-adoption boundary review  
 **Scope:** data model, ingestion, queries, CLI/web presentation  
 **Related work item:** WI-059 — Multi-estate comparison (post-1.0)  
 
 ## Strategic role
 
-The `Estate` data model is intentionally single-domain. That is the right v1
-decision: it lets the tool get to honest, calibrated answers quickly without
-chasing cross-domain trust semantics, SID history, or universal-group resolution.
-But enterprise AD deployments are almost always multi-domain; for gpo-lens to
-reach Fortune-500 adoption, it must be able to reason about more than one
-domain in the same forest without abandoning the local-first, read-only posture.
+The `Estate` data model is deliberately single-domain. That was the right v1
+decision: it gets honest, calibrated answers quickly without cross-domain trust
+semantics, SID history or universal-group resolution. But enterprise AD is
+almost always multi-domain. To be adopted at that scale, gpo-lens must reason
+about more than one domain in a forest without giving up its local-first,
+read-only posture.
 
-This document proposes the **swimlane model**: keep each domain as an independent
-`Estate`, add a thin `MultiEstate` coordination layer, and explicitly detect/
-warn on cross-domain GPO links. The model is cheaper than a true multi-forest
-refactor because it reuses the existing single-domain analysis everywhere. The
-price is that cross-domain *policy flow* (a GPO in domain A applied via a link in
-domain B) is flagged, not simulated. That preserves the charter's *flag, don't
+This document proposes the **swimlane model**: keep each domain as an
+independent `Estate`, add a thin `MultiEstate` coordination layer, and detect
+and warn on cross-domain GPO links. It is cheaper than a true multi-forest
+refactor because every existing single-domain analysis is reused. The price is
+that cross-domain *policy flow* (a GPO in domain A applied through a link in
+domain B) is flagged, not simulated, which keeps the charter's *flag, don't
 simulate* discipline.
 
 ## Ground truth at time of writing
 
 - **`model.Estate`** represents one domain snapshot. Its `domain` field is a
-string, and the code assumes all `Gpo.domain`, `Som.path`, `OuRecord.dn`, and
-principal/group SIDs belong to that single domain.
-- **`Gpo.links`** carry `som_path` strings. In a single-domain export these are
-always DNs inside the same domain. A cross-domain link would show up as a
-`gpo_id` from domain A paired with a `som_path` from domain B; today it would be
-handled inconsistently depending on which `Estate` ingested it.
+  string, and the code assumes every `Gpo.domain`, `Som.path`, `OuRecord.dn`
+  and principal/group SID belongs to that one domain.
+- **`Gpo.links`** carry `som_path` strings, which in a single-domain export are
+  always DNs inside the same domain. A cross-domain link would appear as a
+  `gpo_id` from domain A paired with a `som_path` from domain B, and today it
+  would be handled inconsistently depending on which `Estate` ingested it.
 - **`merge.principal_resultant`** builds tokens from `estate.group_members` and
-`estate.principals` and resolves the principal's OU chain from `estate.soms`.
-It cannot see group membership or SOMs in another domain.
+  `estate.principals` and resolves the principal's OU chain from
+  `estate.soms`. It cannot see group membership or SOMs in another domain.
 - **`topology` and `queries`** all operate on one `Estate`. Conflict detection,
-baseline diff, estate doctor, hygiene, and dangerous-config detection are
-intra-domain by construction.
-- The collector, `scripts/Export-GpoEstate.ps1`, already accepts a domain
-parameter; running it N times with different target domains is the natural path
-to multi-domain collection.
+  baseline diff, estate doctor, hygiene and dangerous-config detection are
+  intra-domain by construction.
+- The collector, `scripts/Export-GpoEstate.ps1`, collects the current domain
+  (`Get-ADDomain`) and has no domain parameter. Its parameters are
+  `-OutputRoot`, `-SkipSysvol`, `-NoZip` and `-DryRun`. Multi-domain collection
+  means running it once per domain, from a host in each, or adding a domain
+  parameter.
 
 ## Charter addendum (decisions this design records)
 
-1. **Swimlanes stay independent.** Each domain keeps its own `Estate`. Do not
-try to merge GPOs, SOMs, principals, or settings into a single graph. Independence
-is the feature that keeps the existing analysis correct.
-2. **Cross-domain links are warnings, not resolved flows.** The tool detects
-that a GPO from domain A is linked to a SOM in domain B and emits a `cross_domain`
-finding. It does not attempt to compute the resultant for domain B using domain
-A's GPO.
+1. **Swimlanes stay independent.** Each domain keeps its own `Estate`. Don't
+   merge GPOs, SOMs, principals or settings into one graph; independence keeps
+   the existing analysis correct.
+2. **Cross-domain links are warnings, not resolved flows.** When a GPO from
+   domain A is linked to a SOM in domain B, the tool emits a `cross_domain`
+   finding. It does not compute domain B's resultant using domain A's GPO.
 3. **Trust relationships are out of scope for v2.0.** Forest trusts, external
-trusts, selective authentication, and UPN suffix mappings are noted in caveats
-but not modeled.
+   trusts, selective authentication and UPN suffix mappings appear in caveats
+   but are not modeled.
 4. **Coverage honesty applies per swimlane.** Each `Estate` has its own
-`coverage_gaps`. A missing trust or an inaccessible domain is reported as a gap,
-not papered over.
-5. **Cross-domain comparison is additive to single-domain comparison.** The
-existing `snapshot_diff` and baseline-diff views stay unchanged; multi-domain
-compare adds a new surface that aligns settings by `(cse, identity)` across
-`Estate` boundaries.
+   `coverage_gaps`. A missing trust or an inaccessible domain is reported as a
+   gap.
+5. **Cross-domain comparison adds to single-domain comparison.** The existing
+   `snapshot_diff` and baseline-diff views stay unchanged. Multi-domain compare
+   is a new surface that aligns settings by `(cse, identity)` across `Estate`
+   boundaries.
 
 ## The swimlane model
 
@@ -95,12 +96,13 @@ represents exactly one domain.
 ### Ingest changes
 
 - `ingest.py` gains a `load_multi_estate(paths: dict[str, Path]) -> MultiEstate`
-entry point that runs the existing single-domain ingest for each export
-directory and assembles them.
-- Domain keys are derived from the export's metadata (`gpo-metadata.json` or
-`estate.json`) rather than directory names, to avoid directory-renaming mistakes.
-- Each `Estate` is ingested independently; failures in one domain do not poison
-others.
+  entry point that runs the existing single-domain ingest on each export
+  directory and assembles the results.
+- Domain keys come from the export's metadata (`gpo-metadata.json` or
+  `estate.json`), not directory names, so renaming a directory can't mislabel a
+  domain.
+- Each `Estate` is ingested independently; a failure in one domain does not
+  affect the others.
 
 ### What works per-domain independently
 
@@ -130,27 +132,28 @@ can only be noted; not simulated.
 
 ## Collector changes needed
 
-The collector already takes a domain parameter. Multi-domain collection is a
-collection orchestration problem, not a new collector script:
+The collector has no domain parameter today (see Ground truth), so this design
+assumes one is added. Multi-domain collection is then an orchestration problem,
+not a new collector script:
 
-- Invoke `Export-GpoEstate.ps1` once per target domain with explicit
-`-Domain` and a distinct output subdirectory (e.g. `export/corp.example/`,
-`export/child.example/`).
-- A top-level `multi-estate.json` manifest lists the exported domains and the
-collection timestamp for each.
-- Each per-domain export remains identical to today's format; no new file
-schemas inside a domain export.
-- Trust / site metadata is optionally emitted at the multi-estate level as
-`trusts.json` and `sites.json` (gated and optional; absence triggers a caveat).
+- Invoke `Export-GpoEstate.ps1` once per target domain with an explicit
+  `-Domain` (the proposed new parameter) and a distinct output subdirectory
+  (e.g. `export/corp.example/`, `export/child.example/`).
+- A top-level `multi-estate.json` manifest lists the exported domains and each
+  one's collection timestamp.
+- Each per-domain export keeps today's format; no new file schemas inside a
+  domain export.
+- Trust and site metadata are optionally emitted at the multi-estate level as
+  `trusts.json` and `sites.json` (optional; absence triggers a caveat).
 
 ## CLI and web surfaces
 
 - **CLI:** `gpo-lens multi-estate /path/to/export` loads the manifest and runs
-per-domain summaries plus cross-domain link warnings. Add `gpo-lens
-multi-compare --domain=corp,child` for settings drift.
-- **Web:** A top-level domain switcher; each domain renders the existing
-single-domain dashboard. A cross-domain links page shows warnings. A
-settings-drift page compares a selected setting across domains.
+  per-domain summaries plus cross-domain link warnings. `gpo-lens multi-compare
+  --domain=corp,child` reports settings drift.
+- **Web:** a top-level domain switcher; each domain renders the existing
+  single-domain dashboard. A cross-domain links page shows the warnings, and a
+  settings-drift page compares a selected setting across domains.
 
 ## Acceptance criteria
 
@@ -200,28 +203,28 @@ in scope in domain A's resource check.
 - **Global catalog / SID resolution across trusts.** Foreign-security-principal
 SIDs that appear in a token are recorded as caveats; no cross-domain AD lookup is
 attempted.
-- **Single-domain assumptions removed entirely.** `Estate` stays single-domain;
-online v2 work is additive around it.
+- **Removing the single-domain assumption entirely.** `Estate` stays
+  single-domain; v2 work is additive around it.
 - **Migration of existing single-domain deployments.** Existing exports and APIs
 continue to work unchanged.
 
 ## Sequencing & risk
 
-- **Effort:** medium. The data-model layer and ingest assembly are small; the
-larger work is the new cross-domain comparison query, the CLI/web surfaces,
-and test fixtures.
+- **Effort:** medium. The data model and ingest assembly are small; the larger
+  work is the cross-domain comparison query, the CLI/web surfaces and the test
+  fixtures.
 - **Risk:** medium-low for correctness, medium for scope creep. The biggest
-danger is attempting to simulate cross-domain policy flow once the data model
-makes it feel possible. The ACs explicitly prevent that by keeping cross-domain
-links as warnings and per-domain analyses independent.
+  danger is simulating cross-domain policy flow once the data model makes it
+  feel possible. The ACs prevent that by keeping cross-domain links as warnings
+  and per-domain analyses independent.
 - **Suggested sequencing:**
   1. Land `MultiEstate` + `CrossDomainLink` data model and `load_multi_estate`
      (no UI).
   2. Add cross-domain link detection and a CLI `multi-estate` command.
   3. Add settings-drift query and tests.
   4. Add web domain switcher and cross-domain pages (gated on UI bandwidth).
-- **Post-1.0:** This design is explicitly tagged post-1.0; it should not delay
-v1.0. The single-domain path and API remain stable.
-- **Dependencies:** If v1.x later introduces a per-estate schema version or
-normalized domain-name rule, that work benefits this design and should precede
-it.
+- **Post-1.0:** this design is tagged post-1.0 and must not delay v1.0. The
+  single-domain path and API stay stable.
+- **Dependencies:** if v1.x introduces a per-estate schema version or a
+  normalized domain-name rule, that work helps this design and should come
+  first.

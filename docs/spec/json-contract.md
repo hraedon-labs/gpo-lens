@@ -4,11 +4,11 @@
 **Enforced by:** `tests/test_json_contract.py` (golden shapes) + `src/gpo_lens/cli/_helpers.py` (envelope).
 
 This is the stable interface downstream consumers build against. gpo-lens's
-analysis pipeline is read-only and air-gapped; its *outputs* are the only
+analysis pipeline is read-only and air-gapped, and its *outputs* are the only
 coupling point for sibling tools (see `/projects/maybe-projects/`). Those tools
-trust the JSON shapes documented here as their input contract — no shared code,
-no DB import, no parsing duplication. Freezing this contract is what lets a
-complement be built without tracking gpo-lens's internals.
+treat the JSON shapes here as their input contract, with no shared code, no DB
+import and no parsing duplication. A frozen contract lets a complement be built
+without tracking gpo-lens's internals.
 
 ## The envelope
 
@@ -37,36 +37,37 @@ success: a self-describing envelope with the command payload under `data`.
 
 - **Additive change** (a new field on an object, a new optional key): the shape
   stays at the same `schema_version`. Consumers must ignore unknown fields.
-- **Breaking change** (removing/renaming a field, retyping, reshaping the
-  envelope): bump `schema_version`, and update both this document and
+- **Breaking change** (removing or renaming a field, retyping, reshaping the
+  envelope): bump `schema_version`, and update this document and
   `tests/test_json_contract.py` in the same change.
-- A consumer should read `data`, tolerate unknown fields, and may assert
-  `schema_version == 2` if it wants to fail loudly on a future break.
+- A consumer should read `data` and tolerate unknown fields. It may assert
+  `schema_version == 2` to fail loudly on a future break.
 
 ## Stream and exit-code semantics
 
 - **Success:** the envelope is the *only* thing on stdout; exit `0`.
-- **Warnings** (e.g. a missing `--admx-dir`): go to **stderr**; stdout stays
+- **Warnings** (e.g. a missing `--admx-dir`) go to **stderr**; stdout stays
   clean JSON. A warning is not a failure.
-- **Errors** (not-found, bad input, missing DB): a message on **stderr** and a
-  **nonzero** exit. Errors are never printed as plain text on stdout, so a
-  consumer can trust "exit 0 ⟹ stdout parses as the envelope."
-- **`report --json` is refused** (exit 2, stderr): `report` produces a
-  human-readable document (`--format md|html`), not part of this contract. For
-  a machine-readable estate snapshot use `summary --json`; for the per-setting
-  body use `settings-dump --json`; for findings use `doctor --json`.
+- **Errors** (not-found, bad input, missing DB) put a message on **stderr** and
+  exit **nonzero**. Errors are never printed as plain text on stdout, so
+  "exit 0 ⟹ stdout parses as the envelope" holds.
+- **`report --json` is refused** (exit 2, stderr). `report` produces a
+  human-readable document (`--format md|html`) that is not part of this
+  contract. For a machine-readable estate snapshot use `summary --json`; for
+  the per-setting body use `settings-dump --json`; for findings use
+  `doctor --json`.
 
 ## Preconditions
 
 - **`events` requires `ingest --diff-latest`.** The append-only event log is
-  populated only when an ingest is run with `--diff-latest` (which diffs the new
-  snapshot against the prior one). Without it the table exists but stays empty,
+  filled only when an ingest runs with `--diff-latest`, which diffs the new
+  snapshot against the prior one. Without it the table exists but stays empty,
   and `events --json` returns `{"data": []}`.
 
 ## Per-command `data` shapes (the consumed surface)
 
-Required fields are listed; commands may add fields additively. These are the
-shapes complements consume — the golden test pins exactly this set.
+Required fields are listed; commands may add fields additively. Complements
+consume these shapes, and the golden test pins exactly this set.
 
 ### `summary --json` → object (estate snapshot)
 `domain`, `gpo_count`, `som_count` (OU/domain SOMs only),
@@ -83,8 +84,8 @@ shapes complements consume — the golden test pins exactly this set.
 ### `doctor --json` → object
 `findings`: array of `{severity, category, gpo_id, gpo_name, summary, detail}`.
 `category` includes `coverage_gap` for GPOs that exist but could not be
-collected (reconciled from `gpo-inventory.json` / `collection-errors.json`) —
-the analysis is explicit that it is incomplete rather than silently partial.
+collected (reconciled from `gpo-inventory.json` / `collection-errors.json`),
+so the analysis says it is incomplete rather than being silently partial.
 
 ### `settings-dump --json` → array of rows
 `{gpo_id, gpo_name, side, cse, identity, display_name, display_value,
@@ -130,8 +131,8 @@ whose shape depends on `event_type`:
 - `audit.ingest` / `audit.narrate` → web-UI access-audit records
   (`{principal, …}`)
 
-Note: the per-record `schema_version` here is the *event* schema version, which
-is independent of the top-level contract `schema_version`.
+The per-record `schema_version` here is the *event* schema version, independent
+of the top-level contract `schema_version`.
 
 ### `sites --json` → array
 AD sites and their direct GPO links. `[{name, dn, links: [{gpo_id, gpo_name,

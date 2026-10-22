@@ -7,63 +7,65 @@
 
 ## Strategic role
 
-The project charter says *flag, don't simulate*: topology resolution is OU-level,
-never object-level. Plan 019 extended that honesty to per-candidate gate
-attribution. Plan 021 then built a real, bounded resultant for a principal from a
-snapshot by evaluating **security filtering** from collected AD group membership.
-That code is already shipping in `merge.principal_resultant`, but the *design*
-has never been written down as a first-class boundary statement. This document
-closes that gap. It formally defines the middle tier the project now occupies:
-"principal-group effective policy" — more than "gates shown but not evaluated",
-less than "true per-object RSoP". Naming the tier makes the tool's claims
-auditable and its caveats legible to users.
+The project charter says *flag, don't simulate*: topology resolution is
+OU-level, never object-level. Plan 019 extended that honesty to per-candidate
+gate attribution. Plan 021 then built a real, bounded resultant for a principal
+from a snapshot by evaluating **security filtering** against collected AD group
+membership. That code already ships in `merge.principal_resultant`, but the
+*design* was never written down as a boundary statement. This document does
+that. It defines the middle tier the project occupies: "principal-group
+effective policy", which is more than "gates shown but not evaluated" and less
+than "true per-object RSoP". Naming the tier makes the tool's claims auditable
+and its caveats legible.
 
 ## Ground truth at time of writing
 
 The deterministic core already implements the building blocks:
 
-- **`merge.build_token(estate, principal_sid)`** expands a principal's transitive
-group membership (`estate.group_members`) into a `PrincipalToken`, adding
-well-known SIDs and domain-relative groups (Domain Users / Domain Computers).
-It records unresolved foreign SIDs as `token_caveats`.
+- **`merge.build_token(estate, principal_sid)`** expands a principal's
+  transitive group membership (`estate.group_members`) into a `PrincipalToken`,
+  adding well-known SIDs and domain-relative groups (Domain Users / Domain
+  Computers). Unresolved foreign SIDs become `token_caveats`.
 - **`merge.principal_resultant(...)`** composes the full resultant: token
-expansion, OU-chain resolution from a DN, security-filter gate evaluation against
-the token, per-CSE merge-resolution, and explicit exclusion of WMI/ILT-gated
-contributors. It returns `PrincipalResultant` with `settings`, `excluded`,
-`excluded_settings`, `conditional_dangers`, `token_caveats`, and a
-`caveat_summary`.
-- **`topology.scope_caveats(estate, som_path)`** already emits the aggregated
-caveats for security filtering, WMI, ILT, loopback, site links, and disabled sides.
-- **`topology.effective_scope(...)`** gives a per-GPO scoping view including
-explicit Apply trustees, WMI filters, loopback mode, and ILT presence.
+  expansion, OU-chain resolution from a DN, security-filter gate evaluation
+  against the token, per-CSE merge-resolution, and explicit exclusion of
+  WMI/ILT-gated contributors. It returns `PrincipalResultant` with `settings`,
+  `excluded`, `excluded_settings`, `conditional_dangers`, `token_caveats` and a
+  `caveat_summary`.
+- **`topology.scope_caveats(estate, som_path)`** emits the aggregated caveats
+  for security filtering, WMI, ILT, loopback, site links and disabled sides.
+- **`topology.effective_scope(...)`** gives a per-GPO scoping view: explicit
+  Apply trustees, WMI filters, loopback mode and ILT presence.
 - The collector already produces `principals.json` (SID → name/type) and
-`group-members.json` (group SID → member SIDs), because Plan 020 collected
-group membership for delegation resolution and dead-group detection.
+  `group-members.json` (group SID → member SIDs), because Plan 020 collected
+  group membership for delegation resolution and dead-group detection.
 
-What is **missing** is the design-level contract: *what exactly is simulated,
-what is not, and why that is an honest middle tier rather than a charter
-violation.* The code and the UI currently say "resultant given collected inputs";
-this document says what that sentence means.
+What was **missing** is the design-level contract: *what exactly is simulated,
+what is not, and why this is an honest middle tier and not a charter
+violation.* The code and UI say "resultant given collected inputs"; this
+document says what that sentence means.
 
 ## Charter addendum (decisions this design records)
 
-1. **Principal-group effective policy is in charter.** Evaluating security-filter
-SIDs against collected AD group membership is *reading collected facts*, not
-simulating Windows client behavior. Both sides of the intersection (token SIDs
-and Apply-Group-Policy trustee SIDs) come from the static export. This is the
-one gate that moves from "shown" to "evaluated."
-2. **It is still not object-level RSoP.** We do not resolve per-machine WMI state,
-per-user loopback replacements, per-item ILT conditions, primary-group nuances,
-or deny-ACE interactions with the full token. Those remain caveats.
-3. **Output stays labeled.** Result objects and UI never use the word "effective"
-without the "given collected inputs" qualifier. The label is updated only after
-lab calibration (see Plan 021 validation).
+1. **Principal-group effective policy is in charter.** Evaluating
+   security-filter SIDs against collected AD group membership *reads collected
+   facts*; it does not simulate Windows client behavior. Both sides of the
+   intersection (token SIDs and Apply-Group-Policy trustee SIDs) come from the
+   static export. This is the one gate that moves from "shown" to "evaluated".
+2. **It is still not object-level RSoP.** The tool does not resolve per-machine
+   WMI state, per-item ILT conditions, primary-group nuances or deny-ACE
+   interactions with the full token, and loopback is best-effort only. Those
+   remain caveats.
+3. **Output stays labeled.** Result objects and UI never use the word
+   "effective" without the "given collected inputs" qualifier. The label
+   changes only after lab calibration (see Plan 021 validation).
 4. **Exclusion must never hide a danger.** GPOs or settings excluded because of
-an unevaluated gate flow into `conditional_dangers` when they carry dangerous
-configurations (Plan 018). A gated dangerous setting is still surfaced.
-5. **User+computer pairs are first-class.** A user's full resultant requires the
-computer token (post-MS16-072 Read behavior). The existing API already accepts an
-optional `computer_sid` and `computer_dn`; this design endorses that shape.
+   an unevaluated gate flow into `conditional_dangers` when they carry
+   dangerous configurations (Plan 018). A gated dangerous setting is still
+   surfaced.
+5. **User+computer pairs are first-class.** A user's full resultant needs the
+   computer token (post-MS16-072 Read behavior). The API already accepts an
+   optional `computer_sid` and `computer_dn`; this design endorses that shape.
 
 ## What IS simulated
 
@@ -87,10 +89,13 @@ not merged (they are surfaced separately as disabled-but-populated findings).
 
 These are surfaced explicitly in every result, never silently assumed:
 
-- **Loopback processing.** The merge/replace mode may change which user-side
-settings apply on affected computers. `loopback_awareness` reports the mode, but
-the user-side resultant is not rewritten by loopback until WI-028 validates the
-mode parser and the design elects to apply it.
+- **Loopback processing (partly).** The merge/replace mode changes which
+  user-side settings apply on affected computers. `principal_resultant` applies
+  it best-effort (WI-028): in replace mode the computer chain is the sole source
+  of User-side settings, and in merge mode both chains contribute with the
+  computer chain winning conflicts. `mixed` and `unknown` modes, and WMI/ILT on
+  computer-chain user-side GPOs, are not simulated; they fall back to the
+  non-loopback path with a caveat.
 - **WMI filter evaluation.** A WMI filter name and query are collected and
 attached, but the query is not evaluated against any actual machine state. A
 WMI-filtered GPO is excluded and listed as conditional.
@@ -169,7 +174,9 @@ containing the "given collected inputs" qualifier and counts of excluded /
 conditional / approximate items.
 - **AC-6** When a computer SID is supplied for a user principal, the computer
 side of the computer's OU chain is merged and loopback state is surfaced in the
-caveat summary (not silently applied).
+caveat summary (not silently applied). The original draft required that
+loopback never be applied; the code now applies it best-effort (see "What is
+NOT simulated").
 - **AC-7** A dangerous configuration inside a gated (WMI/ILT/security-filter)
 GPO appears in `conditional_dangers`, never in `settings`.
 - **AC-8** The UI and CLI never render the word "effective" without the adjacent
@@ -213,5 +220,5 @@ caveat banner mitigate it.
 not as a code refactor. It can land in any v1.x release once the tests are
 passing.
 - **Dependencies before trusting the user+computer path:** WI-028 (loopback mode
-parser) and confirmation that the WI-051 deduplication logic handles double-chain
-collection correctly.
+  parser) and confirmation that the WI-051 deduplication logic handles
+  double-chain collection correctly.
