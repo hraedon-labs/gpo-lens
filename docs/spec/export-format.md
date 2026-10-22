@@ -4,9 +4,9 @@
 **Produced by:** `scripts/Export-GpoEstate.ps1` (PowerShell, read-only).
 **Consumed by:** `src/gpo_lens/ingest.py` (`load_estate` and helpers).
 
-This is the *input* contract — the on-disk layout that the collector writes and
-the parser reads. It is distinct from the JSON output contract
-(`docs/spec/json-contract.md`), which governs what gpo-lens emits downstream.
+This is the *input* contract: the on-disk layout the collector writes and the
+parser reads. The JSON output contract (`docs/spec/json-contract.md`) is
+separate and governs what gpo-lens emits downstream.
 
 ## Directory layout
 
@@ -49,9 +49,8 @@ the parser reads. It is distinct from the JSON output contract
 
 The collector names the export directory
 `<DNS-domain>-<YYYYMMDD-HHmmss>` (e.g.
-`workdomain.local-20260614-153000`). The parser does not depend on this
-naming convention — it discovers files by well-known names relative to the
-supplied root.
+`workdomain.local-20260614-153000`). The parser does not depend on the name;
+it finds files by well-known names relative to the supplied root.
 
 ## Per-CSE subfolder layout
 
@@ -81,10 +80,9 @@ Preferences/
 └── ...
 ```
 
-The parser handles **both** shapes. It walks `Preferences/` one level deep,
-collecting XML files from both direct children and one level of subdirectory
-children. See `detection._walk_gpp_xml` for the canonical implementation of
-this dual-shape scan.
+The parser handles **both** shapes. It walks `Preferences/` one level deep and
+collects XML files from direct children and from one level of subdirectories.
+The implementation is `_walk_gpp_xml` in `src/gpo_lens/detection/_gpp.py`.
 
 ## Side-directory casing
 
@@ -93,10 +91,10 @@ Real SYSVOL uses **uppercase** `MACHINE` / `USER` for the default GPOs
 `Machine` / `User`. Other casings are possible.
 
 The analysis host is typically **Linux** (case-sensitive filesystem), so the
-parser resolves side-directory names case-insensitively via
-`paths.ci_child` / `paths.ci_path`. A literal path is tried first (fast path
-on case-insensitive hosts), then a directory scan falls back to
-case-insensitive matching.
+parser resolves side-directory names case-insensitively through
+`paths.ci_child` and `paths.ci_path`. It tries the literal path first (the fast
+path on case-insensitive hosts), then falls back to a case-insensitive
+directory scan.
 
 The GPO report XML (`AllGPOs.xml`, per-GPO `reports/*.xml`) uses the
 canonical element names `<Computer>` and `<User>` regardless of SYSVOL casing.
@@ -120,17 +118,16 @@ canonical element names `<Computer>` and `<User>` regardless of SYSVOL casing.
 
 ### Required vs optional files
 
-`AllGPOs.xml` is the **only required** file — its absence raises
-`FileNotFoundError` from `load_estate`. All other files are optional; the
-parser silently skips missing files and falls back to defaults (empty lists,
-no metadata, no SYSVOL augmentation). This allows partial exports (e.g. a
-SYSVOL-only copy, or an export from a machine without RSAT) to still produce
-useful results.
+`AllGPOs.xml` is the **only required** file; without it `load_estate` raises
+`FileNotFoundError`. All other files are optional. The parser skips missing
+files silently and uses defaults (empty lists, no metadata, no SYSVOL
+augmentation), so partial exports (a SYSVOL-only copy, or an export from a
+machine without RSAT) still produce useful results.
 
 ### principals.json format (Plan 020)
 
-SID -> name resolution map. SIDs are canonical (lowercase). Produced by the
-collector's principals section (integrated in v0.6.2) or the standalone
+SID -> name map. SIDs are canonical (lowercase). Written by the collector's
+principals section (integrated in v0.6.2) or the standalone
 `Export-Principals.ps1`.
 
 ```json
@@ -163,9 +160,8 @@ collector's principals section (integrated in v0.6.2) or the standalone
 
 ### group-members.json format (Plan 020-B)
 
-Transitive group membership expansion. Produced by the collector's group
-membership section (integrated in v0.6.2) or the standalone
-`Export-GroupMembers.ps1`.
+Transitive group membership. Written by the collector's group membership
+section (integrated in v0.6.2) or the standalone `Export-GroupMembers.ps1`.
 
 ```json
 {
@@ -207,26 +203,27 @@ membership section (integrated in v0.6.2) or the standalone
 | `Registry.pol` | PReg binary format | `registry_pol.parse_registry_pol` reads raw bytes |
 
 **BOM tolerance is mandatory.** PowerShell 5.1's `Set-Content -Encoding UTF8`
-prepends a UTF-8 BOM. The `build_fixture.py` generator intentionally writes a
-BOM on `ou-tree.json` and `sites.json` to ensure the parser is tested against
-this reality.
+prepends a UTF-8 BOM. `build_fixture.py` deliberately writes a BOM on
+`ou-tree.json` and `sites.json` so the parser is tested against it.
 
 ## Zip handling
 
 When the collector is run without `-NoZip`, it produces a `.zip` archive of
 the export directory. Key properties:
 
-- **Forward-slash separators.** The collector explicitly replaces backslashes
-  with forward slashes when creating zip entries, ensuring portability on
-  Linux extractors.
-- **File-only entries.** The collector adds only files (no directory entries),
-  avoiding the missing-traversal-bit problem that `Compress-Archive` on
-  PowerShell 5.1 can produce.
-- **Zip-slip protection.** The parser's `_safe_extract` normalizes paths and
-  rejects entries that would extract outside the target directory.
-- **Decompression-bomb guard.** `_streaming_zip_read` enforces a 2 GB
-  decompressed-size cap during streaming reads, preventing zip bombs that
-  spoof `info.file_size` headers.
+- **Forward-slash separators.** The collector replaces backslashes with forward
+  slashes in zip entry names, so the archive extracts cleanly on Linux.
+- **File-only entries.** The collector adds files only, with no directory
+  entries. This avoids the missing-traversal-bit problem that `Compress-Archive`
+  on PowerShell 5.1 can produce.
+- **Zip-slip protection.** Extraction (`src/gpo_lens/collection_zip.py`)
+  normalizes entry paths, including backslashes, and rejects any entry that
+  would land outside the target directory. It also rejects symlinks, duplicate
+  paths and excessive compression ratios.
+- **Decompression-bomb guard.** `_streaming_zip_read` in `ingest.py` enforces a
+  2 GB decompressed-size cap during streaming reads, which stops zip bombs that
+  spoof `info.file_size` headers. `collection_zip.py` applies the same 2 GB cap
+  to extraction.
 
 ## Permissions and unreadable subtrees
 
@@ -235,35 +232,35 @@ The SYSVOL copy preserves Windows ACLs. On a Linux analysis host:
 - An **unreadable directory** (e.g. a security-filtered GPO whose folder the
   collector account cannot enter) produces a `collection-errors.json` entry
   with `Stage: sysvol`.
-- The parser never crashes on an unreadable subtree — `ci_child` returns
-  `None` on `OSError`, and `_walk_gpp_xml` catches `OSError` per-entry.
-- Missing SYSVOL data is surfaced as a `coverage_gap` finding (kind
+- The parser never crashes on an unreadable subtree: `ci_child` returns `None`
+  on `OSError`, and `_walk_gpp_xml` catches `OSError` per entry.
+- Missing SYSVOL data surfaces as a `coverage_gap` finding (kind
   `"inaccessible"` or `"collection_error"`), never silently dropped.
 
 ### Zip extraction and lost traversal bits (common gotcha)
 
 Windows-produced zips extracted on Linux with `unzip` may **lose the execute
-(traversal) bit** on `Preferences/` subdirectories. When this happens, all GPP
-content (Groups.xml, ScheduledTasks.xml, Drives.xml, etc.) becomes invisible
-without any crash or error message from the extractor.
+(traversal) bit** on `Preferences/` subdirectories. All GPP content
+(Groups.xml, ScheduledTasks.xml, Drives.xml, etc.) then becomes invisible, with
+no crash or error from the extractor.
 
-The parser detects this condition and surfaces it as a `coverage_gap` finding
-with `kind: "unreadable_sysvol"`, including the remediation command:
+The parser detects this and raises a `coverage_gap` finding with
+`kind: "unreadable_sysvol"`, which includes the fix:
 
 ```bash
 chmod -R +rX SYSVOL-Policies/
 ```
 
-If you see `unreadable_sysvol` coverage gaps after extraction, run the above
-command and re-run the analysis. This is the most common cause of "the tool
-found zero GPP settings on a known-active estate."
+If you see `unreadable_sysvol` coverage gaps after extraction, run that command
+and re-run the analysis. This is the most common cause of "the tool found zero
+GPP settings on a known-active estate."
 
 ## GPO ID normalization
 
 All GPO IDs are **canonical**: lowercase, braces stripped. The parser applies
-`normalize.canonical_guid` to every ID read from XML, JSON, and gPLink
-attributes. Cross-input joins (report ↔ metadata ↔ SYSVOL ↔ inheritance)
-use this canonical key.
+`normalize.canonical_guid` to every ID read from XML, JSON and gPLink
+attributes, and joins across inputs (report, metadata, SYSVOL, inheritance) on
+that key.
 
 ## SYSVOL path matching
 
@@ -274,14 +271,15 @@ The parser matches each GPO to its SYSVOL folder by trying, in order:
 2. `SYSVOL-Policies/<canonical-id>` (lowercase, no braces)
 3. `SYSVOL-Policies/<CANONICAL-ID>` (upper-case, no braces)
 
-The first match that resolves within the SYSVOL base directory is used. Path
-traversal outside the base (symlink attacks) is rejected.
+The first match that resolves inside the SYSVOL base directory wins. A path that
+escapes the base (symlink attacks) is rejected.
 
 ## Versioning (proposed)
 
-The current format has no version indicator. To support future collector
-changes without breaking the parser, a `format_version` field should be added
-to `gpo-metadata.json` (or a new `manifest.json` at the export root).
+The current format has no version indicator (no `format_version` exists in the
+code). To support future collector changes without breaking the parser, add a
+`format_version` field to `gpo-metadata.json` or a new `manifest.json` at the
+export root.
 
 Proposed schema:
 
@@ -294,11 +292,10 @@ Proposed schema:
 }
 ```
 
-The parser would read this field and adjust its expectations accordingly.
-Version 0 (absent field) is the current format. Incrementing `format_version`
-signals a breaking change to the on-disk layout.
+The parser would read this field and adjust. Version 0 (field absent) is the
+current format; incrementing `format_version` signals a breaking change to the
+on-disk layout.
 
-Until `format_version` is implemented, the parser detects the export format
-implicitly by the presence/absence of well-known files, which is sufficient
-but fragile. Adding the version field is a low-risk improvement that should
-ship with the next collector revision.
+Until then, the parser infers the format from which well-known files are
+present. That is sufficient but fragile. Adding the field is a low-risk change
+that should ship with the next collector revision.

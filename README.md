@@ -1,11 +1,12 @@
 # gpo-lens
 
-Local-first, read-only Group Policy analysis. Ingests copies of a GPO estate
-(never touches live AD) and answers questions about it. The deterministic core
-has no AI in the truth path — the optional LLM layer explains computed facts.
+Local-first, read-only Group Policy analysis. gpo-lens ingests copies of a GPO
+estate (it never touches live AD) and answers questions about it. The
+deterministic core has no AI in the truth path; the optional LLM layer only
+explains facts the core computed.
 
-**Project status:** the current release is **v1.4.0** (2026-10-06, tag
-`v1.4.0`); see the [changelog](CHANGELOG.md). Commands below describe 1.4. The
+**Project status:** the current release is **v1.5.0** (2026-10-14, tag `v1.5.0`); see the
+[changelog](CHANGELOG.md). The commands below describe 1.4 and later. The
 dependency inventory, scheduled collection helper, CLI ZIP ingest and freshness
 warning require 1.4. Report security issues privately as described in
 [SECURITY.md](SECURITY.md).
@@ -34,14 +35,15 @@ uv run gpo-lens --db ./gpo-lens.sqlite3 serve --open
 ```
 
 The local server listens on `127.0.0.1:8000`. Browser upload through
-**Tools → Ingest** also accepts collector ZIPs. CLI ingest still accepts directories.
-Both ZIP paths share traversal/symlink rejection, a 500 MiB archive limit,
-2 GiB total expansion limit and 1000:1 per-entry compression ratio limit.
-Windows PowerShell 5.1 `Compress-Archive` backslash paths are safely normalized
-before validation; a single enclosing export folder is supported. Temporary
-extraction directories are removed after ingest, including on failure. Keep
-original exports in restricted storage for later re-ingestion. Use one estate
-and one app instance per database; multiple snapshots describe that same estate.
+**Tools → Ingest** also accepts collector ZIPs; CLI ingest also accepts
+directories. Both ZIP paths reject path traversal and symlinks and enforce a
+500 MiB archive limit, a 2 GiB total expansion limit and a 1000:1 per-entry
+compression ratio limit. Backslash paths from Windows PowerShell 5.1
+`Compress-Archive` are normalized before validation, and a single enclosing
+export folder is supported. Temporary extraction directories are removed after
+ingest, including on failure. Keep original exports in restricted storage for
+later re-ingestion. Use one estate and one app instance per database; multiple
+snapshots describe that same estate.
 
 ## Keep collection running
 
@@ -54,64 +56,67 @@ On a Windows DC/RSAT host, run either command in an elevated PowerShell session:
 .\scripts\Register-GpoLensCollection.ps1 -ServiceAccount 'LABDOMAIN\svc-collector' -OutputRoot C:\GpoExport
 ```
 
-Defaults: daily at 02:00 host local time, a hard two-hour runtime limit, last
-14 successful exports, and a 5 MiB log with five rotated backups. Configure
-`-At`, `-EveryDays`, `-ExecutionTimeLimit`, `-Retention`, `-LogMaxBytes` and
-`-LogFiles`. Use `-CopyTo '\\lab.example.com\gpo-drop'` for ZIP delivery,
-`-WhatIf` to preview, or `-Unregister` to remove the task. Delivery requires a
-separate ingest step; dropping a ZIP in an inbox does not import it.
+Defaults: daily at 02:00 host local time, a hard two-hour runtime limit, the
+last 14 successful exports, and a 5 MiB log with five rotated backups. Change
+them with `-At`, `-EveryDays`, `-ExecutionTimeLimit`, `-Retention`,
+`-LogMaxBytes` and `-LogFiles`. Use `-CopyTo '\\lab.example.com\gpo-drop'` for
+ZIP delivery, `-WhatIf` to preview, or `-Unregister` to remove the task.
+Delivery is separate from ingest: dropping a ZIP in an inbox does not import
+it.
 
-Each task owns its output root through `.gpo-lens-collection-owner`. Use a
-separate root for each `-TaskName`, including tasks collecting the same domain.
-Registration refuses another task's marker; `-Force` transfers ownership with
-a warning. The previous task then refuses to run. Re-register existing tasks
-to create the marker before their next run; manual runner calls must pass the
-registered `-TaskName`.
+Each task owns its output root through the marker `.gpo-lens-collection-owner`.
+Use a separate root for each `-TaskName`, including tasks that collect the same
+domain. Registration refuses another task's marker. `-Force` transfers
+ownership with a warning, and the previous task then refuses to run.
+Re-register existing tasks to create the marker before their next run. Manual
+runner calls must pass the registered `-TaskName`.
 
 [The IIS collection guide](deploy/iis/README.md#scheduled-collection) covers
-permissions, privileged inventory overlay, verification and lab validation.
+permissions, the privileged inventory overlay, verification and lab validation.
 [The handover checklist](docs/handover.md#3-keeping-collection-alive) explains
-how to keep coverage honest. Briefing shows the newest imported snapshot's age
-and warns after eight days. Set `GPO_LENS_STALE_SNAPSHOT_DAYS` to a positive
-integer and restart the app to change that threshold. An unchanged estate can
-still be stale; import age does not prove when the source data was collected.
+how to keep coverage honest. Briefing shows the age of the newest imported
+snapshot and warns after eight days. To change that threshold, set
+`GPO_LENS_STALE_SNAPSHOT_DAYS` to a positive integer and restart the app. An
+unchanged estate can still be stale, and import age does not prove when the
+source data was collected.
 
 ## Feature tour
 
 The primary navigation is **Briefing / Findings / Explore / History / Tools**.
-The wordmark opens Briefing; existing bookmarks, including the original `/`
-dashboard, retain their handlers and filters.
+The wordmark opens Briefing. Existing bookmarks, including the original `/`
+dashboard, keep their handlers and filters.
 
 | Destination | What you can do |
 |-------------|-----------------|
-| **Briefing** | Read deterministic change and finding deltas, linked estate vitals, expiring accepted risks, and coverage/provenance warnings. Select a historical snapshot; a first snapshot or incomplete evaluation is labeled honestly. |
-| **Findings** | Work the default new-or-regressed, open inbox; filter and page results, inspect occurrence observations and evaluation provenance, acknowledge findings, and record or revoke risk acceptance. Resolved and accepted findings remain accessible. |
-| **Explore** | Browse GPO dossiers and their uniform settings ledgers, compare two GPOs, inspect exact settings across the estate, search configured settings, browse scopes, and open resultant, conflict, danger and delegation workbenches. |
-| **History** | Compare stored snapshots with version-counter and per-setting changes. Trends remain available through Tools. Snapshot deltas describe what changed between captures; they do not identify the AD actor who made a change. |
+| **Briefing** | Read deterministic change and finding deltas, linked estate vitals, expiring accepted risks, and coverage and provenance warnings. Select a historical snapshot; a first snapshot or an incomplete evaluation is labeled as such. |
+| **Findings** | Work the default inbox of new or regressed, open findings. Filter and page results, inspect occurrence observations and evaluation provenance, acknowledge findings, and record or revoke risk acceptance. Resolved and accepted findings stay accessible. |
+| **Explore** | Browse GPO dossiers and their uniform settings ledgers, compare two GPOs, inspect exact settings across the estate, search configured settings, browse scopes, and open the resultant, conflict, danger and delegation workbenches. |
+| **History** | Compare stored snapshots by version counter and per-setting change. Trends are available through Tools. Snapshot deltas describe what changed between captures; they do not identify the AD actor who made a change. |
 | **Tools** | Upload exports, manage snapshots, compare Microsoft baselines or golden backups, inspect ADMX coverage, open the legacy dashboard and route reference, and use optional Ask narration. |
 
 Hygiene checks include cpassword exposure, MS16-072, version skew, broken
 references, unlinked/empty GPOs, disabled but populated sides, coverage gaps
-and cited dangerous configurations. Baseline ZIP comparison uses an optional
-ADMX/ADML crosswalk to turn registry identities into policy names.
+and cited dangerous configurations. Baseline ZIP comparison can use an
+optional ADMX/ADML crosswalk to turn registry identities into policy names.
 
 **cpassword values are never stored.** A GPP `cpassword` is encrypted with a
 key Microsoft published (MS14-025), so it is a recoverable credential. Before
-anything is written, ingest discovers every value *labelled* as one, across
-all inputs of the import together (every report, including every report in a
-baseline ZIP, the SYSVOL files and the JSON inputs): the attribute or key in
-any casing or namespace, a `<cpassword>` element, or an inline `cpassword="…"`
-(escaped XML too, and when the word or the value is split across XML nodes).
-Each labelled value becomes `[redacted cpassword]`. Copies of a discovered
-value under another name (a GPO name or description, a path, another setting,
-a SOM or WMI filter field) are replaced too. Values are compared canonically
-— whitespace inside the value, the URL-safe base64 alphabet and `=` padding do
-not matter — and the replacement covers the copy as written, including a copy
-split across the text or attribute values of nested XML elements
-(`<P>AAEC…<Span>…Dw==</Span></P>`, `<P a="AAEC…" b="…Dw=="/>`), whose pieces
-are redacted in place (a field derived from one piece, such as a display value
-taken from an attribute, loses that piece too). Two limits keep
-the redaction from rewriting unrelated facts:
+anything is written, ingest discovers every value *labelled* as one, across all
+inputs of the import together (every report, including every report in a
+baseline ZIP, the SYSVOL files and the JSON inputs). It recognizes the
+attribute or key in any casing or namespace, a `<cpassword>` element, and an
+inline `cpassword="…"`, including escaped XML and a word or value split across
+XML nodes. Each labelled value becomes `[redacted cpassword]`.
+
+Copies of a discovered value under another name (a GPO name or description, a
+path, another setting, a SOM or WMI filter field) are replaced too. Values are
+compared canonically: whitespace inside the value, the URL-safe base64 alphabet
+and `=` padding do not matter. The replacement covers the copy as written,
+including a copy split across the text or attribute values of nested XML
+elements (`<P>AAEC…<Span>…Dw==</Span></P>`, `<P a="AAEC…" b="…Dw=="/>`). Its
+pieces are redacted in place, and a field derived from one piece, such as a
+display value taken from an attribute, loses that piece too. Two limits keep the
+redaction from rewriting unrelated facts:
 
 - Copies are chased only for values of at least 12 characters that look like
   GPP ciphertext or mix letters and digits, and below 22 characters only as a
@@ -122,83 +127,88 @@ the redaction from rewriting unrelated facts:
   exact whole-field copies) are replaced.
 - Copies are rewritten only in descriptive fields. A copy in an identity field
   (GPO GUID, owner, SID, SOM path, CSE name, event type, …) stops the import,
-  or the upgrade, with an error naming the field and never the value. This is
-  deliberate: a crafted export can therefore block its own import rather than
-  have a credential stored or an identity silently rewritten.
+  or the upgrade, with an error that names the field and never the value. This
+  is deliberate: a crafted export can block its own import, but it cannot get a
+  credential stored or an identity silently rewritten.
 
-The result is verified independently before it is kept: discovery and the
-copy search run again over the sanitized data, then over the rows as written
-(read back from the database), and after commit over the raw bytes of the
-database, `-wal`, `-shm` and `-journal`; any remaining value refuses the
-import with nothing stored. Diagnostics follow the same rule: warnings raised
-while loading are held back until every value of the import is known, then
-scrubbed, as are log records and error messages, including those for skipped
-GPOs and rejected inputs. The guard spans the whole CLI command or web request,
-so the values stay known until its last line of output, log record, HTTP
-response and `audit.log` entry. Externally supplied names are never echoed at
-all: ZIP errors cite a member's position (and the OS error, without the path),
-CLI path arguments are cited by position, and the audit log records an upload's
-size, not its file name.
-The finding is computed from the SYSVOL files at
-ingest and records only that a cpassword is present, with no characters of it.
-No hash is kept, so replacing one cpassword with another is not a visible
-change in diffs or events; the finding persists on the GPO until the attribute
-is removed, which is the remediation.
+The result is verified independently before it is kept. Discovery and the copy
+search run again over the sanitized data, then over the rows as written (read
+back from the database), and after commit over the raw bytes of the database,
+`-wal`, `-shm` and `-journal`. Any remaining value refuses the import with
+nothing stored.
+
+Diagnostics follow the same rule. Warnings raised while loading are held back
+until every value of the import is known, then scrubbed, as are log records and
+error messages, including those for skipped GPOs and rejected inputs. The guard
+spans the whole CLI command or web request, so the values stay known until its
+last line of output, log record, HTTP response and `audit.log` entry.
+Externally supplied names are never echoed: ZIP errors cite a member's position
+(and the OS error, without the path), CLI path arguments are cited by position,
+and the audit log records an upload's size, not its file name.
+
+The finding is computed from the SYSVOL files at ingest and records only that a
+cpassword is present, with no characters of it. No hash is kept, so replacing
+one cpassword with another is not a visible change in diffs or events. The
+finding persists on the GPO until the attribute is removed, which is the
+remediation.
 
 Text supplied after ingest cannot be redacted against a value the database no
-longer holds, so a triage note or rationale, an Ask question, an
+longer holds. So a triage note or rationale, an Ask question, an
 `explain-setting` identity and a forwarded user name that carry a cpassword are
-**refused, not stored or sent**: a labelled value in any form ingest
-recognises, or an unlabelled token shaped like GPP ciphertext (also when it is
-wrapped across lines with prose around it). The refusal names the field and the
-reason, never the value; the triage form keeps the draft so the analyst can
-remove it. `gpo-lens analyst-text-check` lists the ids of older rows that would
-now be refused (read-only). False-positive and miss rates, known false
+**refused, not stored or sent**. This covers a labelled value in any form
+ingest recognises, and an unlabelled token shaped like GPP ciphertext (also
+when wrapped across lines with prose around it). The refusal names the field
+and the reason, never the value; the triage form keeps the draft so the analyst
+can remove it. `gpo-lens analyst-text-check` lists the ids of older rows that
+would now be refused (read-only). False-positive and miss rates, known false
 positives and limits are in
 [`SECURITY.md`](SECURITY.md#credentials-in-analyst-typed-text).
 
 The first read-write open by this release (`ingest`, `serve` or a web upload)
-scrubs databases written by earlier releases: it discovers values in every
-column whatever its declared type or the value's storage class (BLOBs are read
-as Latin-1/UTF-8 and UTF-16), and in SYSVOL still on disk at a stored path,
-rewrites them (one in an identity column refuses the upgrade; a BLOB is
-rewritten in place in an exactly round-tripping reading, including misaligned
-or odd-length UTF-16, and a BLOB whose value shows only in a reading that cannot
-be written back exactly is replaced whole, so it can never pin the database at
-schema 10), re-hashes the event chain from the first
-rewritten event, and verifies the result by rediscovering over every column.
-The set of events that fail verification must be exactly the same before and
-after: an earlier break stays a break even if a rewritten payload would match
-its stored hash. If
-anything remains, the whole scrub is rolled back and the database stays at
-schema 10 — the labelled sources stay in place, so every later open rediscovers
+scrubs databases written by earlier releases. The scrub:
+
+- discovers values in every column, whatever its declared type or the value's
+  storage class (BLOBs are read as Latin-1/UTF-8 and UTF-16), and in SYSVOL
+  still on disk at a stored path;
+- rewrites them. A value in an identity column refuses the upgrade. A BLOB is
+  rewritten in place in an exactly round-tripping reading, including misaligned
+  or odd-length UTF-16. A BLOB whose value shows only in a reading that cannot
+  be written back exactly is replaced whole, so it can never pin the database
+  at schema 10;
+- re-hashes the event chain from the first rewritten event;
+- verifies the result by rediscovering over every column. The set of events
+  that fail verification must be exactly the same before and after: an earlier
+  break stays a break even if a rewritten payload would match its stored hash.
+
+If anything remains, the whole scrub is rolled back and the database stays at
+schema 10. The labelled sources stay in place, so every later open rediscovers
 and refuses again. Otherwise it runs `VACUUM`, truncates the WAL and stamps
-schema 11 once the chain verifies and no discovered value is in the file
-bytes. (The byte check can only look for values known in that run; once a
-verified scrub is committed, a later retry relies on `VACUUM` and a complete
+schema 11 once the chain verifies and no discovered value is in the file bytes.
+(The byte check can only look for values known in that run; once a verified
+scrub is committed, a later retry relies on `VACUUM` and a complete
 checkpoint.) Allow free disk space about the size of the database for that
 one-time `VACUUM`. Read-only commands do not migrate. Original exports and
 backups made before the upgrade still contain the values; keep them restricted
 or delete them.
 
 For a staged rollout, set `GPO_LENS_LEGACY_NAV=1` before starting the server to
-restore the earlier primary links. Ask stays under Tools. Unset the variable
-and restart to return to the new navigation. This changes presentation;
+restore the earlier primary links; Ask stays under Tools. Unset the variable
+and restart to return to the new navigation. This changes presentation only;
 [deployment access control](deploy/README.md#access-boundary) still applies.
 
 The compact header search searches **configured settings**. It is not a general
-GPO/GUID/OU/trustee search. Historical selection is supported by specific views
-(such as Briefing and dossiers), rather than a global snapshot selector.
+GPO/GUID/OU/trustee search. Specific views (such as Briefing and dossiers) let
+you select a historical snapshot; there is no global snapshot selector.
 
 ## Exports for change tickets and auditors
 
 Major views offer deterministic **Markdown and CSV** downloads: dossiers and
 settings ledgers, filtered findings, occurrence histories, accepted risks,
-briefings, exact settings, and snapshot/GPO/comparison differences. Upload-based
-comparisons have an output selector. Downloads retain the selected filters,
-snapshot/evaluation provenance and scope caveats; secrets and raw source
-fragments are redacted, and spreadsheet formula cells are neutralized. Triage
-attribution is included only for authorized callers.
+briefings, exact settings, and snapshot, GPO and comparison differences.
+Upload-based comparisons have an output selector. Downloads keep the selected
+filters, snapshot and evaluation provenance, and scope caveats. Secrets and raw
+source fragments are redacted, and spreadsheet formula cells are neutralized.
+Triage attribution is included only for authorized callers.
 
 CLI equivalents read a stored database. For example:
 
@@ -208,16 +218,16 @@ uv run gpo-lens --db ./gpo-lens.sqlite3 export briefing --format md --as-of 2026
 uv run gpo-lens --db ./gpo-lens.sqlite3 report --output report.html --format html
 ```
 
-Exports omit volatile generation timestamps. Supply `--as-of` for repeatable
-time-sensitive briefing/risk classification. The findings export defaults to
+Exports omit volatile generation timestamps. Pass `--as-of` for repeatable
+time-sensitive briefing and risk classification. The findings export defaults to
 the same actionable view as the inbox; `--lifecycle all --triage all` widens it.
-Use `export --help` for supported views and their required selectors. The older
-HTML/Markdown estate report remains available separately.
+`export --help` lists the supported views and their required selectors. The
+older HTML/Markdown estate report remains available separately.
 
 ## CLI reference
 
-Global `--db` and `--json` go **before** the subcommand. These are common entry
-points; the help lists the full command set and required arguments:
+Global `--db` and `--json` go **before** the subcommand. These are the common
+entry points; the help lists the full command set and required arguments:
 
 ```bash
 uv run gpo-lens --help
@@ -245,15 +255,15 @@ uv run gpo-lens export --help
 
 ## Machine-readable output
 
-Add the global `--json` flag to emit a stable, versioned envelope on stdout:
+The global `--json` flag emits a stable, versioned envelope on stdout:
 
 ```bash
 uv run gpo-lens --db ./gpo-lens.sqlite3 --json doctor | jq '.data.findings[] | select(.severity=="critical")'
 ```
 
 Every `--json` payload is wrapped as `{schema_version, kind, tool_version,
-generated_at, data}`. Errors go to stderr with a nonzero exit; `report` and
-`export` support human formats and reject `--json`. Use `--json summary` for a
+generated_at, data}`. Errors go to stderr with a nonzero exit. `report` and
+`export` produce human formats and reject `--json`. `--json summary` gives a
 machine-readable overview. The frozen shapes are documented in
 [the JSON contract](docs/spec/json-contract.md) and pinned by
 [contract tests](tests/test_json_contract.py).
@@ -268,14 +278,14 @@ values, raw evidence and HTML are excluded. The model selects supplied fact
 IDs, and the server rejects additional claims. Without a key, explain actions
 are absent and Ask reports that configuration is needed. Pages never wait for
 narration. Signed forms expire after an hour or a server restart; reload the
-source page if necessary.
+source page if needed.
 
 The CLI also offers `doctor --explain`, `ask <question>` and
-`explain-setting <identity>`. CLI narration has a different data boundary:
-it can send configured names and values to the selected provider. CLI Ask
-requires a key to route a question; it cannot silently answer without one.
-Review provider/data-egress policy before enabling narration. Core analysis
-and every deterministic export run without a model or API key.
+`explain-setting <identity>`. CLI narration has a different data boundary: it
+can send configured names and values to the selected provider. CLI Ask needs a
+key to route a question and cannot silently answer without one. Review your
+provider and data-egress policy before enabling narration. Core analysis and
+every deterministic export run without a model or API key.
 
 ## Deployment and handover
 
@@ -286,47 +296,50 @@ Use the [deployment index](deploy/README.md) to choose:
 - [Linux systemd](deploy/systemd/README.md): dedicated service user, hardened unit, root-owned code and optional same-host proxy.
 
 All paths consume copied exports. For remote browser access, the proxy must
-restrict who can reach the app; accepted users can replace the estate.
+restrict who can reach the app, because accepted users can replace the estate.
 Fresh IIS installs require `-WindowsAuth` or the explicit anonymous-access
-opt-out; upgrades preserve existing access and warn if anonymous. Every proxy
-must set `GPO_LENS_ALLOWED_HOSTS` to the browser authority (IIS merges a missing
-value, Compose/systemd provide it). Unset accepts only loopback Host authorities;
-a disallowed Host returns 400 naming the variable. See the deployment guides
-for firewall scope, locked installs and WAL-safe backup/restore commands.
-Inherited a running installation? Start with the [operator
-handover](docs/handover.md), including backup and upgrade rules.
+opt-out; upgrades preserve existing access and warn if it is anonymous. Every
+proxy must set `GPO_LENS_ALLOWED_HOSTS` to the browser authority (IIS merges a
+missing value; Compose and systemd provide it). Unset, the app accepts only
+loopback Host authorities, and a disallowed Host returns 400 naming the
+variable. The deployment guides cover firewall scope, locked installs and
+WAL-safe backup and restore commands. If you inherited a running installation,
+start with the [operator handover](docs/handover.md), including its backup and
+upgrade rules.
 
 ## Advanced audit and Public Key settings
 
 Advanced Audit Configuration uses subcategory GUID identities and readable
 No Auditing / Success / Failure / Success and Failure values. Copied SYSVOL
-`audit.csv` entries are reconciled with the report; disagreements and unsupported
-shapes are flagged rather than silently interpreted. The override caveat cites
-Microsoft and describes only what that GPO authors, not effective device policy.
+`audit.csv` entries are reconciled with the report; disagreements and
+unsupported shapes are flagged, not silently interpreted. The override caveat
+cites Microsoft and describes only what that GPO authors, not effective device
+policy.
 
 Public Key settings include EFS, root trust, autoenrollment, certificate path
 validation and certificate entries with stable identities. Search, GPO ledgers,
-exports, baseline and golden comparisons consume these settings. Legacy Internet
-Explorer Maintenance is marked deprecated. Re-ingest copied exports to obtain
-the new normalization; stored historical settings are retained.
+exports, and baseline and golden comparisons use these settings. Legacy
+Internet Explorer Maintenance is marked deprecated. Re-ingest copied exports to
+get the new normalization; stored historical settings are kept.
 
 ## External dependencies and ADMX templates
 
 In **v1.4**, external dependencies and ADMX coverage have separate views.
 
 Before decommissioning or migrating a file or print server, ask “which GPOs
-reference `\\old-fs01`?” Open **Explore → External dependencies**, filter by
-server, or use `gpo-lens dependencies --server old-fs01 --json`. The inventory
-shows servers, shares, counts, GPO links and targets, distinguishing drive maps,
-printer connections, file copies, shortcuts, task actions, scripts, installation
-packages and folder redirection wherever those paths are exposed in the inputs.
-Markdown and CSV downloads preserve the filter and use deterministic redaction.
-This is configured dependency evidence: no server is contacted, reachability is
-unknown, and conditional/disabled settings do not imply actual use. Broken
-references now mean malformed paths or missing files in the GPO's own collected
-SYSVOL, not ordinary external UNC paths. Machine-local paths are unverifiable.
+reference `\\old-fs01`?” Open **Explore → External dependencies** and filter by
+server, or run `gpo-lens dependencies --server old-fs01 --json`. The inventory
+shows servers, shares, counts, GPO links and targets. Wherever the inputs expose
+the path, it distinguishes drive maps, printer connections, file copies,
+shortcuts, task actions, scripts, installation packages and folder
+redirection. Markdown and CSV downloads keep the filter and use deterministic
+redaction. This is configured dependency evidence: no server is contacted,
+reachability is unknown, and conditional or disabled settings do not imply
+actual use. Broken references now mean malformed paths or missing files in the
+GPO's own collected SYSVOL, not ordinary external UNC paths. Machine-local
+paths are unverifiable.
 
-ADMX gaps now create one finding per GPO with the gap count and setting list.
+ADMX gaps now create one finding per GPO, with the gap count and setting list.
 Load additional templates with repeatable flags, for example:
 
 ```bash
@@ -335,12 +348,12 @@ gpo-lens admx-gaps --admx-dir ./central-store --admx-dir ./toolkit-templates
 gpo-lens serve --admx-dir ./central-store --admx-dir ./toolkit-templates
 ```
 
-Alternatively set `GPO_LENS_ADMX_DIR` to a platform path list (`:` on Linux/macOS,
-`;` on Windows). Explicit CLI directories replace that environment list; absent
-both, the usual central-store auto-detection applies. Keep each directory's
-ADML resources beside its ADMX files (typically `en-US`). The first matching
-policy in directory order supplies its display name. Missing/corrupt templates
-are reported; they do not prevent other directories from loading.
+Or set `GPO_LENS_ADMX_DIR` to a platform path list (`:` on Linux/macOS, `;` on
+Windows). Explicit CLI directories replace that environment list; with neither,
+the usual central-store auto-detection applies. Keep each directory's ADML
+resources beside its ADMX files (typically `en-US`). The first matching policy
+in directory order supplies its display name. Missing or corrupt templates are
+reported and do not stop other directories from loading.
 
 Get MSS-legacy and SecGuide templates from Microsoft's
 [Security Compliance Toolkit](https://www.microsoft.com/en-us/download/details.aspx?id=55319)
@@ -348,17 +361,17 @@ security baseline packages; see the [SCT guide](https://learn.microsoft.com/wind
 Microsoft's templates are not bundled. An unresolved registry setting is a
 coverage gap in the loaded template catalogue, not proof of a bad configuration.
 
-After upgrading to 1.4, on the next completed ingest, superseded UNC and value-level ADMX findings
-resolve as no longer observed, retaining observations and triage history. New
-GPO-level ADMX findings require fresh review; old per-value acknowledgements do
-not silently approve a broader finding. Partial coverage prevents resolution
-claims for uncollected GPOs. Machine consumers should migrate to JSON contract
-version 2; see [the contract](docs/spec/json-contract.md).
+After upgrading to 1.4, the next completed ingest resolves superseded UNC and
+value-level ADMX findings as no longer observed, keeping their observations and
+triage history. New GPO-level ADMX findings need fresh review; old per-value
+acknowledgements do not silently approve a broader finding. Partial coverage
+prevents resolution claims for uncollected GPOs. Machine consumers should
+migrate to JSON contract version 2; see [the contract](docs/spec/json-contract.md).
 
 ## Design principles
 
-- **Deterministic core.** No AI in the truth path. Parse, normalize, query —
-  all verifiable.
+- **Deterministic core.** No AI in the truth path. Parse, normalize and query;
+  every step is verifiable.
 - **Read-only.** Never connects to or changes live AD. Input is file copies.
 - **Minimal runtime dependencies.** The core CLI depends only on `defusedxml`
   beyond the standard library. The web UI is an optional extra.
@@ -366,7 +379,7 @@ version 2; see [the contract](docs/spec/json-contract.md).
   dependency artifacts before moving an installation into an isolated network.
 - **Flag, don't simulate.** OU-level topology flags security filtering, WMI,
   loopback, item-level targeting and sites. The supported snapshot principal
-  model evaluates only documented collected inputs; it never claims live RSoP.
+  model evaluates only documented collected inputs and never claims live RSoP.
 
 ## Requirements
 
@@ -384,22 +397,22 @@ flags or resolves it; its last section repeats what is not supported.
 - **One estate per store.** Each database holds snapshots of one domain.
   Use separate databases/instances for unrelated estates. Multi-domain,
   multi-forest and cross-estate comparison are not supported.
-- **Site links.** Captured and flagged, but subnet/site membership is not
-  resolved per machine and site GPOs are excluded from OU precedence views.
-- **Live per-user/object RSoP.** Snapshot principal/token/CSE analysis is
+- **Site links.** Captured and flagged, but subnet and site membership is not
+  resolved per machine, and site GPOs are excluded from OU precedence views.
+- **Live per-user/object RSoP.** Snapshot principal, token and CSE analysis is
   bounded by collected inputs. WMI truth, ILT and loopback runtime behavior
-  remain caveats; it does not observe what a Windows client applied.
-- **`<Blocked/>` extensions.** Unreadable report extensions remain opaque.
-  For the Registry CSE, a collected `Registry.pol` can resolve them into
+  remain caveats; gpo-lens does not observe what a Windows client applied.
+- **`<Blocked/>` extensions.** Unreadable report extensions stay opaque. For
+  the Registry CSE, a collected `Registry.pol` can resolve them into
   key/value/type/data (`source_state="registry_pol"`). Other blocked CSEs
-  remain flagged (`source_state="blocked"`).
-- **Collection coverage.** A GPO with Authenticated Users Read stripped can
-  be invisible to a routine collector. Reconciliation uses the inventory
-  and errors supplied with **that export**. Periodically obtain an
-  authoritative `gpo-inventory.json` with a privileged run and include it
-  with routine exports; missing/error GPOs become `coverage_gap` findings.
-  A prior privileged snapshot does not automatically supply the inventory
-  for later exports. No sidecar means no evidence of complete collection.
+  stay flagged (`source_state="blocked"`).
+- **Collection coverage.** A GPO with Authenticated Users Read stripped can be
+  invisible to a routine collector. Reconciliation uses the inventory and
+  errors supplied with **that export**. Periodically obtain an authoritative
+  `gpo-inventory.json` with a privileged run and include it with routine
+  exports; missing or error GPOs become `coverage_gap` findings. A prior
+  privileged snapshot does not supply the inventory for later exports. No
+  sidecar means no evidence of complete collection.
 
 ## Security
 

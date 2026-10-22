@@ -3,11 +3,11 @@
 This document covers threats **to and through gpo-lens itself**: the collector,
 the transport of its output, ingest, the SQLite database, the web server, the
 browser, and the optional egress paths. It does not catalogue Group Policy
-attacks; those are what gpo-lens *detects* (see `docs/spec/wi_danger.md` and
-the detectors in `src/gpo_lens/danger.py` and `src/gpo_lens/detection/`).
+attacks; gpo-lens *detects* those (see `docs/spec/wi_danger.md` and the
+detectors in `src/gpo_lens/danger.py` and `src/gpo_lens/detection/`).
 
-Citations are `path:line` at the commit that last edited this file; tests are
-named so a reviewer can run them. Where a mitigation is not mechanically
+Citations are `path:line` as of the commit that last edited this file. Tests
+are named so a reviewer can run them. Where a mitigation is not mechanically
 enforced, this document says so. Report a gap through [SECURITY.md](../SECURITY.md).
 
 ## Assets
@@ -17,7 +17,7 @@ enforced, this document says so. Report a gap through [SECURITY.md](../SECURITY.
 | Collector exports (`AllGPOs.xml`, `gpo-metadata.json`, `principals.json`, `group-members.json`, `SYSVOL-Policies/` copy, the ZIP) | Collector output root on the DC/RSAT host; transfer medium; analysis host | The full GPO estate: names, OU paths, delegation, SIDs, settings and every GPP XML file — including any `cpassword` attribute (an AES key Microsoft published; MS14-025), which is a recoverable credential. |
 | SQLite database (`--db`, plus `-wal`/`-shm`) | Analysis host | Persisted snapshots: GPOs, links, settings (`setting.raw` holds the parsed setting subtree), delegation, findings, triage notes and actors. |
 | `cpassword` values | Discovered across every input of an import and replaced with `[redacted cpassword]` before anything is written (schema v11); the finding carries no characters of the value and no hash or fingerprint | A live credential if leaked. See residual risk R1 for where unredacted copies can still exist. |
-| Narration payloads | In memory; sent to the configured LLM endpoint | Whatever the code path sends leaves the host. The web paths and CLI paths differ deliberately (see "Egress"). |
+| Narration payloads | In memory; sent to the configured LLM endpoint | Whatever a code path sends leaves the host. The web and CLI paths differ deliberately (see "Egress"). |
 | Audit log (`audit.log` beside the DB or `GPO_LENS_AUDIT_LOG`) | Analysis host | Who ingested, deleted, triaged or narrated, and when. |
 | Auth material | Environment: `GPO_LENS_AUTH_TOKEN`, `GPO_LENS_API_KEY`, `GPO_LENS_HEC_TOKEN`; a service-account password handed to Task Scheduler | Each grants access to the app, the LLM endpoint or Splunk. |
 | Analysis integrity | Findings, coverage gaps, caveats | A **false all-clear** (a condition present in the export but not reported) is treated as a security bug ([SECURITY.md](../SECURITY.md)). |
@@ -96,7 +96,7 @@ it receives; physical access.
 | Oversized web upload / slow-drip upload | Streamed to disk with a 500 MiB cap; stops reading at the cap instead of draining. Non-upload POST bodies capped at 10 MiB by `Content-Length`. | `src/gpo_lens/web/_helpers.py:90-102`; `src/gpo_lens/web/app.py:467-485` |
 | XML entity expansion / external entities | All untrusted XML is parsed with `defusedxml`. | `src/gpo_lens/ingest.py:17`; `src/gpo_lens/detection/_gpp.py:12`; `src/gpo_lens/admx_parser.py:34` |
 | Ambiguous archive (two estates) silently merged | Exactly one `AllGPOs.xml` is required. | `src/gpo_lens/collection_zip.py:162-167`; `tests/test_collection_zip.py::test_cli_rejects_missing_or_ambiguous_estate` |
-| Partial estate presented as complete | Coverage gaps from `gpo-inventory.json`, `collection-errors.json` and unreadable SYSVOL subtrees are persisted and surfaced as findings. | `AGENTS.md` "Coverage honesty"; `src/gpo_lens/ingest.py:1904,1965`; `tests/test_coverage.py` |
+| Partial estate presented as complete | Coverage gaps from `gpo-inventory.json`, `collection-errors.json` and unreadable SYSVOL subtrees are persisted and surfaced as findings. | `AGENTS.md` "Coverage honesty"; `src/gpo_lens/ingest.py` (`parse_coverage_gaps`, `_scan_sysvol_gaps`, `_scan_missing_sysvol`); `tests/test_coverage.py` |
 
 ### B4 — Database at rest
 
@@ -143,8 +143,8 @@ on the path:
 | CLI `events` to Splunk HEC | Change events. Opt-in via `GPO_LENS_HEC_URL` + `GPO_LENS_HEC_TOKEN`; warns on `http://`; `GPO_LENS_HEC_VERIFY_TLS=false` disables certificate verification. | `src/gpo_lens/sinks.py:84-106,123-126` |
 
 The LLM endpoint accepts `http://` as well as `https://`
-(`src/gpo_lens/narration.py:143-146`), so the API key and payload can be sent in
-cleartext if an operator configures that.
+(`src/gpo_lens/narration.py:143-146`), so an operator can configure the API key
+and payload to travel in cleartext.
 
 ### Deployment (IIS, container, systemd)
 
@@ -157,7 +157,7 @@ cleartext if an operator configures that.
 
 ## Residual risks
 
-These are known and not mitigated by code at this commit.
+These risks are known and code does not mitigate them.
 
 - **R1 — Unredacted `cpassword` copies outside the database.** The database
   no longer stores `cpassword` values (redacted at ingest since schema v11; the
@@ -181,13 +181,14 @@ These are known and not mitigated by code at this commit.
   static test, not dataflow analysis. Notes, questions and names stored before
   v1.5.0 are not rewritten (the triage log is append-only);
   `gpo-lens analyst-text-check` lists their ids for the operator.
-  Search terms are not stored by gpo-lens but travel in URLs, so a reverse
+  gpo-lens does not store search terms, but they travel in URLs, so a reverse
   proxy's access log may record them.
 - **R2 — No per-user identity in the app.** Every accepted caller on the
   loopback path is the same principal with view, ingest, delete, triage and
   narrate rights (`src/gpo_lens/web/auth.py:63-69`). Remote access control is
-  entirely the reverse proxy's job; a misconfigured proxy exposes everything.
-  Rate limits key on client IP, so behind a proxy all users share one bucket.
+  entirely the reverse proxy's job, and a misconfigured proxy exposes
+  everything. Rate limits key on client IP, so behind a proxy all users share
+  one bucket.
 - **R3 — Loopback is trusted.** Any local process or user that can reach
   `127.0.0.1:<port>` is the analyst. The CSRF check accepts any `localhost`
   origin on any port (`src/gpo_lens/web/app.py:345-360`), so a page served by
@@ -212,7 +213,7 @@ These are known and not mitigated by code at this commit.
     they are allowlists and pins, not a proof of read-only behaviour. A
     print-only helper (`scripts/print_statement_digests.py`, never wired into
     the generator) prints candidate digests for review.
-  - The floor itself is broad: every command invocation, every .NET method call and every property
+  - The floor is broad: every command invocation, every .NET method call and every property
     access is pinned by exact text, multiplicity and control-flow context; every
     expression-valued pipeline input is pinned the same way; every type-conversion or
     type-reference construct (a cast, `-as`/`-is`/`-isnot`, a parameter
@@ -247,10 +248,10 @@ These are known and not mitigated by code at this commit.
   and are out of scope.
 - **R6 — CLI narration sends estate strings.** `ask` and `doctor --explain`
   send `safe_data`-redacted estate content (GPO names, settings, finding text)
-  to the configured endpoint; redaction targets credentials, not names or
+  to the configured endpoint. Redaction targets credentials, not names or
   topology. `http://` endpoints are accepted.
 - **R7 — `style-src 'unsafe-inline'`** remains in the CSP, so injected markup
-  could still apply inline styles (no script execution).
+  could still apply inline styles. It cannot execute script.
 - **R8 — Windows file permissions.** On IIS the DB relies on directory ACLs;
   `restrict_db_permissions` is effectively a no-op on Windows. The audit log is
   opened with `logging.FileHandler` and is not chmod-tightened on any platform
@@ -263,4 +264,4 @@ These are known and not mitigated by code at this commit.
 
 Update this file in the same change that adds an ingest path, an egress path,
 a route without the standard middleware, or a deployment mode. Line citations
-drift; re-verify them when editing a cited file.
+drift. Re-verify them when you edit a cited file.

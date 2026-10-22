@@ -6,36 +6,36 @@ gpo-lens is a **defensive, local-first, read-only** Group Policy analyzer. It
 ingests *copies* of a GPO estate (collector exports or ZIPs) and reports
 hygiene findings, dangerous configurations and estate structure. The Python
 application never connects to or writes to Active Directory, Group Policy or
-SYSVOL; the PowerShell collector that produces its inputs runs on a domain
+SYSVOL. The PowerShell collector that produces its inputs runs on a domain
 controller or RSAT host and is read-only by design. The deterministic core has
 no AI in the truth path; the optional narration layer only explains facts the
 core computed.
 
 ## Reporting a vulnerability
 
-Please report security issues **privately**, not as a public issue:
+Report security issues **privately**, not as a public issue:
 
 - Email: **plm@hraedon.com**
 - Or open a private vulnerability report via GitHub's
   [Security Advisories](https://github.com/hraedon-labs/gpo-lens/security/advisories/new).
 
 Include the affected version (`gpo-lens --version` or the release tag), the
-Python version, a reproduction, and the expected vs. actual behavior. Attach
+Python version, a reproduction, and the expected and actual behavior. Attach
 any proof of concept or sample export as a file, and **sanitize real estate
 data first** (domain names, GPO names, OU paths, SIDs, account names). Never
 send a real `cpassword` value or an unsanitized SYSVOL copy.
 
-Acknowledgement within 72 hours is the target. Coordinated disclosure follows
-once a fix is released.
+The target is to acknowledge within 72 hours. Disclosure is coordinated: it
+follows the release of a fix.
 
 ## Supported versions
 
 Security fixes land on `main` and ship in the next release. Only the latest
-release is supported; upgrade before reporting where you can.
+release is supported. Upgrade before reporting where you can.
 
 | Version | Supported |
 |---------|-----------|
-| Latest release (currently v1.4.0) | Yes |
+| Latest release (currently v1.5.0) | Yes |
 | Any older release | No — upgrade to the latest release |
 | Unreleased `main` / release candidates | Report findings against them; run a release in production |
 
@@ -46,8 +46,7 @@ In scope — vulnerabilities in gpo-lens itself, including:
 - **A false all-clear**: gpo-lens reports an estate, GPO or setting as clean
   (or omits a finding, coverage gap or caveat it documents that it raises) when
   the export contains the condition. A silent under-report of a cpassword,
-  MS16-072 exposure, dangerous configuration or coverage gap is a security bug,
-  not a cosmetic one.
+  MS16-072 exposure, dangerous configuration or coverage gap is a security bug.
 - **Presenting a partial estate as complete**, or claiming object-level RSoP
   the tool does not compute (see the "Flag, don't simulate" rules in
   `AGENTS.md`).
@@ -72,14 +71,14 @@ In scope — vulnerabilities in gpo-lens itself, including:
 - Narration egress beyond what is documented (estate strings reaching the LLM
   endpoint on a path that promises only signed numeric facts).
 - **The PowerShell collector mutating anything** in Active Directory, Group
-  Policy or SYSVOL. It is read-only by design; if it ever writes, that is a
-  critical bug — report it the same way.
+  Policy or SYSVOL. It is read-only by design; a write is a critical bug.
+  Report it the same way.
 
 Out of scope (welcome as regular issues):
 
 - The Group Policy misconfigurations gpo-lens *detects*. Those are findings in
   your estate, not gpo-lens bugs.
-- Deployments that ignore the documented access boundary — for example a
+- Deployments that ignore the documented access boundary, for example a
   non-loopback listener without the documented reverse proxy, authentication
   and `GPO_LENS_ALLOWED_HOSTS` configuration (see
   [`deploy/README.md`](deploy/README.md#access-boundary)).
@@ -93,8 +92,8 @@ Out of scope (welcome as regular issues):
 Ingest redacts every `cpassword` value and keeps no hash or fingerprint of one,
 so nothing at rest can recognise a value an operator types or pastes later. The
 paths below that store or send operator-supplied text pass one guard,
-`gpo_lens.analyst_text.check_analyst_text`, which **refuses** (never rewrites)
-the text:
+`gpo_lens.analyst_text.check_analyst_text`. It **refuses** the text and never
+rewrites it:
 
 | Path | Stored or sent | On refusal |
 |------|----------------|------------|
@@ -110,9 +109,9 @@ The refusal names the field and the reason ("looks like it contains a Group
 Policy Preferences cpassword; remove it — the value is a recoverable
 credential…"), never the value or any part of it. Callers check what they
 store or send plus 1,024 characters past a truncation point
-(`analyst_text.checked_slice`), so a value cut by the 2,000-character note limit
-is still refused while the work per request stays bounded; text beyond that is
-discarded, never stored.
+(`analyst_text.checked_slice`). A value cut by the 2,000-character note limit
+is therefore still refused, and the work per request stays bounded. Text beyond
+that is discarded, never stored.
 
 `tests/test_analyst_text_guard.py` keeps a static inventory of write paths and
 request sources: SQL writes to the triage tables and the event log, dynamic SQL,
@@ -120,15 +119,15 @@ request sources: SQL writes to the triage tables and the event log, dynamic SQL,
 inputs (`Form`/`File`/`Body`/`Header`/`Query`/`Cookie`), POST-route parameters,
 raw `headers`/`cookies`/`query_params` reads and request body reads. Each must
 be guarded field by field before its sink, or classified with a reason, or the
-test fails; a writer that truncates must guard each field both before and after
+test fails. A writer that truncates must guard each field both before and after
 the truncation. Removing the only guard for a field, or either stage of a
 truncating writer, fails the test; other redundant guards are not individually
-required. It is a heuristic, not dataflow analysis; its blind spots (SQL
+required. The test is a heuristic, not dataflow analysis. Its blind spots (SQL
 assembled outside string literals, values renamed before a sink, sinks reached
 through helpers, new tables nobody listed, writes outside SQLite/events/
-`audit.log`/model calls) are listed in the test. Search terms and filters are
-not stored by gpo-lens; they appear in URLs, so a reverse proxy's access log may
-record them, which the app cannot refuse.
+`audit.log`/model calls) are listed in the test. gpo-lens does not store search
+terms and filters, but they appear in URLs, so a reverse proxy's access log may
+record them. The app cannot refuse them.
 
 **What is refused.** (a) A labelled cpassword in any form the ingest redactor
 recognises: `cpassword="…"`, `cpassword: …`, escaped quotes (`\"`, `&quot;`),
@@ -196,17 +195,18 @@ hard-wrapped prose and ordinary prose pass; the tests pin each case.
 
 The refusal message explains each case.
 
-**Known limits.** The guard is for accidents, not a determined insider: a value
-deliberately broken up (spaces or zero-width characters inside it), re-encoded
-(percent- or entity-encoding, a Unicode look-alike in the label) or glued to
-other letters passes, as does the measured fraction of one-block values above.
+**Known limits.** The guard catches accidents, not a determined insider. These
+pass: a value deliberately broken up (spaces or zero-width characters inside
+it), re-encoded (percent- or entity-encoding, a Unicode look-alike in the
+label) or glued to other letters, and the measured fraction of one-block values
+above.
 
 **Rows written before this guard** are not rewritten: the triage log is
 append-only history. `gpo-lens analyst-text-check` (read-only) lists the table,
 column and id of every stored note, rationale, triage actor, Ask question and
-event principal the guard would now refuse, never the value, and exits 1 when it
-lists any; the operator decides what to do (back up the database before editing
-it).
+event principal the guard would now refuse, never the value. It exits 1 when it
+lists any. The operator decides what to do; back up the database before editing
+it.
 
 **Upgrading a schema v7 database.** The v7→v8 step copies the legacy
 `finding_triage` rows into `finding_triage_event`. Each copied actor, note and
@@ -274,9 +274,11 @@ The provenance table is internal migration state and the trust boundary for
 re-runs: it is only ever written by the copy. Editing it by hand — deleting a
 row, or pointing a legacy row at an unrelated event — makes a later re-run copy
 a row twice or skip it, and foreign-key checks cannot tell. Repair a database
-by restoring a backup, not by editing this table on its own. This does not break "refuse, never rewrite": that contract is
-about what an analyst submits — refusing gives the analyst the chance to remove
-the value and resubmit. A migration has no submitter to refuse to, and copying
+by restoring a backup, not by editing this table on its own.
+
+This does not break "refuse, never rewrite". That contract
+covers what an analyst submits: refusing lets the analyst remove the value and
+resubmit. A migration has no submitter to refuse to, and copying
 the value verbatim would put it into the active, append-only history. Refusing
 the upgrade instead was rejected: nothing in the app can edit the legacy table,
 and a database stuck below v8 would never reach the v11 cpassword scrub, which
@@ -284,12 +286,12 @@ removes estate credentials. A labelled value in a legacy note or rationale is
 also redacted in place by that v11 scrub, as every labelled value in a
 descriptive column is.
 
-The CLI `ask` command checks the whole question, not a slice: it sends the whole
-question, and the argument is local and bounded by the operating system.
+The CLI `ask` command checks the whole question, not a slice, because it sends
+the whole question. The argument is local and bounded by the operating system.
 
 ## Threat model
 
-[`docs/threat-model.md`](docs/threat-model.md) describes the assets, trust
+[`docs/threat-model.md`](docs/threat-model.md) covers the assets, trust
 boundaries (collector host, transport, ingest, database at rest, web server,
 browser, narration and Splunk egress, deployments), the mitigations with code
-and test citations, and the residual risks that are not mitigated by code.
+and test citations, and the residual risks that code does not mitigate.

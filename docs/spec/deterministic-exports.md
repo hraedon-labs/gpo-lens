@@ -2,23 +2,23 @@
 
 A view's Markdown/CSV control uses the same handler, typed query results,
 normalized filters and page window as its HTML response. It does not scrape
-HTML or call narration. Controls preserve query parameters, including snapshot,
-comparison, search and pagination. The dossier also has ledger-only downloads;
-its browser filter updates both dossier and ledger download links.
+HTML or call narration. Controls keep the query parameters, including snapshot,
+comparison, search and pagination. The dossier also has ledger-only downloads,
+and its browser filter updates both the dossier and ledger download links.
 
 Supported web views: GPO dossier (including GPO comparison), settings ledger,
 findings inbox, occurrence observations and triage history, accepted-risk
 register, briefing, exact setting identity, settings search and snapshot
 changelog/settings diff. Baseline/golden comparison uploads offer an output
-selector before uploading: view, Markdown or CSV. All three choices consume
-one computation over that upload. Comparison provenance includes a semantic
-comparator digest and explicitly labels the comparison as ad hoc, because
-these upload workbenches do not persist comparison evaluation runs.
+selector before uploading: view, Markdown or CSV. All three consume one
+computation over that upload. Comparison provenance includes a semantic
+comparator digest and labels the comparison ad hoc, because these upload
+workbenches do not persist comparison evaluation runs.
 
 Downloads require VIEW. Workflow state is visible to viewers; actor, note,
-rationale and audit events require TRIAGE, consistently in HTML and exports.
-This uses existing permissions and changes no IIS or loopback/token boundary.
-CLI exports are authorized by the local operator's access to the database.
+rationale and audit events require TRIAGE, in HTML and exports alike. This uses
+existing permissions and changes no IIS or loopback/token boundary. CLI exports
+are authorized by the local operator's access to the database.
 
 ```bash
 gpo-lens --db estate.sqlite3 export ledger --gpo-id <canonical-guid> --format csv
@@ -32,26 +32,26 @@ gpo-lens --db estate.sqlite3 export diff-settings --snapshot-a 1 --snapshot-b 2 
 gpo-lens --db estate.sqlite3 export baseline-diff --comparator baseline.zip --format md
 ```
 
-`export --help` lists the remaining equivalents: snapshot diff, changelog,
-golden diff, settings dump, two-file settings diff and who-sets. Existing
-commands and their frozen `--json` envelopes are unchanged. Legacy web JSON
-attachment shapes remain available; source subtrees/credentials are redacted.
-The old findings/GPO CSV URLs redirect to the filtered view download.
+`export --help` lists the rest: snapshot diff, changelog, golden diff, settings
+dump, two-file settings diff and who-sets. Existing commands and their frozen
+`--json` envelopes are unchanged. Legacy web JSON attachment shapes remain
+available, with source subtrees and credentials redacted. The old findings and
+GPO CSV URLs redirect to the filtered view download.
 
 Both formats use a common four-column schema: `section,record,field,value`.
-A record number groups fields belonging to the same typed result. Nested
-values use canonical JSON. Metadata is a section in the same schema, so even
-an empty result includes snapshot and evaluation IDs, application/rule/ADMX/
-comparator provenance, filters, coverage/scope/claim caveats and the evidence
-redaction policy. Missing evaluation/ADMX provenance is explicit. Observation
+A record number groups the fields of one typed result. Nested values use
+canonical JSON. Metadata is a section in the same schema, so even an empty
+result includes snapshot and evaluation IDs, application/rule/ADMX/comparator
+provenance, filters, coverage/scope/claim caveats and the evidence redaction
+policy. Missing evaluation or ADMX provenance is stated explicitly. Observation
 history carries each run's own provenance and safe evidence references.
 
 Fields are sorted; query record order is preserved; line endings are LF;
 output is UTF-8. No generated-at timestamp is added. Persisted snapshot,
-observation and triage timestamps are evidence and remain present. Time-sensitive
-briefing/risk classification accepts explicit `as_of` (web) / `--as-of` (CLI)
-for repeatable output; omitting it means current workflow state. New triage or
-analysis changes the input and can therefore change the artifact.
+observation and triage timestamps are evidence and stay. Briefing and risk
+classification are time-sensitive: pass `as_of` (web) or `--as-of` (CLI) for
+repeatable output; without it they reflect current workflow state. New triage
+or analysis changes the input and so can change the artifact.
 
 Credential fields, raw Setting subtrees, source XML and full SDDL are omitted
 with `[REDACTED]` markers. Credential context from the selected snapshots also
@@ -63,7 +63,7 @@ values (for example MinimumPasswordLength) remain visible. Markdown text is
 escaped; every CSV cell beginning with `=`, `+`, `-`, `@`, tab or CR receives
 a leading apostrophe for spreadsheet safety.
 
-Rendering streams one record/line at a time; it never builds the complete
+Rendering streams one record or line at a time. It never builds the complete
 artifact or copies the full result into another output list. Query memory is
 the existing typed view result plus provenance and the distinct credential
 masking context. HTTP transport joins these lines into chunks of at most 64 KiB

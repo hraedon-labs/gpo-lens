@@ -1,14 +1,14 @@
 # Tier-1 normalized model
 
-The deterministic core's data model. Designed against two real exports —
-`WORK-DOMAIN.local` (work, 100+ GPOs, 1,000+ SOMs — the mess, and the reason we wanted a
-work extract) and `lab.example.com` (lab, 12 GPOs, 28 SOMs, clean) — so the field
-mappings below are observed, not guessed.
+The deterministic core's data model. It was designed against two real exports:
+`WORK-DOMAIN.local` (work: 100+ GPOs, 1,000+ SOMs, messy) and `lab.example.com`
+(lab: 12 GPOs, 28 SOMs, clean). The field mappings below are observed, not
+guessed.
 
-Goal: ingest the collector outputs into a normalized model that (a) answers the
-Tier-1 queries deterministically and (b) already carries the fields every later
-feature needs, so nothing reshapes. Settings come from the **GPO report XML**;
-raw-file references come from **SYSVOL**; topology comes from **GPInheritance**.
+Goal: ingest the collector outputs into a normalized model that answers the
+Tier-1 queries deterministically and already carries the fields every later
+feature needs, so nothing reshapes. Settings come from the **GPO report XML**,
+raw-file references from **SYSVOL**, and topology from **GPInheritance**.
 
 ## The join key (get this right first)
 
@@ -21,23 +21,24 @@ Every input identifies a GPO differently:
 | `SYSVOL-Policies\` folder name | `{31B2F340-…}` (braced, upper) |
 | `gpo-metadata.json` `Id` | GUID (case varies) |
 
-**Canonical key = lowercase, braces stripped.** Normalize on ingest; join on that.
-Getting this wrong silently breaks the report↔topology↔SYSVOL joins.
+**Canonical key = lowercase, braces stripped.** Normalize on ingest and join on
+that. A wrong key silently breaks the report↔topology↔SYSVOL joins.
 
 ## Parser gotchas (observed)
 
 - **BOM:** PowerShell 5.1 `Set-Content -Encoding UTF8` writes a UTF-8 BOM. Read all
-  JSON as `utf-8-sig` (or have the collector emit `utf8NoBOM` on PS7 — but the
-  loader must tolerate BOM regardless, since we can't pin the admin's PS version).
+  JSON as `utf-8-sig`. The collector could emit `utf8NoBOM` on PS7, but the
+  loader must tolerate a BOM regardless, because the admin's PS version is not
+  pinned.
 - **Namespaced XML:** root is `{…}report`; match by localname, not prefix.
-- **`<Blocked/>` ExtensionData:** some `ExtensionData/Extension` contain only a
-  `<Blocked/>` element (extension present but unreadable in-report). Tolerate;
-  flag the setting source as `blocked`, don't crash.
+- **`<Blocked/>` ExtensionData:** some `ExtensionData/Extension` elements contain
+  only a `<Blocked/>` element (extension present but unreadable in the report).
+  Tolerate it and flag the setting source as `blocked`; don't crash.
 
 ## Entities
 
 ### Gpo
-One per `GPO` element. Carries everything later features need.
+One per `GPO` element.
 
 | Field | Source |
 |-------|--------|
@@ -54,8 +55,8 @@ One per `GPO` element. Carries everything later features need.
 | `wmi_filter` | `gpo-metadata.json` (report WMI lives elsewhere) |
 | `sysvol_path` | matched SYSVOL folder (for raw-file scans) |
 
-> Version-skew detector (later) = `*_ver_ds != *_ver_sysvol`. (0 cases in both
-> samples — feature is valid, just no positives here.)
+> The later version-skew detector is `*_ver_ds != *_ver_sysvol`. Neither sample
+> has a positive (0 cases), but the feature is valid.
 
 ### GpoLink
 One per `GPO/LinksTo` (repeating; a GPO had 4 in the home lab).
@@ -70,8 +71,8 @@ One per `GPO/LinksTo` (repeating; a GPO had 4 in the home lab).
 ### Setting (the heterogeneous one)
 One per leaf setting inside `Computer|User / ExtensionData / Extension`. Each CSE
 (`ExtensionData/Name`: Registry, Security, Local Users and Groups, Printers,
-Public Key, …) has a **different child schema**, so we do *not* fully schematize
-every CSE in Tier-1. Instead:
+Public Key, …) has a **different child schema**, so Tier-1 does *not* fully
+schematize every CSE. Instead:
 
 | Field | How |
 |-------|-----|
@@ -90,9 +91,9 @@ every CSE in Tier-1. Instead:
 - *GPP (Windows Registry, Local Users and Groups, Printers, Drives…)* → CSE-native
   key; conflict identity here is best-effort, scoped conservatively.
 
-`from_disabled_side` matters: the home lab has **several disabled-but-populated sides** —
-settings authored then the side switched off. They must be flagged, not silently
-counted as active.
+`from_disabled_side` matters: the home lab has **several disabled-but-populated
+sides**, where settings were authored and the side was then switched off. Flag
+them; never count them silently as active.
 
 ### Som (topology — from `gp-inheritance.json`)
 One per SOM record (1,000+ in the home lab — must scale).
@@ -103,18 +104,20 @@ One per SOM record (1,000+ in the home lab — must scale).
 | `inheritance_blocked` | `GpoInheritanceBlocked` (12 true in lab, 3 at work) |
 | `links[]` | `InheritedGpoLinks[]`: `{gpo_id, order, enabled, enforced, target}` |
 
-This is the resolved, ordered, block/enforced-aware chain — the platform already
+This is the resolved, ordered, block/enforced-aware chain; the platform already
 did the precedence walk. The topology layer (Tier 2.5) consumes it directly.
 
 ### Delegation (from `SecurityDescriptor/Permissions`)
-Per-trustee permission rows. Powers the delegation audit and the **MS16-072**
-check: flag GPOs whose trustees lack Authenticated Users / Domain Computers read.
+Per-trustee permission rows. They power the delegation audit and the
+**MS16-072** check, which flags GPOs whose trustees lack Authenticated Users /
+Domain Computers read.
 
 ### FileRef / GppSecretRef (from SYSVOL — captured now, scanned later)
-Record `sysvol_path` per GPO now; the cpassword scan (MS14-025) and broken-ref
-inventory walk the GPP XML (`Groups.xml`, `Services.xml`, `Drives.xml`,
-`ScheduledTasks.xml`, `DataSources.xml`). Both sample domains have carriers;
-**neither has a live cpassword** (clean) — good negative-path test data.
+Record `sysvol_path` per GPO now. The cpassword scan (MS14-025) and the
+broken-ref inventory walk the GPP XML (`Groups.xml`, `Services.xml`,
+`Drives.xml`, `ScheduledTasks.xml`, `DataSources.xml`). Both sample domains have
+carriers, but **neither has a live cpassword**, which makes them good
+negative-path test data.
 
 ## Tier-1 queries → entities
 
@@ -143,7 +146,7 @@ inventory walk the GPP XML (`Groups.xml`, `Services.xml`, `Drives.xml`,
 
 ## Open mappings to verify against more data
 
-- Admin-template (`Registry` CSE) leaf shape when **not** `<Blocked/>` — need a
-  non-blocked sample to pin the policy/registry identity precisely.
-- GPP conflict identity (Tier-2.5) — define per-CSE natural keys.
-- `gpo-metadata.json` `Id` casing — confirm normalization covers it.
+- Admin-template (`Registry` CSE) leaf shape when **not** `<Blocked/>`: a
+  non-blocked sample is needed to pin the policy/registry identity precisely.
+- GPP conflict identity (Tier-2.5): define per-CSE natural keys.
+- `gpo-metadata.json` `Id` casing: confirm that normalization covers it.
