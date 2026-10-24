@@ -5,6 +5,12 @@
 Draft **v1.6.0**. The owner sets the release target and date; the status-colour
 change is visible, so a patch number was not assumed.
 
+### ZIP import cleanup
+
+- Preserve the original extraction error or cancellation if listing the temporary
+  extraction directory fails during cleanup. Cleanup warnings report only the
+  exception class; inaccessible files may remain for the caller's final cleanup.
+
 ### Adopt patina 0.6.0's vendored token contract
 
 The web UI's design tokens are no longer a hand-synced copy. They are vendored
