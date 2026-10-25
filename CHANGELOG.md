@@ -12,6 +12,11 @@ change is visible, so a patch number was not assumed.
   Representable deadlines, inclusive expiry boundaries and time-zone offsets
   retain their existing behavior.
 
+- Finding details and historical GPO views return their existing not-found
+  response for record IDs outside SQLite's integer range. Changelog selectors
+  ignore unusable numeric input like other invalid text, including oversized
+  integers and digit characters that Python cannot parse, instead of failing.
+
 ### Reject conflicting ZIP path components
 
 Collector ZIP imports reject case aliases in implicit or explicit directories,

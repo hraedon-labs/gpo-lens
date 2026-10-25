@@ -14,11 +14,23 @@ from fastapi.templating import Jinja2Templates
 from gpo_lens import queries
 from gpo_lens import store as _store
 from gpo_lens.exports import ExportSection, export_context
+from gpo_lens.normalize import sqlite_int
 from gpo_lens.safe_output import safe_data
 from gpo_lens.web._helpers import get_ro_conn
 from gpo_lens.web.auth import Permission, Principal, requires
 from gpo_lens.web.page_narration import make_action
 from gpo_lens.web.routes.export import view_export
+
+
+def _snapshot_id(value: str) -> int | None:
+    if not value.isdigit():
+        return None
+    try:
+        return sqlite_int(int(value))
+    except ValueError:
+        # isdigit() includes characters int() cannot parse, and very long
+        # decimal strings may exceed Python's integer conversion limit.
+        return None
 
 
 def register(app: FastAPI, templates: Jinja2Templates) -> None:
@@ -37,8 +49,8 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
             snapshots = _store.list_snapshots(conn)
             entries: list[queries.ChangelogEntry] = []
             settings_changes: list[queries.SnapshotSettingChange] = []
-            snap_a_id = int(snap_a) if snap_a.isdigit() else None
-            snap_b_id = int(snap_b) if snap_b.isdigit() else None
+            snap_a_id = _snapshot_id(snap_a)
+            snap_b_id = _snapshot_id(snap_b)
             if snap_a_id is not None and snap_b_id is not None:
                 entries = queries.snapshot_changelog(conn, snap_a_id, snap_b_id)
                 settings_changes = queries.snapshot_settings_diff(conn, snap_a_id, snap_b_id)
