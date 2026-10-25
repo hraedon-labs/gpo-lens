@@ -5,6 +5,14 @@
 Draft **v1.6.0**. The owner sets the release target and date; the status-colour
 change is visible, so a patch number was not assumed.
 
+### Clarify resultant scope warnings
+
+Approximation warnings describe the requested DN's missing scope match and
+the use of a collected ancestor or fallback chain. Previously a full object
+DN could produce a warning that its OU was uncollected even when that OU was
+present. The warning still explains the limit on checking inheritance blocking
+in uncollected intermediate OUs.
+
 ### Adopt patina 0.6.0's vendored token contract
 
 The web UI's design tokens are no longer a hand-synced copy. They are vendored
