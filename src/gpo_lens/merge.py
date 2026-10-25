@@ -1078,8 +1078,8 @@ def principal_resultant(
         dn_norm = ",".join(_dn_parts_without_padding(dn)).lower()
         if dn_norm != som_path.lower():
             approx_msgs.append(
-                "Principal's OU is not in the collected estate; the chain was "
-                "resolved from the nearest ancestor OU. inheritance_blocked on "
+                "Principal target DN did not match a collected scope; the chain "
+                "uses a collected ancestor or fallback scope. Inheritance blocking on "
                 "uncollected intermediate OUs could not be checked."
             )
     if is_user_computer_pair:
@@ -1094,8 +1094,8 @@ def principal_resultant(
             comp_dn_norm = ",".join(_dn_parts_without_padding(comp_dn_resolved)).lower()
             if comp_dn_norm != comp_som.lower():
                 approx_msgs.append(
-                    "Computer's OU is not in the collected estate; its chain "
-                    "was resolved from the nearest ancestor OU."
+                    "Computer target DN did not match a collected scope; its chain "
+                    "uses a collected ancestor or fallback scope."
                 )
 
         loopback_map = loopback_awareness(estate)

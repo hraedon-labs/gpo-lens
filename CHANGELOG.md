@@ -33,6 +33,14 @@ names. Previously trimming a DN component could skip a collected OU and use
 the domain's chain instead. Ordinary whitespace around DN separators remains
 supported; this does not add general DN equivalence or object-level RSoP.
 
+### Clarify resultant scope warnings
+
+Approximation warnings describe the requested DN's missing scope match and
+the use of a collected ancestor or fallback chain. Previously a full object
+DN could produce a warning that its OU was uncollected even when that OU was
+present. The warning still explains the limit on checking inheritance blocking
+in uncollected intermediate OUs.
+
 ### Adopt patina 0.6.0's vendored token contract
 
 The web UI's design tokens are no longer a hand-synced copy. They are vendored
