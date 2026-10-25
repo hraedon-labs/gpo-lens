@@ -93,10 +93,13 @@ def safe_extract(
                     spelling = "/".join(parts[:depth])
                     key = spelling.casefold()
                     directory = depth <= parent_count
+                    # Parents were checked at earlier depths, so retain only
+                    # this component's spelling rather than another full prefix.
+                    entry = (parts[depth - 1], directory)
                     existing = paths.get(key)
-                    if existing is not None and existing != (spelling, directory):
+                    if existing is not None and existing != entry:
                         raise ValueError(f"zip duplicate path blocked (member {index})")
-                    paths[key] = (spelling, directory)
+                    paths[key] = entry
                     if directory:
                         directories.add(key)
                 if len(directories) > MAX_DIRECTORIES:

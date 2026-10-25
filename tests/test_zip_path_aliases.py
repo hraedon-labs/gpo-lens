@@ -83,7 +83,7 @@ def collector_members(folder: str) -> list[tuple[str, str | bytes]]:
             json.dumps(
                 [
                     {
-                        "Id": "11111111-2222-4333-8444-555555555555",
+                        "Id": "11111111222243338444555555555555",
                         "DisplayName": "Synthetic missing GPO",
                     }
                 ]

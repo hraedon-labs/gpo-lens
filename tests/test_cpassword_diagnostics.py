@@ -267,7 +267,8 @@ def test_zip_extraction_errors_never_echo_member_names(
     else:
         _collector_zip(archive, [(V, b"file"), (f"{V}/inner", b"x")])
     proc = _cli_subprocess(tmp_path, "--db", str(tmp_path / "cli.sqlite3"), "ingest", str(archive))
-    assert proc.returncode != 0 and "could not be extracted" in proc.stderr
+    expected_error = "duplicate path" if kind == "file-dir-collision" else "could not be extracted"
+    assert proc.returncode != 0 and expected_error in proc.stderr
     captured.add(proc.stdout, proc.stderr)
     audit = tmp_path / "audit.log"
     monkeypatch.setenv("GPO_LENS_AUDIT_LOG", str(audit))
