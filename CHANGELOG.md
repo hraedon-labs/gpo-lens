@@ -5,6 +5,13 @@
 Draft **v1.6.0**. The owner sets the release target and date; the status-colour
 change is visible, so a patch number was not assumed.
 
+### Fixed
+
+- Briefing views and Markdown/CSV exports no longer fail when an accepted
+  `as_of` date near year 9999 makes the accepted-risk expiry horizon overflow.
+  Representable deadlines, inclusive expiry boundaries and time-zone offsets
+  retain their existing behavior.
+
 ### Reject conflicting ZIP path components
 
 Collector ZIP imports reject case aliases in implicit or explicit directories,
