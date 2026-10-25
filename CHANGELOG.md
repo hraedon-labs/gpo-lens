@@ -7,6 +7,8 @@ change is visible, so a patch number was not assumed.
 
 ### Fixed
 
+- Sorting the GPO inventory by modification time handles early and far-future dates without platform timestamp errors or lost microsecond precision. Timestamps without an offset use UTC consistently, and missing dates stay last.
+
 - Briefing views and Markdown/CSV exports no longer fail when an accepted
   `as_of` date near year 9999 makes the accepted-risk expiry horizon overflow.
   Representable deadlines, inclusive expiry boundaries and time-zone offsets
