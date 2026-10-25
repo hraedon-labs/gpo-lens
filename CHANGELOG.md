@@ -5,6 +5,10 @@
 Draft **v1.6.0**. The owner sets the release target and date; the status-colour
 change is visible, so a patch number was not assumed.
 
+### Fixed
+
+- Sorting the GPO inventory by modification time handles early and far-future dates without platform timestamp errors or lost microsecond precision. Timestamps without an offset use UTC consistently, and missing dates stay last.
+
 ### Adopt patina 0.6.0's vendored token contract
 
 The web UI's design tokens are no longer a hand-synced copy. They are vendored

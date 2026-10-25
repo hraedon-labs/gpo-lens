@@ -14,6 +14,7 @@ import io
 import json
 import sqlite3
 from collections.abc import Iterator, Mapping
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
@@ -298,6 +299,16 @@ def filter_soms(soms: list[Any], q: str, type_filter: str, sort: str) -> list[An
     return result
 
 
+def _modified_sort_key(value: datetime | None) -> tuple[bool, timedelta]:
+    """Exact UTC order, including dates outside platform timestamp limits."""
+    if value is None:
+        return False, timedelta()
+    # Report timestamps without an offset use UTC, as in stale_gpos.
+    if value.tzinfo is None or value.utcoffset() is None:
+        value = value.replace(tzinfo=UTC)
+    return True, value - datetime(1970, 1, 1, tzinfo=UTC)
+
+
 def filter_gpos(gpos: list[Any], q: str, status: str, sort: str) -> list[Any]:
     """Apply a status filter, text search, and sort to the GPO inventory.
 
@@ -329,7 +340,7 @@ def filter_gpos(gpos: list[Any], q: str, status: str, sort: str) -> list[Any]:
         # Most-recent first; GPOs without a timestamp sort last.
         result = sorted(
             result,
-            key=lambda g: g.modified.timestamp() if g.modified else float("-inf"),
+            key=lambda g: _modified_sort_key(g.modified),
             reverse=True,
         )
     else:
