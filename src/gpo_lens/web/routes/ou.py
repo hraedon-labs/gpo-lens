@@ -7,13 +7,12 @@ threadpool, preventing synchronous SQLite from blocking the event loop
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from gpo_lens import queries, topology
+from gpo_lens.model import Estate
 from gpo_lens.web._helpers import (
     _VALID_OU_SORTS,
     _VALID_OU_TYPES,
@@ -28,9 +27,6 @@ from gpo_lens.web._helpers import (
 from gpo_lens.web.auth import Permission, Principal, requires
 from gpo_lens.web.page_narration import make_action
 
-if TYPE_CHECKING:
-    from gpo_lens.model import Estate
-
 
 def _estate_for_ou(request: Request) -> Estate:
     from gpo_lens.store import list_snapshots, load_estate
@@ -40,6 +36,8 @@ def _estate_for_ou(request: Request) -> Estate:
         snapshots = list_snapshots(conn)
         snapshot_id = snapshots[0][0] if snapshots else None
         request.state.ou_snapshot_id = snapshot_id
+        if snapshot_id is None:
+            return Estate()
         return load_estate(conn, snapshot_id)
     finally:
         conn.close()
@@ -73,6 +71,7 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
                 "soms": page_soms,
                 "pag": pag,
                 "all_soms_count": len(all_soms),
+                "no_estate": request.state.ou_snapshot_id is None,
                 "filtered_count": len(filtered),
                 "f_q": q,
                 "f_type": type,

@@ -5,6 +5,13 @@
 Draft **v1.6.0**. The owner sets the release target and date; the status-colour
 change is visible, so a patch number was not assumed.
 
+### Directory before the first import
+
+The Directory page shows an empty state before any estate is imported, and
+unknown detail links return 404. Previously both could fail with a server
+error. The page distinguishes an unloaded estate from a recorded snapshot
+containing no scopes, and reads the next imported snapshot normally.
+
 ### Adopt patina 0.6.0's vendored token contract
 
 The web UI's design tokens are no longer a hand-synced copy. They are vendored
