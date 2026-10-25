@@ -11,6 +11,7 @@ import os
 import re
 import sqlite3
 import tempfile
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -933,10 +934,6 @@ class TestGpoDetailRendering:
 class TestEmptyStates:
     """An empty database (no snapshots) must not crash any page."""
 
-    # /ou is excluded — the OU list route does not catch ValueError from
-    # load_estate on an empty DB (pre-existing gap). It is tracked separately;
-    # the parametrized test below documents the expected behaviour for the
-    # pages that DO handle empty estates gracefully.
     _EMPTY_SAFE_PAGES = [
         "/",
         "/danger",
@@ -947,6 +944,7 @@ class TestEmptyStates:
         "/ingest",
         "/resultant",
         "/inventory",
+        "/ou",
         "/trends",
     ]
 
@@ -955,21 +953,66 @@ class TestEmptyStates:
         resp = _empty_client.get(path)
         assert resp.status_code != 500, f"{path} crashed on empty DB"
 
-    @pytest.mark.xfail(
-        reason="OU list route does not catch ValueError on empty DB "
-        "(pre-existing gap, not introduced by WI-060)",
-        strict=True,
-    )
-    def test_empty_db_ou_list_known_gap(self, _empty_client) -> None:
-        """The /ou route raises ValueError → 500 on an empty DB.
-
-        This is a known pre-existing gap in the OU list route (it calls
-        ``load_estate`` without a try/except, unlike the dashboard and
-        danger routes). This test documents the gap so it is not silently
-        forgotten; when fixed, remove the ``xfail`` marker.
-        """
+    def test_empty_db_ou_list_shows_no_estate(self, _empty_client) -> None:
         resp = _empty_client.get("/ou")
         assert resp.status_code == 200
+        assert "No estate loaded" in resp.text
+        assert _has_class(resp.text, "gp-empty")
+
+    def test_empty_db_ou_detail_is_not_found(self, _empty_client) -> None:
+        resp = _empty_client.get("/ou/ou=missing,dc=example,dc=com")
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "OU not found"
+
+    def test_recorded_snapshot_without_scopes_is_not_called_missing(
+        self, _empty_client, _empty_db
+    ) -> None:
+        from gpo_lens.model import Estate
+        from gpo_lens.store import save_estate
+
+        with closing(sqlite3.connect(_empty_db)) as conn:
+            save_estate(conn, Estate(domain="example.com"))
+        resp = _empty_client.get("/ou")
+        assert resp.status_code == 200
+        assert "No scopes of management" in resp.text
+        assert "No scopes were recorded in this snapshot" in resp.text
+        assert "No estate loaded" not in resp.text
+
+    def test_directory_reads_a_new_snapshot_after_an_empty_visit(
+        self, _empty_client, _empty_db
+    ) -> None:
+        from gpo_lens.model import Estate, Som
+        from gpo_lens.store import save_estate
+
+        assert _empty_client.get("/ou").status_code == 200
+        estate = Estate(
+            domain="example.com",
+            soms=[Som("ou=synthetic,dc=example,dc=com", "Synthetic OU", "ou", False)],
+        )
+        with closing(sqlite3.connect(_empty_db)) as conn:
+            save_estate(conn, estate)
+        resp = _empty_client.get("/ou")
+        assert resp.status_code == 200
+        assert "Synthetic OU" in resp.text
+        assert "No estate loaded" not in resp.text
+        assert "No scopes of management" not in resp.text
+
+    @pytest.mark.parametrize("path", ["/ou", "/ou/ou=missing,dc=example,dc=com"])
+    def test_existing_snapshot_load_errors_are_not_rendered_as_empty(
+        self, _empty_client, _empty_db, monkeypatch, path
+    ) -> None:
+        from gpo_lens.model import Estate
+        from gpo_lens.store import save_estate
+
+        with closing(sqlite3.connect(_empty_db)) as conn:
+            save_estate(conn, Estate(domain="example.com"))
+
+        def broken_snapshot(_conn, _snapshot_id):
+            raise ValueError("synthetic snapshot load failure")
+
+        monkeypatch.setattr("gpo_lens.store.load_estate", broken_snapshot)
+        with pytest.raises(ValueError, match="synthetic snapshot load failure"):
+            _empty_client.get(path)
 
     def test_empty_db_dashboard_shows_no_estate(self, _empty_client) -> None:
         resp = _empty_client.get("/")

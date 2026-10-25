@@ -125,18 +125,27 @@ class LiveServer:
             conn.close()
 
 
-def start(tmp: Path) -> LiveServer:
+def start(tmp: Path, *, seed: bool = True) -> LiveServer:
     estate = tmp / "estate"
     shutil.copytree(GOLDEN, estate)
     db = tmp / "browser.sqlite3"
     env = _child_env(tmp)
-    subprocess.run(
-        [sys.executable, "-m", "gpo_lens", "--db", str(db), "ingest", str(estate)],
-        check=True,
-        env=env,
-        capture_output=True,
-        timeout=120,
-    )
+    if seed:
+        subprocess.run(
+            [sys.executable, "-m", "gpo_lens", "--db", str(db), "ingest", str(estate)],
+            check=True,
+            env=env,
+            capture_output=True,
+            timeout=120,
+        )
+    else:
+        from gpo_lens.store import init_db
+
+        conn = sqlite3.connect(db)
+        try:
+            init_db(conn)
+        finally:
+            conn.close()
     # Port TOCTOU: the port is free when chosen but another process may take it
     # before uvicorn binds. Health is only trusted when THIS process is alive and
     # its own log reports the bind on this port; a bind failure retries on a new

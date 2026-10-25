@@ -94,8 +94,8 @@
 {% endif %}
 {% else %}
 <div class="gp-empty">
-  <div class="title">No scopes of management</div>
-  <div class="sub">Ingest an estate export to populate the directory.</div>
+  <div class="title">{% if no_estate %}No estate loaded{% else %}No scopes of management{% endif %}</div>
+  <div class="sub">{% if no_estate %}Ingest an estate export to populate the directory.{% else %}No scopes were recorded in this snapshot.{% endif %}</div>
 </div>
 {% endif %}
 {% endblock %}

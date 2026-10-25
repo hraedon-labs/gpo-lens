@@ -41,6 +41,13 @@ DN could produce a warning that its OU was uncollected even when that OU was
 present. The warning still explains the limit on checking inheritance blocking
 in uncollected intermediate OUs.
 
+### Directory before the first import
+
+The Directory page shows an empty state before any estate is imported, and
+unknown detail links return 404. Previously both could fail with a server
+error. The page distinguishes an unloaded estate from a recorded snapshot
+containing no scopes, and reads the next imported snapshot normally.
+
 ### Adopt patina 0.6.0's vendored token contract
 
 The web UI's design tokens are no longer a hand-synced copy. They are vendored
