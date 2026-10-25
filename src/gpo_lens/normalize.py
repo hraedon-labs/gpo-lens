@@ -108,6 +108,11 @@ def parse_int(text: str | None) -> int | None:
         return None
 
 
+def sqlite_int(value: int) -> int | None:
+    """Return a bindable SQLite integer, or None outside its signed 64-bit range."""
+    return value if -(2**63) <= value <= 2**63 - 1 else None
+
+
 REGISTRY_CSES = frozenset({"registry", "windows registry"})
 
 

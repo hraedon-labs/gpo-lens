@@ -5,6 +5,13 @@
 Draft **v1.6.0**. The owner sets the release target and date; the status-colour
 change is visible, so a patch number was not assumed.
 
+### Fixed
+
+- Finding details and historical GPO views return their existing not-found
+  response for record IDs outside SQLite's integer range. Changelog selectors
+  ignore unusable numeric input like other invalid text, including oversized
+  integers and digit characters that Python cannot parse, instead of failing.
+
 ### Adopt patina 0.6.0's vendored token contract
 
 The web UI's design tokens are no longer a hand-synced copy. They are vendored
