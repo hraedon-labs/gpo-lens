@@ -77,16 +77,28 @@ def safe_extract(
             if sum(len(info.filename.encode("utf-8")) for info in members) > MAX_FILENAME_BYTES:
                 raise ValueError("zip total filename bytes exceeds limit")
             directories: set[str] = set()
+            # One portable namespace, including implicit parents. Otherwise
+            # Export/report and export/inventory split into different trees
+            # on Linux, silently excluding some collector inputs.
+            paths: dict[str, tuple[str, bool]] = {}
             # Preflight the entire directory before creating/opening anything.
-            for info in members:
+            for index, info in enumerate(members, 1):
                 parts = info.filename.replace("\\", "/").rstrip("/").split("/")
                 if len(parts) > MAX_PATH_DEPTH:
                     raise ValueError("zip path depth exceeds limit")
                 parent_count = (
                     len(parts) if info.is_dir() or info.filename.endswith("\\") else len(parts) - 1
                 )
-                for depth in range(1, parent_count + 1):
-                    directories.add("/".join(parts[:depth]).casefold())
+                for depth in range(1, len(parts) + 1):
+                    spelling = "/".join(parts[:depth])
+                    key = spelling.casefold()
+                    directory = depth <= parent_count
+                    existing = paths.get(key)
+                    if existing is not None and existing != (spelling, directory):
+                        raise ValueError(f"zip duplicate path blocked (member {index})")
+                    paths[key] = (spelling, directory)
+                    if directory:
+                        directories.add(key)
                 if len(directories) > MAX_DIRECTORIES:
                     raise ValueError("zip directory count exceeds limit")
             for index, info in enumerate(members, 1):

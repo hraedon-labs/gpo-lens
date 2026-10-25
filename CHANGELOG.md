@@ -5,6 +5,14 @@
 Draft **v1.6.0**. The owner sets the release target and date; the status-colour
 change is visible, so a patch number was not assumed.
 
+### Reject conflicting ZIP path components
+
+Collector ZIP imports reject case aliases in implicit or explicit directories,
+and paths used as both files and directories, before reading any members.
+Previously `Export/AllGPOs.xml` and `export/gpo-inventory.json` could split on
+Linux and silently lose the inventory's coverage gaps. Consistent wrappers
+and explicit/implicit use of the same directory remain supported.
+
 ### Adopt patina 0.6.0's vendored token contract
 
 The web UI's design tokens are no longer a hand-synced copy. They are vendored
