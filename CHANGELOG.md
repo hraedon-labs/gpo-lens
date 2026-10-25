@@ -13,6 +13,12 @@ Previously `Export/AllGPOs.xml` and `export/gpo-inventory.json` could split on
 Linux and silently lose the inventory's coverage gaps. Consistent wrappers
 and explicit/implicit use of the same directory remain supported.
 
+### ZIP import cleanup
+
+- Preserve the original extraction error or cancellation if listing the temporary
+  extraction directory fails during cleanup. Cleanup warnings report only the
+  exception class; inaccessible files may remain for the caller's final cleanup.
+
 ### Adopt patina 0.6.0's vendored token contract
 
 The web UI's design tokens are no longer a hand-synced copy. They are vendored

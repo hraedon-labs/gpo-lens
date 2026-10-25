@@ -177,19 +177,26 @@ def safe_extract(
         # outer ``iterdir`` guard is needed because ``dest`` may not exist
         # (extraction failed before any file was written) or may have been
         # removed mid-extraction by a concurrent process.
-        if dest.is_dir():
-            for child in dest.iterdir():
-                try:
-                    if child.is_symlink() or not child.is_dir():
-                        child.unlink()
-                    else:
-                        shutil.rmtree(child)
-                except OSError as cleanup_exc:
-                    # Member names are attacker-controlled: never logged.
-                    _logger.warning(
-                        "cleanup after extraction failure failed (%s)",
-                        type(cleanup_exc).__name__,
-                    )
+        try:
+            if dest.is_dir():
+                for child in dest.iterdir():
+                    try:
+                        if child.is_symlink() or not child.is_dir():
+                            child.unlink()
+                        else:
+                            shutil.rmtree(child)
+                    except OSError as cleanup_exc:
+                        # Member names are attacker-controlled: never logged.
+                        _logger.warning(
+                            "cleanup after extraction failure failed (%s)",
+                            type(cleanup_exc).__name__,
+                        )
+        except OSError as cleanup_exc:
+            # The destination can disappear or become unreadable after is_dir.
+            _logger.warning(
+                "cleanup after extraction failure failed (%s)",
+                type(cleanup_exc).__name__,
+            )
         raise
 
 
