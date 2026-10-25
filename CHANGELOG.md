@@ -26,6 +26,13 @@ an extension, such as `NUL .txt`, including parent directories. These aliases
 previously passed the portable filename checks on Linux. Ordinary filenames
 with spaces before an extension remain supported.
 
+### Preserve escaped spaces in OU ancestry
+
+Topology and principal-chain lookups retain escaped trailing spaces in OU
+names. Previously trimming a DN component could skip a collected OU and use
+the domain's chain instead. Ordinary whitespace around DN separators remains
+supported; this does not add general DN equivalence or object-level RSoP.
+
 ### Adopt patina 0.6.0's vendored token contract
 
 The web UI's design tokens are no longer a hand-synced copy. They are vendored

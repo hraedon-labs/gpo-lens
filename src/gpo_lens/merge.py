@@ -42,7 +42,7 @@ from gpo_lens.model import Side
 from gpo_lens.normalize import is_registry_cse
 from gpo_lens.topology import (
     EffectiveGpo,
-    _split_dn,
+    _dn_parts_without_padding,
     loopback_awareness,
     som_effective_gpos,
 )
@@ -775,7 +775,7 @@ class PrincipalResultant:
 def _resolve_som_path_for_principal(estate: Estate, dn: str | None) -> str:
     """Find the most specific SOM path for a principal's DN, or the domain root."""
     if dn:
-        parts = [p.strip() for p in _split_dn(dn)]
+        parts = _dn_parts_without_padding(dn)
         for i in range(len(parts)):
             candidate = ",".join(parts[i:])
             for som in estate.soms:
@@ -1075,7 +1075,7 @@ def principal_resultant(
 
     approx_msgs: list[str] = []
     if dn and som_path and chain:
-        dn_norm = ",".join(p.strip() for p in _split_dn(dn)).lower()
+        dn_norm = ",".join(_dn_parts_without_padding(dn)).lower()
         if dn_norm != som_path.lower():
             approx_msgs.append(
                 "Principal's OU is not in the collected estate; the chain was "
@@ -1091,7 +1091,7 @@ def principal_resultant(
         comp_chain = som_effective_gpos(estate, comp_som) if comp_som else []
         comp_dn_resolved = computer_dn if computer_dn is not None else dn
         if comp_dn_resolved and comp_som and comp_chain:
-            comp_dn_norm = ",".join(p.strip() for p in _split_dn(comp_dn_resolved)).lower()
+            comp_dn_norm = ",".join(_dn_parts_without_padding(comp_dn_resolved)).lower()
             if comp_dn_norm != comp_som.lower():
                 approx_msgs.append(
                     "Computer's OU is not in the collected estate; its chain "

@@ -159,6 +159,10 @@ def som_effective_gpos(
   find the closest non-site SOM that *is* in the estate. If a parent
   SOM is found, its `InheritedGpoLinks` are returned. If no parent is
   found either, return `[]` (not an exception).
+  - Whitespace trimming around RDN separators must preserve escaped trailing
+    spaces in a value, including odd/even backslash runs. The same rule applies
+    to principal-chain lookup in `merge.py`; it does not decode or equate
+    different DN spellings.
   - **Limitation:** `inheritance_blocked` on intermediate OUs that are
     *not* in the estate cannot be checked. The returned chain is an
     approximation — the parent's resolved links, which may not reflect
