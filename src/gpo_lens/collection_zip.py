@@ -113,11 +113,12 @@ def safe_extract(
                 if member.startswith("/") or ":" in member or ".." in member.split("/"):
                     raise ValueError(f"zip-slip blocked (member {index})")
                 components = member.removesuffix("/").split("/")
+                # DOS device stems ignore spaces before an extension: NUL .txt.
                 if any(
                     not part
                     or part in {".", ".."}
                     or part.rstrip(" .") != part
-                    or part.split(".", 1)[0].upper() in _WINDOWS_DEVICES
+                    or part.split(".", 1)[0].rstrip(" ").upper() in _WINDOWS_DEVICES
                     or any(ord(char) < 32 or char in '<>"|?*' for char in part)
                     for part in components
                 ):

@@ -19,6 +19,13 @@ and explicit/implicit use of the same directory remain supported.
   extraction directory fails during cleanup. Cleanup warnings report only the
   exception class; inaccessible files may remain for the caller's final cleanup.
 
+### ZIP device-name aliases
+
+Collector ZIP imports reject reserved Windows device names with spaces before
+an extension, such as `NUL .txt`, including parent directories. These aliases
+previously passed the portable filename checks on Linux. Ordinary filenames
+with spaces before an extension remain supported.
+
 ### Adopt patina 0.6.0's vendored token contract
 
 The web UI's design tokens are no longer a hand-synced copy. They are vendored
