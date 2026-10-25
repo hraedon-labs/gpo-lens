@@ -5,6 +5,13 @@
 Draft **v1.6.0**. The owner sets the release target and date; the status-colour
 change is visible, so a patch number was not assumed.
 
+### Fixed
+
+- Briefing views and Markdown/CSV exports no longer fail when an accepted
+  `as_of` date near year 9999 makes the accepted-risk expiry horizon overflow.
+  Representable deadlines, inclusive expiry boundaries and time-zone offsets
+  retain their existing behavior.
+
 ### Adopt patina 0.6.0's vendored token contract
 
 The web UI's design tokens are no longer a hand-synced copy. They are vendored
