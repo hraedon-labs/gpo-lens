@@ -19,6 +19,13 @@ change is visible, so a patch number was not assumed.
   ignore unusable numeric input like other invalid text, including oversized
   integers and digit characters that Python cannot parse, instead of failing.
 
+- Triaging a finding and deleting a snapshot with an ID outside SQLite's integer
+  range now return 404 instead of a server error.
+
+- `som_effective_gpos` resolves a DN with padding around a separator (for
+  example `OU=A , DC=example,DC=com`) to that OU's own chain instead of its
+  parent's.
+
 ### Reject conflicting ZIP path components
 
 Collector ZIP imports reject case aliases in implicit or explicit directories,

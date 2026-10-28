@@ -170,6 +170,14 @@ def som_effective_gpos(
                 target_som = som
                 break
         if target_som is None:
+            # Retry the DN itself with separator padding removed, so a padded
+            # spelling of a collected OU resolves to that OU, not its parent.
+            normalised = ",".join(_dn_parts_without_padding(som_path)).lower()
+            for som in estate.soms:
+                if som.path.lower() == normalised:
+                    target_som = som
+                    break
+        if target_som is None:
             target_som = _find_parent_som(estate, som_path)
     if target_som is None:
         return []

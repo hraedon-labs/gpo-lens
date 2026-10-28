@@ -119,3 +119,38 @@ def test_resultant_uses_the_collected_ou_setting_instead_of_domain_fallback(side
     assert len(result.settings) == 1
     assert result.settings[0].winning_value == "collected OU"
     assert result.settings[0].winning_gpo_id == OU_GPO
+
+
+@pytest.mark.parametrize(
+    "presented",
+    [
+        "OU=A , DC=example,DC=com",
+        "OU=A,DC=example , DC=com",
+        " OU=A , DC=example , DC=com ",
+        "ou=a ,dc=EXAMPLE,DC=com",
+        "OU=A,\tDC=example,DC=com",
+    ],
+)
+def test_padded_own_dn_resolves_to_the_ou_not_its_parent(presented):
+    estate = estate_with_ou("OU=A," + ROOT)
+    result = som_effective_gpos(estate, presented)
+    assert [g.gpo_id for g in result] == [OU_GPO]
+    assert _resolve_som_path_for_principal(estate, presented) == "OU=A," + ROOT
+
+
+def test_padded_dn_of_uncollected_ou_still_falls_back_to_collected_parent():
+    estate = estate_with_ou("OU=A," + ROOT)
+    result = som_effective_gpos(estate, "OU=Uncollected , OU=A , DC=example,DC=com")
+    assert [g.gpo_id for g in result] == [OU_GPO]
+    # A different, uncollected sibling falls back to the domain root chain.
+    sibling = som_effective_gpos(estate, "OU=A2 , DC=example,DC=com")
+    assert [g.gpo_id for g in sibling] == [ROOT_GPO]
+
+
+def test_padded_escaped_space_ou_is_not_conflated_with_plain_ou():
+    escaped = r"OU=Name\ ," + ROOT
+    estate = estate_with_ou(escaped)
+    estate.soms.append(Som("OU=Name," + ROOT, "Plain", "ou", False, []))
+    result = som_effective_gpos(estate, r"OU=Name\  , DC=example,DC=com")
+    assert [g.gpo_id for g in result] == [OU_GPO]
+    assert som_effective_gpos(estate, "OU=Name , DC=example,DC=com") == []

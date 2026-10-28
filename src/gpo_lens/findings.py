@@ -183,6 +183,8 @@ def triage_finding(
     note = (note or "")[:2000]
     actor = (actor or "unknown")[:256]
 
+    if sqlite_int(finding_id) is None:
+        raise ValueError(f"finding {finding_id} not found")
     row = conn.execute(
         "SELECT resolved_run_id, resolved_in_snapshot FROM finding WHERE id = ?",
         (finding_id,),
