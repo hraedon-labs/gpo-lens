@@ -25,6 +25,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from gpo_lens.exports import ExportSection, export_context, occurrence_run_ids
+from gpo_lens.normalize import sqlite_int
 from gpo_lens.safe_output import safe_data
 from gpo_lens.web._helpers import (
     _MAX_SEARCH_LEN,
@@ -409,6 +410,8 @@ def register(app: FastAPI, templates: Jinja2Templates) -> None:
 
         if status not in _VALID_TRIAGE:
             return HTMLResponse("Invalid triage status", status_code=400)
+        if sqlite_int(finding_id) is None:
+            return HTMLResponse("Finding not found", status_code=404)
 
         conn = get_rw_conn(app.state.db_path)
         try:

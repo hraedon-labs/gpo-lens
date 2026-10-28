@@ -2085,6 +2085,9 @@ def delete_snapshot(conn: sqlite3.Connection, snapshot_id: int, *, commit: bool 
     (``get_rw_conn`` does). Re-assert it here so a direct caller can't silently
     orphan child rows.
     """
+    if sqlite_int(snapshot_id) is None:
+        # No row can have an ID SQLite cannot bind; same answer as a missing one.
+        return False
     conn.execute("PRAGMA foreign_keys = ON")
     cur = conn.execute("DELETE FROM snapshot WHERE id = ?", (snapshot_id,))
     if commit:

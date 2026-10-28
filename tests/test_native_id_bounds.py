@@ -128,3 +128,28 @@ def test_changelog_exports_ignore_unrepresentable_numeric_selector(client, forma
         assert json.loads(metadata["snapshot_ids"]) == [1]
     else:
         assert "Snapshot diff" in response.text
+
+
+@pytest.mark.parametrize("identifier", [_MAX + 1, _MIN - 1])
+def test_triage_post_returns_404_for_oversized_finding_id(client, identifier):
+    response = client.post(
+        f"/findings/{identifier}/triage",
+        data={"status": "acknowledged", "note": ""},
+        headers={"X-Requested-With": "XMLHttpRequest", "Origin": "http://testserver"},
+    )
+    assert response.status_code == 404
+    assert "not found" in response.text.lower()
+
+
+@pytest.mark.parametrize("identifier", [_MAX + 1, _MIN - 1, 10**100])
+def test_snapshot_delete_post_returns_404_for_oversized_id(records, client, identifier):
+    conn, _, _ = records
+    before = conn.execute("SELECT COUNT(*) FROM snapshot").fetchone()[0]
+    response = client.post(
+        "/ingest/delete",
+        data={"snapshot_id": str(identifier)},
+        headers={"Origin": "http://testserver"},
+    )
+    assert response.status_code == 404
+    assert "not found" in response.text.lower()
+    assert conn.execute("SELECT COUNT(*) FROM snapshot").fetchone()[0] == before
