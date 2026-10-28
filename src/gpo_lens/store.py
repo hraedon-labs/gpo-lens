@@ -38,7 +38,7 @@ from gpo_lens.model import (
     SomLink,
     WmiFilter,
 )
-from gpo_lens.normalize import parse_dt
+from gpo_lens.normalize import parse_dt, sqlite_int
 from gpo_lens.redaction import (
     _JSON_ESCAPE,
     CPASSWORD_FINDING_DETAIL,
@@ -1846,6 +1846,8 @@ def load_estate(conn: sqlite3.Connection, snapshot_id: int | None = None) -> Est
             raise ValueError("No snapshots found in database")
         snapshot_id = row[0]
     else:
+        if sqlite_int(snapshot_id) is None:
+            raise ValueError("Snapshot not found: ID is outside SQLite's integer range")
         row = conn.execute(
             "SELECT id, domain, taken_at FROM snapshot WHERE id = ?", (snapshot_id,)
         ).fetchone()

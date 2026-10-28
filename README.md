@@ -45,6 +45,10 @@ ingest, including on failure. Keep original exports in restricted storage for
 later re-ingestion. Use one estate and one app instance per database; multiple
 snapshots describe that same estate.
 
+ZIP members must use consistent directory casing. Conflicting path spellings
+and file/directory aliases are rejected before extraction, so a Linux import
+cannot silently separate a Windows-equivalent report and its sidecar inputs.
+
 ## Keep collection running
 
 On a Windows DC/RSAT host, run either command in an elevated PowerShell session:

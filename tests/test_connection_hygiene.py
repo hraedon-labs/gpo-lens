@@ -92,12 +92,21 @@ def test_rw_pragma_closes_after_error(tmp_path, connections, monkeypatch):
 
 def test_route_query_errors_close_connections(tmp_path, connections, monkeypatch):
     from gpo_lens import store
+    from gpo_lens.model import Estate
+
+    path = tmp_path / "lab.db"
+    conn = sqlite3.connect(path)
+    try:
+        store.init_db(conn)
+        store.save_estate(conn, Estate(domain="example.com"))
+    finally:
+        conn.close()
 
     def fail(*args, **kwargs):
         raise sqlite3.OperationalError("synthetic read failure")
 
     monkeypatch.setenv("GPO_LENS_AUTH_TOKEN", "lab-token")
-    app = create_app(str(tmp_path / "lab.db"))
+    app = create_app(str(path))
     monkeypatch.setattr(store, "load_estate", fail)
     with TestClient(
         app,
@@ -128,6 +137,27 @@ def test_route_query_errors_close_connections(tmp_path, connections, monkeypatch
                 == 500
             )
             assert all(c.closed for c in connections), route
+
+
+@pytest.mark.parametrize("query_error", [False, True])
+def test_empty_directory_closes_connections(tmp_path, connections, monkeypatch, query_error):
+    from gpo_lens import store
+
+    def fail(*args, **kwargs):
+        raise sqlite3.OperationalError("synthetic snapshot lookup failure")
+
+    monkeypatch.setenv("GPO_LENS_AUTH_TOKEN", "lab-token")
+    app = create_app(str(tmp_path / "lab.db"))
+    if query_error:
+        monkeypatch.setattr(store, "list_snapshots", fail)
+    with TestClient(
+        app,
+        raise_server_exceptions=False,
+        headers={"Authorization": "Bearer lab-token", "Origin": "http://testserver"},
+    ) as client:
+        for route, expected in (("/ou", 200), ("/ou/ou=missing,dc=example,dc=com", 404)):
+            assert client.get(route).status_code == (500 if query_error else expected), route
+            assert connections and all(c.closed for c in connections), route
 
 
 def test_benchmark_script_closes_connection(connections, monkeypatch, capsys):

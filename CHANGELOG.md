@@ -5,6 +5,63 @@
 Draft **v1.6.0**. The owner sets the release target and date; the status-colour
 change is visible, so a patch number was not assumed.
 
+### Fixed
+
+- Sorting the GPO inventory by modification time handles early and far-future dates without platform timestamp errors or lost microsecond precision. Timestamps without an offset use UTC consistently, and missing dates stay last.
+
+- Briefing views and Markdown/CSV exports no longer fail when an accepted
+  `as_of` date near year 9999 makes the accepted-risk expiry horizon overflow.
+  Representable deadlines, inclusive expiry boundaries and time-zone offsets
+  retain their existing behavior.
+
+- Finding details and historical GPO views return their existing not-found
+  response for record IDs outside SQLite's integer range. Changelog selectors
+  ignore unusable numeric input like other invalid text, including oversized
+  integers and digit characters that Python cannot parse, instead of failing.
+
+### Reject conflicting ZIP path components
+
+Collector ZIP imports reject case aliases in implicit or explicit directories,
+and paths used as both files and directories, before reading any members.
+Previously `Export/AllGPOs.xml` and `export/gpo-inventory.json` could split on
+Linux and silently lose the inventory's coverage gaps. Consistent wrappers
+and explicit/implicit use of the same directory remain supported.
+
+### ZIP import cleanup
+
+- Preserve the original extraction error or cancellation if listing the temporary
+  extraction directory fails during cleanup. Cleanup warnings report only the
+  exception class; inaccessible files may remain for the caller's final cleanup.
+
+### ZIP device-name aliases
+
+Collector ZIP imports reject reserved Windows device names with spaces before
+an extension, such as `NUL .txt`, including parent directories. These aliases
+previously passed the portable filename checks on Linux. Ordinary filenames
+with spaces before an extension remain supported.
+
+### Preserve escaped spaces in OU ancestry
+
+Topology and principal-chain lookups retain escaped trailing spaces in OU
+names. Previously trimming a DN component could skip a collected OU and use
+the domain's chain instead. Ordinary whitespace around DN separators remains
+supported; this does not add general DN equivalence or object-level RSoP.
+
+### Clarify resultant scope warnings
+
+Approximation warnings describe the requested DN's missing scope match and
+the use of a collected ancestor or fallback chain. Previously a full object
+DN could produce a warning that its OU was uncollected even when that OU was
+present. The warning still explains the limit on checking inheritance blocking
+in uncollected intermediate OUs.
+
+### Directory before the first import
+
+The Directory page shows an empty state before any estate is imported, and
+unknown detail links return 404. Previously both could fail with a server
+error. The page distinguishes an unloaded estate from a recorded snapshot
+containing no scopes, and reads the next imported snapshot normally.
+
 ### Adopt patina 0.6.0's vendored token contract
 
 The web UI's design tokens are no longer a hand-synced copy. They are vendored

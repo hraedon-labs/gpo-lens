@@ -1472,14 +1472,15 @@ def test_principal_resultant_parent_walk_caveat():
         _USER_SID,
         dn=f"ou=missing,{_ROOT_DN}",
     )
-    assert any("not in the collected estate" in m for m in result.caveat_mechanisms)
+    assert any("did not match a collected scope" in m for m in result.caveat_mechanisms)
+    assert any("uncollected intermediate OUs" in m for m in result.caveat_mechanisms)
 
 
 def test_principal_resultant_no_caveat_when_ou_present():
     """When the principal's OU IS in the estate, no parent-walk caveat fires."""
     estate = _sec_estate("Apply Group Policy")
     result = principal_resultant(estate, _USER_SID, dn=_ROOT_DN)
-    assert not any("not in the collected estate" in m for m in result.caveat_mechanisms)
+    assert not any("did not match a collected scope" in m for m in result.caveat_mechanisms)
 
 
 def test_build_token_no_forward_expansion_of_individual_principals():

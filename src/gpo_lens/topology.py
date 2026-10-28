@@ -99,6 +99,26 @@ def _split_dn(dn: str) -> list[str]:
     return parts
 
 
+def _dn_parts_without_padding(dn: str) -> list[str]:
+    """Split a DN and trim formatting without removing escaped value spaces."""
+    parts: list[str] = []
+    for part in _split_dn(dn):
+        part = part.lstrip()
+        end = len(part)
+        while end and part[end - 1].isspace():
+            backslashes = 0
+            cursor = end - 2
+            while cursor >= 0 and part[cursor] == "\\":
+                backslashes += 1
+                cursor -= 1
+            if backslashes % 2:
+                # An escaped trailing space belongs to the RDN's value.
+                break
+            end -= 1
+        parts.append(part[:end])
+    return parts
+
+
 def _find_parent_som(estate: Estate, dn: str) -> Som | None:
     """Walk up a DN to find the closest non-site SOM in the estate.
 
@@ -116,7 +136,7 @@ def _find_parent_som(estate: Estate, dn: str) -> Som | None:
     if not dn:
         return None
     som_by_path = {som.path.lower(): som for som in estate.soms if som.container_type != "site"}
-    parts = [p.strip() for p in _split_dn(dn)]
+    parts = _dn_parts_without_padding(dn)
     for i in range(1, len(parts)):
         candidate = ",".join(parts[i:]).lower()
         if candidate in som_by_path:

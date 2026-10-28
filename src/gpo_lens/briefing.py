@@ -327,7 +327,7 @@ def build_briefing(
                 for r in register
                 if r.revoked_at is None
                 and r.expires_at is not None
-                and r.expires_at <= now + EXPIRY_HORIZON
+                and _expires_within_horizon(r.expires_at, now)
             ),
             key=lambda r: (r.expires_at or now, r.occurrence_id),
         )
@@ -384,6 +384,18 @@ def build_briefing(
         vitals=vitals,
         freshness=freshness,
     )
+
+
+def _expires_within_horizon(expires_at: datetime, now: datetime) -> bool:
+    """Preserve the local deadline, with no out-of-range datetime construction."""
+    try:
+        deadline = now + EXPIRY_HORIZON
+    except OverflowError:
+        # An offset can put a representable expiry beyond the horizon even
+        # when the local deadline overflows. Compare durations rather than
+        # clamping the deadline or including every representable expiry.
+        return expires_at - now <= EXPIRY_HORIZON
+    return expires_at <= deadline
 
 
 def _to_expiring(acceptance: RiskAcceptance) -> ExpiringAcceptance:

@@ -62,7 +62,7 @@ from gpo_lens.finding_model import (
     compute_fingerprint,
     series_key,
 )
-from gpo_lens.normalize import parse_triage_dt
+from gpo_lens.normalize import parse_triage_dt, sqlite_int
 
 if TYPE_CHECKING:
     from gpo_lens.danger import DangerFinding, DangerRule
@@ -1436,6 +1436,8 @@ def finding_history(
 
     Returns the occurrence record, all observations, and all triage events.
     """
+    if sqlite_int(occurrence_id) is None:
+        raise ValueError("Occurrence not found: ID is outside SQLite's integer range")
     row = conn.execute(
         "SELECT id, finding_key, fingerprint_version, series_key, "
         "detector_id, detector_version, rule_id, subject_type, "

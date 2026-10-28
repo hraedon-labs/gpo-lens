@@ -77,16 +77,31 @@ def safe_extract(
             if sum(len(info.filename.encode("utf-8")) for info in members) > MAX_FILENAME_BYTES:
                 raise ValueError("zip total filename bytes exceeds limit")
             directories: set[str] = set()
+            # One portable namespace, including implicit parents. Otherwise
+            # Export/report and export/inventory split into different trees
+            # on Linux, silently excluding some collector inputs.
+            paths: dict[str, tuple[str, bool]] = {}
             # Preflight the entire directory before creating/opening anything.
-            for info in members:
+            for index, info in enumerate(members, 1):
                 parts = info.filename.replace("\\", "/").rstrip("/").split("/")
                 if len(parts) > MAX_PATH_DEPTH:
                     raise ValueError("zip path depth exceeds limit")
                 parent_count = (
                     len(parts) if info.is_dir() or info.filename.endswith("\\") else len(parts) - 1
                 )
-                for depth in range(1, parent_count + 1):
-                    directories.add("/".join(parts[:depth]).casefold())
+                for depth in range(1, len(parts) + 1):
+                    spelling = "/".join(parts[:depth])
+                    key = spelling.casefold()
+                    directory = depth <= parent_count
+                    # Parents were checked at earlier depths, so retain only
+                    # this component's spelling rather than another full prefix.
+                    entry = (parts[depth - 1], directory)
+                    existing = paths.get(key)
+                    if existing is not None and existing != entry:
+                        raise ValueError(f"zip duplicate path blocked (member {index})")
+                    paths[key] = entry
+                    if directory:
+                        directories.add(key)
                 if len(directories) > MAX_DIRECTORIES:
                     raise ValueError("zip directory count exceeds limit")
             for index, info in enumerate(members, 1):
@@ -98,11 +113,12 @@ def safe_extract(
                 if member.startswith("/") or ":" in member or ".." in member.split("/"):
                     raise ValueError(f"zip-slip blocked (member {index})")
                 components = member.removesuffix("/").split("/")
+                # DOS device stems ignore spaces before an extension: NUL .txt.
                 if any(
                     not part
                     or part in {".", ".."}
                     or part.rstrip(" .") != part
-                    or part.split(".", 1)[0].upper() in _WINDOWS_DEVICES
+                    or part.split(".", 1)[0].rstrip(" ").upper() in _WINDOWS_DEVICES
                     or any(ord(char) < 32 or char in '<>"|?*' for char in part)
                     for part in components
                 ):
@@ -162,19 +178,26 @@ def safe_extract(
         # outer ``iterdir`` guard is needed because ``dest`` may not exist
         # (extraction failed before any file was written) or may have been
         # removed mid-extraction by a concurrent process.
-        if dest.is_dir():
-            for child in dest.iterdir():
-                try:
-                    if child.is_symlink() or not child.is_dir():
-                        child.unlink()
-                    else:
-                        shutil.rmtree(child)
-                except OSError as cleanup_exc:
-                    # Member names are attacker-controlled: never logged.
-                    _logger.warning(
-                        "cleanup after extraction failure failed (%s)",
-                        type(cleanup_exc).__name__,
-                    )
+        try:
+            if dest.is_dir():
+                for child in dest.iterdir():
+                    try:
+                        if child.is_symlink() or not child.is_dir():
+                            child.unlink()
+                        else:
+                            shutil.rmtree(child)
+                    except OSError as cleanup_exc:
+                        # Member names are attacker-controlled: never logged.
+                        _logger.warning(
+                            "cleanup after extraction failure failed (%s)",
+                            type(cleanup_exc).__name__,
+                        )
+        except OSError as cleanup_exc:
+            # The destination can disappear or become unreadable after is_dir.
+            _logger.warning(
+                "cleanup after extraction failure failed (%s)",
+                type(cleanup_exc).__name__,
+            )
         raise
 
 
